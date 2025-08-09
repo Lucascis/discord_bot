@@ -1,0 +1,62 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model GuildConfig {
+  id        String   @id @default(cuid())
+  guildId   String   @unique
+  prefix    String?
+  language  String   @default("en")
+  createdAt DateTime @default(now())
+}
+
+model Queue {
+  id        String   @id @default(cuid())
+  guildId   String
+  createdAt DateTime @default(now())
+  items     QueueItem[]
+}
+
+model QueueItem {
+  id          String   @id @default(cuid())
+  queueId     String
+  title       String
+  url         String
+  requestedBy String
+  duration    Int
+  createdAt   DateTime @default(now())
+  queue       Queue    @relation(fields: [queueId], references: [id])
+}
+
+model UserProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  guildId   String
+  userId    String
+  action    String
+  createdAt DateTime @default(now())
+}
+
+model RateLimit {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  count     Int      @default(0)
+  expiresAt DateTime
+}
+
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  guildId   String
+  name      String
+  enabled   Boolean  @default(false)
+}

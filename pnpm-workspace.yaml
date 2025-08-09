@@ -1,0 +1,6 @@
+packages:
+  - "gateway"
+  - "audio"
+  - "api"
+  - "worker"
+  - "packages/*"

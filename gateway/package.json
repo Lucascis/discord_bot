@@ -1,0 +1,21 @@
+{
+  "name": "gateway",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "discord.js": "^14.13.0",
+    "@discordjs/rest": "^1.7.0",
+    "@discord-bot/config": "workspace:*",
+    "@discord-bot/logger": "workspace:*"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
+  }
+}
