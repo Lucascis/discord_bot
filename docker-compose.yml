@@ -1,0 +1,57 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: discord
+    ports:
+      - "5432:5432"
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:3.7
+    environment:
+      SERVER_PORT: 2333
+      LAVALINK_SERVER_PASSWORD: youshallnotpass
+    ports:
+      - "2333:2333"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm --filter gateway start
+    env_file: .env
+    depends_on:
+      - postgres
+      - lavalink
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm --filter api start
+    env_file: .env
+    depends_on:
+      - postgres
+  audio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm --filter audio start
+    env_file: .env
+    depends_on:
+      - lavalink
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm --filter worker start
+    env_file: .env
+    depends_on:
+      - postgres
+      - lavalink

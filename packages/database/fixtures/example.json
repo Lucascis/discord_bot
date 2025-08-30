@@ -1,0 +1,5 @@
+{
+  "guilds": [
+    { "guildId": "123", "prefix": "!", "language": "en" }
+  ]
+}
