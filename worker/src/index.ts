@@ -25,7 +25,8 @@ const healthServer = http.createServer(async (req, res) => {
     res.end(await registry.metrics());
     return;
   }
-  res.writeHead(404); res.end();
+  res.writeHead(404);
+  res.end();
 });
 healthServer.listen(env.WORKER_HTTP_PORT, () => logger.info(`Worker health on :${env.WORKER_HTTP_PORT}`));
 
