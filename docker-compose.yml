@@ -1,5 +1,29 @@
-version: "3.8"
 services:
+  lavalink-plugins:
+    image: maven:3-eclipse-temurin-21
+    command: >-
+      sh -lc 'set -e
+      mkdir -p /plugins
+      echo "Cleaning old jars" && rm -f /plugins/*.jar || true
+      echo "Fetching youtube-plugin 1.9.3 from maven.lavalink.dev" &&
+      mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.7.0:get \
+        -DremoteRepositories=lavalink::default::https://maven.lavalink.dev/releases \
+        -Dartifact=dev.lavalink.youtube:youtube-plugin:1.9.3 &&
+      YJAR=$$(find /root/.m2/repository/dev/lavalink/youtube/youtube-plugin -type f -name "youtube-plugin-*.jar" | sort | tail -n 1) &&
+      cp "$$YJAR" /plugins/ &&
+      echo "Saved: $$(basename "$$YJAR")" &&
+      echo "Fetching lavasrc-plugin 4.3.1 from jitpack" &&
+      mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.7.0:get \
+        -DremoteRepositories=jitpack::default::https://jitpack.io \
+        -Dartifact=com.github.topi314.lavasrc:lavasrc-plugin:4.3.1 &&
+      LJAR=$$(find /root/.m2/repository/com/github/topi314/lavasrc/lavasrc-plugin -type f -name "lavasrc-plugin-*.jar" | sort | tail -n 1) &&
+      cp "$$LJAR" /plugins/ &&
+      echo "Saved: $$(basename "$$LJAR")" &&
+      ls -lah /plugins'
+    volumes:
+      - ./lavalink/plugins:/plugins
+    restart: "no"
+
   postgres:
     image: postgres:15
     environment:
@@ -13,45 +37,58 @@ services:
     ports:
       - "6379:6379"
   lavalink:
-    image: ghcr.io/lavalink-devs/lavalink:3.7
+    image: ghcr.io/lavalink-devs/lavalink:4
     environment:
       SERVER_PORT: 2333
       LAVALINK_SERVER_PASSWORD: youshallnotpass
     ports:
       - "2333:2333"
+    depends_on:
+      - lavalink-plugins
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml
+      - ./lavalink/plugins:/opt/Lavalink/plugins
   gateway:
     build:
       context: .
       dockerfile: Dockerfile
-    command: pnpm --filter gateway start
+    command: node gateway/dist/index.js
     env_file: .env
     depends_on:
       - postgres
       - lavalink
+      - redis
+    ports:
+      - "3001:3001"
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    command: pnpm --filter api start
+    command: node api/dist/index.js
     env_file: .env
     depends_on:
       - postgres
+    ports:
+      - "3000:3000"
   audio:
     build:
       context: .
       dockerfile: Dockerfile
-    command: pnpm --filter audio start
+    command: node audio/dist/index.js
     env_file: .env
     depends_on:
       - lavalink
+      - redis
+    ports:
+      - "3002:3002"
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-    command: pnpm --filter worker start
+    command: node worker/dist/index.js
     env_file: .env
     depends_on:
       - postgres
       - lavalink
+    ports:
+      - "3003:3003"

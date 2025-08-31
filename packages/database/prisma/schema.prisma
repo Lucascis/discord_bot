@@ -5,6 +5,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
 model GuildConfig {
@@ -19,6 +20,8 @@ model Queue {
   id        String   @id @default(cuid())
   guildId   String
   createdAt DateTime @default(now())
+  voiceChannelId String?
+  textChannelId  String?
   items     QueueItem[]
 }
 

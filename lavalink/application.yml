@@ -1,12 +1,15 @@
 server:
   port: 2333
+
 lavalink:
   server:
     password: "youshallnotpass"
+    # In v4, YouTube fuente nativa está externalizada como plugin. Mantén youtube=false y usa el plugin abajo.
     sources:
-      youtube: true
+      youtube: false
       soundcloud: true
       http: true
+      local: false
     filters:
       volume: true
       equalizer: true
@@ -15,3 +18,22 @@ lavalink:
       tremolo: true
       rotation: true
       lowPass: true
+
+# Plugins para v4 (YouTube)
+plugins:
+  # YouTube plugin for Lavalink v4
+  - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
+    repository: "https://maven.lavalink.dev/releases"
+  # Multi-source plugin (Spotify / Deezer / Apple / Yandex / etc.).
+  - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.3.1"
+    repository: "https://jitpack.io"
+
+# Optional keys for Lavasrc (uncomment and set if los tenés)
+#lavasrc:
+#  sources:
+#    spotify: true
+#    deezer: true
+#    apple: true
+#  spotify:
+#    clientId: "${SPOTIFY_CLIENT_ID}"
+#    clientSecret: "${SPOTIFY_CLIENT_SECRET}"

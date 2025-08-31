@@ -4,7 +4,16 @@ image:
 
 env:
   DISCORD_TOKEN: "your-bot-token"
+  DISCORD_APPLICATION_ID: "your-application-id"
+  # Optional for dev: register commands per guild
+  # DISCORD_GUILD_ID: "your-dev-guild-id"
   DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/discord"
+  REDIS_URL: "redis://redis:6379"
   LAVALINK_HOST: "lavalink"
   LAVALINK_PORT: "2333"
   LAVALINK_PASSWORD: "youshallnotpass"
+  GATEWAY_HTTP_PORT: "3001"
+  AUDIO_HTTP_PORT: "3002"
+  WORKER_HTTP_PORT: "3003"
+  # Optional tracing
+  # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318/v1/traces"

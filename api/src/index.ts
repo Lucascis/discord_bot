@@ -1,5 +1,17 @@
-import { app } from './app';
+import { app } from './app.js';
 import { logger } from '@discord-bot/logger';
+import { env } from '@discord-bot/config';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 app.listen(port, () => logger.info(`API listening on ${port}`));
+
+if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+  const sdk = new NodeSDK({
+    traceExporter: new OTLPTraceExporter({ url: env.OTEL_EXPORTER_OTLP_ENDPOINT }),
+    instrumentations: [getNodeAutoInstrumentations()],
+  });
+  void sdk.start();
+}

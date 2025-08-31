@@ -3,6 +3,8 @@
 Monorepo de ejemplo para un bot de música de Discord construido con TypeScript y pnpm workspaces.
 Incluye servicios para el gateway de Discord, cliente de audio con Lavalink, API REST y worker de jobs.
 
+Para la guía completa de configuración, ver `docs/SETUP.md`.
+
 ## Requisitos
 - Node.js 20+
 - pnpm 8+

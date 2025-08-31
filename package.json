@@ -6,9 +6,14 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --filter gateway dev",
+    "dev:all": "pnpm -r --parallel dev",
     "lint": "eslint .",
     "test": "vitest run",
-    "start": "pnpm -r start"
+    "start": "pnpm -r start",
+    "postinstall": "pnpm --filter @discord-bot/database prisma:generate",
+    "prepare": "husky install",
+    "db:migrate": "pnpm --filter @discord-bot/database prisma:migrate",
+    "db:seed": "pnpm --filter @discord-bot/database ts-node packages/database/prisma/seed.ts"
   },
   "devDependencies": {
     "@commitlint/cli": "^17.7.1",
