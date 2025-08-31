@@ -221,14 +221,7 @@ manager.on('trackStart', (player, track) => {
 manager.on('trackEnd', () => lavalinkEvents.labels('trackEnd').inc());
 manager.on('trackError', () => lavalinkEvents.labels('trackError').inc());
 
-await redisSub.subscribe('discord-bot:commands', async (message) => {
-  try {
-    const { type } = JSON.parse(message) as { type: string };
-    audioCommands.labels(type).inc();
-  } catch (_err) {
-    // ignore metrics parse errors
-  }
-});
+// Metrics logic for 'discord-bot:commands' is now handled in the main command handler (see line 82).
 
 const healthServer = http.createServer(async (req, res) => {
   if (!req.url) return;
