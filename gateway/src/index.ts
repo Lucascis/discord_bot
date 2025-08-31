@@ -9,7 +9,6 @@ import {
   ButtonBuilder,
   ButtonStyle,
   PermissionsBitField,
-  type GuildMember,
 } from 'discord.js';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
@@ -83,6 +82,21 @@ const commands = [
     ),
   new SlashCommandBuilder().setName('nowplaying').setDescription('Show current track'),
   new SlashCommandBuilder().setName('queue').setDescription('Show queue'),
+  new SlashCommandBuilder()
+    .setName('seek')
+    .setDescription('Seek current track to position (seconds)')
+    .addIntegerOption((opt) => opt.setName('seconds').setDescription('Position in seconds').setRequired(true).setMinValue(0)),
+  new SlashCommandBuilder().setName('shuffle').setDescription('Shuffle the queue'),
+  new SlashCommandBuilder()
+    .setName('remove')
+    .setDescription('Remove a track by position in queue (starting at 1)')
+    .addIntegerOption((opt) => opt.setName('index').setDescription('Position (1-based)').setRequired(true).setMinValue(1)),
+  new SlashCommandBuilder().setName('clear').setDescription('Clear the queue (keeps current track)'),
+  new SlashCommandBuilder()
+    .setName('move')
+    .setDescription('Move a track from one position to another')
+    .addIntegerOption((opt) => opt.setName('from').setDescription('From (1-based)').setRequired(true).setMinValue(1))
+    .addIntegerOption((opt) => opt.setName('to').setDescription('To (1-based)').setRequired(true).setMinValue(1)),
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
@@ -107,8 +121,7 @@ main().catch((err) => logger.error(err));
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   try {
-    const gm = interaction.member as GuildMember | null;
-    const hasControl = hasDjOrAdmin(gm, interaction.guild);
+    const hasControl = hasDjOrAdmin(interaction);
     const requireDJ = async () => {
       if (!hasControl) {
         await interaction.reply({ content: `Requires ${env.DJ_ROLE_NAME} role.`, ephemeral: true });
@@ -136,6 +149,16 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
       await interaction.deferReply();
+      const requestId = crypto.randomUUID();
+      const channel = `discord-bot:response:${requestId}`;
+      type PlayAck = { ok: true; title: string; uri?: string; artworkUrl?: string } | { ok: false; reason: string };
+      const response: Promise<PlayAck | null> = new Promise((resolve) => {
+        const handler = async (message: string, chan: string) => {
+          if (chan !== channel) return;
+          try { resolve(JSON.parse(message)); } finally { await redisSub.unsubscribe(channel); }
+        };
+        redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
+      });
       await redisPub.publish(
         'discord-bot:commands',
         JSON.stringify({
@@ -145,26 +168,41 @@ client.on('interactionCreate', async (interaction) => {
           textChannelId: interaction.channelId,
           userId: interaction.user.id,
           query,
+          requestId,
         }),
       );
       redisPubCounter.labels('discord-bot:commands').inc();
       const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('music:pause').setLabel('Pause').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:resume').setLabel('Resume').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:skip').setLabel('Skip').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('music:stop').setLabel('Stop').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('music:loop').setLabel('Loop').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('music:toggle').setLabel('⏯️ Play/Pause').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:skip').setLabel('⏭️ Skip').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('music:stop').setLabel('⏹️ Stop').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('music:loop').setLabel('🔁 Loop').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('music:shuffle').setLabel('🔀 Shuffle').setStyle(ButtonStyle.Secondary),
       );
       const controls2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('music:voldown').setLabel('Vol -').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:volup').setLabel('Vol +').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:queue').setLabel('Queue').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:voldown').setLabel('🔉 Vol -').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:volup').setLabel('🔊 Vol +').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:queue').setLabel('🗒️ Queue').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:now').setLabel('⏱️ Now').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('music:clear').setLabel('🧹 Clear').setStyle(ButtonStyle.Secondary),
       );
-      const embed = new EmbedBuilder()
-        .setTitle('Queued')
-        .setDescription(query)
-        .setColor(0x5865f2);
-      await interaction.editReply({ embeds: [embed], components: [controls, controls2] });
+      const ack = (await Promise.race([
+        response,
+        new Promise<null>((res) => setTimeout(() => res(null), 2500)),
+      ])) as PlayAck | null;
+      if (!ack) {
+        await interaction.editReply({ content: `Queued: ${query}`, components: [controls, controls2] });
+      } else if ('ok' in ack && ack.ok) {
+        const embed = new EmbedBuilder()
+          .setTitle('Queued')
+          .setDescription(`[${ack.title}](${ack.uri ?? query})`)
+          .setThumbnail(ack.artworkUrl ?? null)
+          .setColor(0x5865f2)
+          .setFooter({ text: 'Use the controls below to manage playback' });
+        await interaction.editReply({ embeds: [embed], components: [controls, controls2] });
+      } else {
+        await interaction.editReply({ content: `No results for: ${query}`, components: [controls, controls2] });
+      }
       return;
     }
     if (interaction.commandName === 'skip') {
@@ -214,6 +252,50 @@ client.on('interactionCreate', async (interaction) => {
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loopSet', guildId: interaction.guildId, mode }));
       redisPubCounter.labels('discord-bot:commands').inc();
       await interaction.editReply(`Loop set to ${mode}`);
+      return;
+    }
+    if (interaction.commandName === 'seek') {
+      if (!(await requireDJ())) return;
+      const seconds = interaction.options.getInteger('seconds', true);
+      await interaction.deferReply({ ephemeral: true });
+      await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seek', guildId: interaction.guildId, positionMs: Math.max(0, seconds) * 1000 }));
+      redisPubCounter.labels('discord-bot:commands').inc();
+      await interaction.editReply(`Seeking to ${seconds}s`);
+      return;
+    }
+    if (interaction.commandName === 'shuffle') {
+      if (!(await requireDJ())) return;
+      await interaction.deferReply({ ephemeral: true });
+      await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'shuffle', guildId: interaction.guildId }));
+      redisPubCounter.labels('discord-bot:commands').inc();
+      await interaction.editReply('Queue shuffled');
+      return;
+    }
+    if (interaction.commandName === 'remove') {
+      if (!(await requireDJ())) return;
+      const index = interaction.options.getInteger('index', true);
+      await interaction.deferReply({ ephemeral: true });
+      await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'remove', guildId: interaction.guildId, index }));
+      redisPubCounter.labels('discord-bot:commands').inc();
+      await interaction.editReply(`Removed track #${index}`);
+      return;
+    }
+    if (interaction.commandName === 'clear') {
+      if (!(await requireDJ())) return;
+      await interaction.deferReply({ ephemeral: true });
+      await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'clear', guildId: interaction.guildId }));
+      redisPubCounter.labels('discord-bot:commands').inc();
+      await interaction.editReply('Cleared queue');
+      return;
+    }
+    if (interaction.commandName === 'move') {
+      if (!(await requireDJ())) return;
+      const from = interaction.options.getInteger('from', true);
+      const to = interaction.options.getInteger('to', true);
+      await interaction.deferReply({ ephemeral: true });
+      await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'move', guildId: interaction.guildId, from, to }));
+      redisPubCounter.labels('discord-bot:commands').inc();
+      await interaction.editReply(`Moved #${from} → #${to}`);
       return;
     }
     if (interaction.commandName === 'volume') {
@@ -324,40 +406,33 @@ const redisUrl = env.REDIS_URL;
 const redisPub = createClient({ url: redisUrl });
 const redisSub = createClient({ url: redisUrl });
 
-async function main() {
-  await redisPub.connect();
-  await redisSub.connect();
+await redisPub.connect();
+await redisSub.connect();
 
-  client.on('raw', async (d) => {
-    try {
-      await redisPub.publish('discord-bot:to-audio', JSON.stringify(d));
-    } catch (e) {
-      logger.error({ e }, 'failed to publish raw to audio');
-    }
-  });
+client.on('raw', async (d) => {
+  try {
+    await redisPub.publish('discord-bot:to-audio', JSON.stringify(d));
+  } catch (e) {
+    logger.error({ e }, 'failed to publish raw to audio');
+  }
+});
 
-  await redisSub.subscribe('discord-bot:to-discord', async (message) => {
-    try {
-      const { guildId, payload } = JSON.parse(message) as {
-        guildId: string;
-        payload: unknown;
-      };
-      redisSubCounter.labels('discord-bot:to-discord').inc();
-      const shardId =
-        client.guilds.cache.get(guildId)?.shardId ??
-        (Number((BigInt(guildId) >> 22n) % BigInt(client.ws.shards.size)) || 0);
-      const shard = client.ws.shards.get(shardId);
-      if (!shard) return;
-      await shard.send(payload as Record<string, unknown>);
-    } catch (e) {
-      logger.error({ e }, 'failed to dispatch payload to shard');
-    }
-  });
-}
-
-main().catch((err) => {
-  logger.error({ err }, 'Fatal error in main initialization');
-  process.exit(1);
+await redisSub.subscribe('discord-bot:to-discord', async (message) => {
+  try {
+    const { guildId, payload } = JSON.parse(message) as {
+      guildId: string;
+      payload: unknown;
+    };
+    redisSubCounter.labels('discord-bot:to-discord').inc();
+    const shardId =
+      client.guilds.cache.get(guildId)?.shardId ??
+      (Number((BigInt(guildId) >> 22n) % BigInt(client.ws.shards.size)) || 0);
+    const shard = client.ws.shards.get(shardId);
+    if (!shard) return;
+    await shard.send(payload as Record<string, unknown>);
+  } catch (e) {
+    logger.error({ e }, 'failed to dispatch payload to shard');
+  }
 });
 
 // Button Interactions
@@ -368,11 +443,8 @@ client.on('interactionCreate', async (interaction) => {
   try {
     if (!hasDjOrAdmin(interaction)) return await interaction.reply({ content: `Requires ${env.DJ_ROLE_NAME} role.`, ephemeral: true });
     switch (id) {
-      case 'music:pause':
-        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'pause', guildId }));
-        break;
-      case 'music:resume':
-        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'resume', guildId }));
+      case 'music:toggle':
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'toggle', guildId }));
         break;
       case 'music:skip':
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'skip', guildId }));
@@ -383,11 +455,17 @@ client.on('interactionCreate', async (interaction) => {
       case 'music:loop':
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loop', guildId }));
         break;
+      case 'music:shuffle':
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'shuffle', guildId }));
+        break;
       case 'music:volup':
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'volumeAdjust', guildId, delta: 10 }));
         break;
       case 'music:voldown':
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'volumeAdjust', guildId, delta: -10 }));
+        break;
+      case 'music:clear':
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'clear', guildId }));
         break;
       case 'music:queue': {
         const requestId = crypto.randomUUID();
@@ -411,6 +489,53 @@ client.on('interactionCreate', async (interaction) => {
         } else {
           const desc = data.items.slice(0, 10).map((t: { title: string; uri?: string }, i: number) => `${i + 1}. [${t.title}](${t.uri})`).join('\n');
           const embed = new EmbedBuilder().setTitle('Queue').setDescription(desc).setColor(0xfee75c);
+          await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+        return;
+      }
+      case 'music:now': {
+        const requestId = crypto.randomUUID();
+        const channel = `discord-bot:response:${requestId}`;
+        type NowPlayingResponse = { title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string } | null;
+        const response: Promise<NowPlayingResponse> = new Promise((resolve) => {
+          const handler = async (message: string, chan: string) => {
+            if (chan !== channel) return;
+            try { resolve(JSON.parse(message)); } finally { await redisSub.unsubscribe(channel); }
+          };
+          redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
+        });
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'nowplaying', guildId, requestId }));
+        redisPubCounter.labels('discord-bot:commands').inc();
+        const data = (await Promise.race([
+          response,
+          new Promise((res) => setTimeout(() => res(null), 1500)),
+        ])) as NowPlayingResponse;
+        if (!data) {
+          await interaction.reply({ content: 'No track playing.', ephemeral: true });
+        } else {
+          const total = data.durationMs || 0;
+          const pos = data.positionMs || 0;
+          const pct = total > 0 ? Math.min(1, pos / total) : 0;
+          const barLen = 20;
+          const filled = Math.min(barLen - 1, Math.round(pct * barLen));
+          const bar = '─'.repeat(filled) + '●' + '─'.repeat(Math.max(0, barLen - filled - 1));
+          const fmt = (ms: number) => {
+            const s = Math.floor(ms / 1000);
+            const m = Math.floor(s / 60);
+            const ss = s % 60;
+            return `${m}:${ss.toString().padStart(2, '0')}`;
+          };
+          const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
+          const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : null);
+          const embed = new EmbedBuilder()
+            .setTitle('Now Playing')
+            .setDescription(`[${data.title}](${data.uri})`)
+            .addFields(
+              { name: 'Author', value: data.author ?? 'Unknown', inline: true },
+              { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false },
+            )
+            .setThumbnail(thumb)
+            .setColor(0x57f287);
           await interaction.reply({ embeds: [embed], ephemeral: true });
         }
         return;

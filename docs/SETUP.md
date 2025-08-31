@@ -54,15 +54,14 @@ docker-compose up --build
 ```
 Servicios: `postgres`, `lavalink`, `gateway`, `api`, `audio`, `worker`.
 - La API expone `GET http://localhost:3000/health`.
-- El gateway registra `/ping`, `/play`, `/pause`, `/resume`, `/skip`, `/stop`, `/volume`, `/nowplaying`, `/queue`.
-- Los mensajes de `/play` incluyen botones (Pause/Resume/Skip/Stop) para control rápido.
-  - Añadidos botones extra: Loop y Vol+/Vol-.
+- El gateway registra comandos: `/ping`, `/play`, `/pause`, `/resume`, `/skip`, `/stop`, `/volume`, `/loop`, `/nowplaying`, `/queue`, `/seek`, `/shuffle`, `/remove`, `/clear`, `/move`.
+- Los mensajes de `/play` incluyen botones (Pause/Resume/Skip/Stop/Loop/Vol-/Vol+/Queue) para control rápido.
 - Bridge Redis: el gateway publica eventos RAW a `audio` y éste responde enviando payloads al gateway. Asegúrate de que `REDIS_URL` apunte a tu Redis.
 
 Opción B — Local con pnpm:
 1. Asegurate de tener PostgreSQL y Lavalink corriendo:
    - Postgres rápido con Docker: `docker run -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=discord -e POSTGRES_USER=postgres postgres:15`
-   - Lavalink con Docker: `docker run -p 2333:2333 -e SERVER_PORT=2333 -e LAVALINK_SERVER_PASSWORD=youshallnotpass ghcr.io/lavalink-devs/lavalink:3.7`
+   - Lavalink v4 con Docker: `docker run -p 2333:2333 -e SERVER_PORT=2333 -e LAVALINK_SERVER_PASSWORD=youshallnotpass ghcr.io/lavalink-devs/lavalink:4`
 2. Arranca Redis y Lavalink (si no usás compose):
    - Redis rápido con Docker: `docker run -p 6379:6379 redis:7`
 3. Exporta el entorno del `.env` en tu shell y levanta todo en paralelo:
@@ -82,11 +81,70 @@ pnpm --filter @discord-bot/database ts-node packages/database/prisma/seed.ts
 
 Nota: El modelo Queue persiste voiceChannelId y textChannelId para resuming automático. Ejecutá `pnpm --filter @discord-bot/database prisma:migrate` tras actualizar el esquema.
 
-## 6) Verificación rápida
+## 6) Lavalink v4: YouTube + LavaSrc
+
+Lavalink v4 ya no trae YouTube nativo. Necesitás plugins:
+
+- YouTube v4: `dev.lavalink.youtube:youtube-plugin:1.13.5` (repo: `https://maven.lavalink.dev/releases`)
+- LavaSrc (Spotify/Deezer/Apple/etc.): `com.github.topi314.lavasrc:lavasrc-plugin:4.8.0` (repo: `https://maven.lavalink.dev/releases`)
+
+Este repo usa descarga remota por defecto: `lavalink/application.yml` incluye `lavalink.plugins` para que Lavalink baje y cargue los plugins automáticamente en el arranque. Además, `plugins.youtube` está configurado para usar clientes que no requieren inicio de sesión.
+
+Verificación rápida:
+
+- Info de Lavalink: `curl -H 'Authorization: youshallnotpass' http://localhost:2333/v4/info`
+  - Debe listar `youtube` en `sourceManagers` y `lavasrc` en `plugins`.
+- Probar carga directa (Spotify):
+  - `curl -G -H 'Authorization: youshallnotpass' --data-urlencode "identifier=https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC" http://localhost:2333/v4/loadtracks`
+  - Debe devolver un objeto con `loadType` distinto de `error/no_matches` y al menos 1 track resuelto (mirroring a YouTube).
+
+Orden de arranque y errores comunes con LavaSrc/Spotify:
+
+- Si ves en `audio` el error: `Query / Link Provided for this Source but Lavalink Node has not 'spotify' enabled`:
+  - Es porque `audio` conectó antes de que Lavalink terminara de cargar plugins y cacheó que Spotify estaba deshabilitado.
+  - Solución: `docker-compose restart audio` para que refresque `/v4/info` y las fuentes disponibles.
+- Si ves `No available Node was found` en `audio` tras reiniciar `lavalink`:
+  - `audio` perdió la conexión con el WebSocket de Lavalink y no reconectó aún.
+  - Solución: `docker-compose restart audio`.
+
+YouTube “Please sign in” durante reproducción:
+- Ya se configuró `plugins.youtube.clients` para evitar clientes que requieren login (TV). Si persiste en algún tema concreto:
+  - Activá Deezer para playback directo: `.env` → `DEEZER_ENABLED=true` y `DEEZER_ARL=<cookie arl>`.
+  - (Avanzado) Usar `yt-dlp` como backend: requiere instalar el binario en la imagen de Lavalink y habilitar `plugins.lavasrc.ytdlp`.
+
+Base de datos (errores Prisma P2021):
+- Si aparece `PrismaClientKnownRequestError P2021` (tabla Queue no existe), corré migraciones:
+  - Local: `pnpm --filter @discord-bot/database prisma:migrate`
+  - Docker: `docker compose exec api pnpm --filter @discord-bot/database prisma:migrate`
+
+Credenciales para LavaSrc:
+
+- Spotify (https://developer.spotify.com/dashboard)
+  - Crea una app → copia `Client ID` y `Client Secret`.
+  - `.env`:
+    - `SPOTIFY_CLIENT_ID=...`
+    - `SPOTIFY_CLIENT_SECRET=...`
+  - `application.yml` (ya configurado bajo `plugins.lavasrc.spotify` via `${...}`):
+    - `clientId: ${SPOTIFY_CLIENT_ID}`
+    - `clientSecret: ${SPOTIFY_CLIENT_SECRET}`
+
+- Deezer (ARL)
+  - Inicia sesión en https://www.deezer.com → DevTools → Storage → Cookies → copia cookie `arl`.
+  - `.env`: `DEEZER_ARL=...`
+  - `application.yml`: `plugins.lavasrc.deezer.arl: ${DEEZER_ARL}`
+
+- Apple Music (Media API Token)
+  - Crea key en Apple Developer (Team ID, Key ID, Private Key `.p8`).
+  - Genera un JWT (RS256) con expiración adecuada (p.ej., 180 días).
+  - `.env`: `APPLE_MUSIC_MEDIA_TOKEN=eyJ...`
+  - `application.yml`: `plugins.lavasrc.applemusic.mediaAPIToken: ${APPLE_MUSIC_MEDIA_TOKEN}`
+
+## 7) Verificación rápida
 - API: `curl http://localhost:3000/health` -> `{ "ok": true }`.
 - Discord: en tu servidor de pruebas, ejecutar `/ping` y obtener “Pong!”. Luego `/play never gonna give you up` en un canal de voz.
 - Logs: ver que `audio` conecte a Lavalink: `Node main connected`.
  - Métricas: `curl http://localhost:3001/metrics` (gateway), `http://localhost:3002/metrics` (audio), `http://localhost:3000/metrics` (api).
+ - Lavalink info: `curl -H 'Authorization: youshallnotpass' http://localhost:2333/v4/info` → `sourceManagers` incluye `youtube`.
 
 ## 7) Observabilidad (métricas + tracing)
 - Métricas Prometheus expuestas en `/metrics` en cada servicio (API, gateway, audio, worker). Llevan métricas de proceso + contadores de comandos/eventos clave.

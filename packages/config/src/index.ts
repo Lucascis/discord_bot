@@ -17,6 +17,15 @@ const envSchema = z.object({
   WORKER_HTTP_PORT: z.coerce.number().default(3003),
   // Permissions
   DJ_ROLE_NAME: z.string().default('DJ'),
+  // LavaSrc optional credentials
+  SPOTIFY_CLIENT_ID: z.string().optional(),
+  SPOTIFY_CLIENT_SECRET: z.string().optional(),
+  DEEZER_ARL: z.string().optional(),
+  APPLE_MUSIC_MEDIA_TOKEN: z.string().optional(),
+  // Feature flags to enable LavaSrc sources only when desired
+  SPOTIFY_ENABLED: z.coerce.boolean().default(false),
+  DEEZER_ENABLED: z.coerce.boolean().default(false),
+  APPLE_ENABLED: z.coerce.boolean().default(false),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -1,17 +1,19 @@
-.RECIPEPREFIX := >
-.PHONY: dev build lint test start
+.PHONY: dev build lint test start prod
 
 dev:
-> pnpm dev
+	pnpm dev
 
 build:
-> pnpm build
+	pnpm build
 
 lint:
-> pnpm lint
+	pnpm lint
 
 test:
-> pnpm test
+	pnpm test
 
 start:
-> pnpm start
+	pnpm start
+
+prod:
+	bash scripts/prod.sh

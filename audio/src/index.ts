@@ -15,6 +15,7 @@ import { logger } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
 import http from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
@@ -61,9 +62,55 @@ manager.nodeManager.on('error', (node: LavalinkNode, error: Error) =>
 
 export { manager };
 
-// Initialize manager
+// Helper: wait until Lavalink REST is ready (plugins loaded)
+async function waitForLavalinkRestReady(maxWaitMs = 60000) {
+  const deadline = Date.now() + maxWaitMs;
+  const url = `http://${env.LAVALINK_HOST}:${env.LAVALINK_PORT}/v4/info`;
+  const headers = { Authorization: env.LAVALINK_PASSWORD } as Record<string, string>;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        // Basic sanity: response is JSON and contains version/plugins keys
+        const j = (await res.json()) as { version?: unknown; plugins?: unknown };
+        if (j && j.version !== undefined && j.plugins !== undefined) return true;
+      }
+    } catch { /* ignore until deadline */ }
+    await delay(1000);
+  }
+  return false;
+}
+
+// Initialize manager, but wait for Lavalink to be ready first to avoid race conditions
+await waitForLavalinkRestReady();
 await manager.init({ id: env.DISCORD_APPLICATION_ID, username: 'discord-bot' } as BotClientOptions);
 
+// Ensure at least one node connect event (best-effort)
+await new Promise<void>((resolve) => {
+  let settled = false;
+  const timer = setTimeout(() => { if (!settled) { settled = true; resolve(); } }, 3000);
+  manager.nodeManager.once('connect', () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } });
+});
+
+
+type CommandMessage =
+  | { type: 'play'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string; requestId?: string }
+  | { type: 'skip'; guildId: string }
+  | { type: 'pause'; guildId: string }
+  | { type: 'resume'; guildId: string }
+  | { type: 'toggle'; guildId: string }
+  | { type: 'stop'; guildId: string }
+  | { type: 'volume'; guildId: string; percent: number }
+  | { type: 'loop'; guildId: string }
+  | { type: 'loopSet'; guildId: string; mode: 'off' | 'track' | 'queue' }
+  | { type: 'volumeAdjust'; guildId: string; delta: number }
+  | { type: 'nowplaying'; guildId: string; requestId: string }
+  | { type: 'queue'; guildId: string; requestId: string }
+  | { type: 'seek'; guildId: string; positionMs: number }
+  | { type: 'shuffle'; guildId: string }
+  | { type: 'remove'; guildId: string; index: number }
+  | { type: 'clear'; guildId: string }
+  | { type: 'move'; guildId: string; from: number; to: number };
 // Handle raw events from Discord via Redis
 await redisSub.subscribe('discord-bot:to-audio', async (message) => {
   try {
@@ -80,19 +127,9 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
 
 // Simple command bus for playback
 await redisSub.subscribe('discord-bot:commands', async (message) => {
+  let data: CommandMessage | undefined;
   try {
-    const data = JSON.parse(message) as
-      | { type: 'play'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string }
-      | { type: 'skip'; guildId: string }
-      | { type: 'pause'; guildId: string }
-      | { type: 'resume'; guildId: string }
-      | { type: 'stop'; guildId: string }
-      | { type: 'volume'; guildId: string; percent: number }
-      | { type: 'loop'; guildId: string }
-      | { type: 'loopSet'; guildId: string; mode: 'off' | 'track' | 'queue' }
-      | { type: 'volumeAdjust'; guildId: string; delta: number }
-      | { type: 'nowplaying'; guildId: string; requestId: string }
-      | { type: 'queue'; guildId: string; requestId: string };
+    data = JSON.parse(message) as CommandMessage;
 
     if (data.type === 'play') {
       logger.info({ guildId: data.guildId, query: data.query }, 'audio: play command received');
@@ -116,8 +153,19 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
           await player.queue.add(res.tracks[0] as Track | UnresolvedTrack);
         }
         await saveQueue(data.guildId, player, data.voiceChannelId, data.textChannelId);
+        if (data.requestId) {
+          type TrackInfoLite = { title?: string; uri?: string; artworkUrl?: string };
+          const info = (res.tracks[0] as { info?: TrackInfoLite }).info;
+          await redisPub.publish(
+            `discord-bot:response:${data.requestId}`,
+            JSON.stringify({ ok: true, title: info?.title ?? 'Unknown', uri: info?.uri, artworkUrl: info?.artworkUrl }),
+          );
+        }
       } else {
         logger.warn({ query: data.query }, 'audio: no tracks found');
+        if (data.requestId) {
+          await redisPub.publish(`discord-bot:response:${data.requestId}`, JSON.stringify({ ok: false, reason: 'no_results' }));
+        }
       }
       return;
     }
@@ -135,6 +183,13 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
     if (data.type === 'resume') {
       const player = manager.getPlayer(data.guildId);
       if (player && player.paused) await player.resume();
+      if (player) await saveQueue(data.guildId, player);
+      return;
+    }
+    if (data.type === 'toggle') {
+      const player = manager.getPlayer(data.guildId);
+      if (!player) return;
+      if (player.paused) await player.resume(); else await player.pause();
       if (player) await saveQueue(data.guildId, player);
       return;
     }
@@ -201,9 +256,64 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
       await redisPub.publish(`discord-bot:response:${data.requestId}`, JSON.stringify({ items }));
       return;
     }
+    if (data.type === 'seek') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) await player.seek(Math.max(0, data.positionMs));
+      return;
+    }
+    if (data.type === 'shuffle') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) await player.queue.shuffle();
+      if (player) await saveQueue(data.guildId, player);
+      return;
+    }
+    if (data.type === 'remove') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) {
+        const idx = Math.max(1, data.index) - 1;
+        if (player.queue.tracks[idx]) {
+          type QueueWithRemove = { remove?: (arg: number | number[] | unknown) => Promise<unknown> };
+          const q = player.queue as unknown as QueueWithRemove;
+          if (q.remove) await q.remove(idx); else player.queue.splice(idx, 1);
+          await saveQueue(data.guildId, player);
+        }
+      }
+      return;
+    }
+    if (data.type === 'clear') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) {
+        const len = player.queue.tracks.length;
+        if (len > 0) player.queue.splice(0, len);
+        await saveQueue(data.guildId, player);
+      }
+      return;
+    }
+    if (data.type === 'move') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) {
+        const from = Math.max(1, data.from) - 1;
+        const to = Math.max(1, data.to) - 1;
+        const track = player.queue.tracks[from];
+        if (track) {
+          player.queue.splice(from, 1);
+          await player.queue.add(track, to);
+          await saveQueue(data.guildId, player);
+        }
+      }
+      return;
+    }
   } catch (e) {
     const err = e as Error;
     logger.error({ err, message: err?.message, stack: err?.stack }, 'failed to process command');
+    try {
+      if (data && data.type === 'play' && data.requestId) {
+        await redisPub.publish(
+          `discord-bot:response:${data.requestId}`,
+          JSON.stringify({ ok: false, reason: 'error', message: err?.message || 'unknown' }),
+        );
+      }
+    } catch (_ackErr) { /* ignore */ }
   }
 });
 
@@ -211,7 +321,7 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
 const lavalinkEvents = new Counter({ name: 'lavalink_events_total', help: 'Lavalink events', labelNames: ['event'], registers: [registry] });
-const audioCommands = new Counter({ name: 'audio_commands_total', help: 'Audio commands', labelNames: ['type'], registers: [registry] });
+// const audioCommands = new Counter({ name: 'audio_commands_total', help: 'Audio commands', labelNames: ['type'], registers: [registry] });
 
 manager.on('trackStart', (player, track) => {
   lavalinkEvents.labels('trackStart').inc();

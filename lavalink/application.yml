@@ -19,14 +19,55 @@ lavalink:
       rotation: true
       lowPass: true
 
-# Plugins para v4 (YouTube)
+  # Plugins (carga remota)
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.0"
+      repository: "https://maven.lavalink.dev/releases"
+
+# Configuración de LavaSrc (correcta para v4): bajo la clave plugins.lavasrc
 plugins:
-  # YouTube plugin for Lavalink v4
-  - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
-    repository: "https://maven.lavalink.dev/releases"
-  # Multi-source plugin (Spotify / Deezer / Apple / Yandex / etc.).
-  - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.3.1"
-    repository: "https://jitpack.io"
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # Evitar clientes que requieren inicio de sesión (TV/TVHTML5). Priorizar WEB/MWEB; MUSIC solo para búsqueda.
+    clients:
+      - WEB
+      - MWEB
+      - ANDROID_VR
+      - MUSIC
+    clientOptions:
+      MUSIC:
+        playback: false
+        videoLoading: false
+        playlistLoading: false
+        searching: true
+  lavasrc:
+    # Proveedores usados para resolver la reproducción desde metadatos (ISRC/consulta)
+    # Usamos YouTube Music primero; si no hay ISRC, se usa búsqueda textual.
+    providers:
+      - "ytsearch:\"%ISRC%\""
+      - "ytsearch:%QUERY%"
+
+    # Fuentes a habilitar en LavaSrc
+    sources:
+      spotify: true
+      deezer: ${DEEZER_ENABLED:false}
+      applemusic: ${APPLE_ENABLED:false}
+
+    # Credenciales/ajustes por fuente
+    spotify:
+      clientId: ${SPOTIFY_CLIENT_ID:}
+      clientSecret: ${SPOTIFY_CLIENT_SECRET:}
+      countryCode: "US"
+      resolveArtistsInSearch: true
+    deezer:
+      arl: ${DEEZER_ARL:}
+    applemusic:
+      mediaAPIToken: ${APPLE_MUSIC_MEDIA_TOKEN:}
 
 # Optional keys for Lavasrc (uncomment and set if los tenés)
 #lavasrc:
