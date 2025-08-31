@@ -108,10 +108,7 @@ client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   try {
     const gm = interaction.member as GuildMember | null;
-    const djRole = interaction.guild?.roles.cache.find((r) => r.name.toLowerCase() === env.DJ_ROLE_NAME.toLowerCase());
-    const hasDJ = djRole ? !!gm?.roles.cache.has(djRole.id) : !!gm?.roles.cache.some((r) => r.name.toLowerCase() === env.DJ_ROLE_NAME.toLowerCase());
-    const isAdmin = !!gm?.permissions.has(PermissionsBitField.Flags.Administrator);
-    const hasControl = hasDJ || isAdmin;
+    const hasControl = hasDjOrAdmin(gm, interaction.guild);
     const requireDJ = async () => {
       if (!hasControl) {
         await interaction.reply({ content: `Requires ${env.DJ_ROLE_NAME} role.`, ephemeral: true });
