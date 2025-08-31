@@ -324,33 +324,40 @@ const redisUrl = env.REDIS_URL;
 const redisPub = createClient({ url: redisUrl });
 const redisSub = createClient({ url: redisUrl });
 
-await redisPub.connect();
-await redisSub.connect();
+async function main() {
+  await redisPub.connect();
+  await redisSub.connect();
 
-client.on('raw', async (d) => {
-  try {
-    await redisPub.publish('discord-bot:to-audio', JSON.stringify(d));
-  } catch (e) {
-    logger.error({ e }, 'failed to publish raw to audio');
-  }
-});
+  client.on('raw', async (d) => {
+    try {
+      await redisPub.publish('discord-bot:to-audio', JSON.stringify(d));
+    } catch (e) {
+      logger.error({ e }, 'failed to publish raw to audio');
+    }
+  });
 
-await redisSub.subscribe('discord-bot:to-discord', async (message) => {
-  try {
-    const { guildId, payload } = JSON.parse(message) as {
-      guildId: string;
-      payload: unknown;
-    };
-    redisSubCounter.labels('discord-bot:to-discord').inc();
-    const shardId =
-      client.guilds.cache.get(guildId)?.shardId ??
-      (Number((BigInt(guildId) >> 22n) % BigInt(client.ws.shards.size)) || 0);
-    const shard = client.ws.shards.get(shardId);
-    if (!shard) return;
-    await shard.send(payload as Record<string, unknown>);
-  } catch (e) {
-    logger.error({ e }, 'failed to dispatch payload to shard');
-  }
+  await redisSub.subscribe('discord-bot:to-discord', async (message) => {
+    try {
+      const { guildId, payload } = JSON.parse(message) as {
+        guildId: string;
+        payload: unknown;
+      };
+      redisSubCounter.labels('discord-bot:to-discord').inc();
+      const shardId =
+        client.guilds.cache.get(guildId)?.shardId ??
+        (Number((BigInt(guildId) >> 22n) % BigInt(client.ws.shards.size)) || 0);
+      const shard = client.ws.shards.get(shardId);
+      if (!shard) return;
+      await shard.send(payload as Record<string, unknown>);
+    } catch (e) {
+      logger.error({ e }, 'failed to dispatch payload to shard');
+    }
+  });
+}
+
+main().catch((err) => {
+  logger.error({ err }, 'Fatal error in main initialization');
+  process.exit(1);
 });
 
 // Button Interactions
