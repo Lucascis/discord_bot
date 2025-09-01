@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 describe('env', () => {
   beforeEach(() => {
     process.env.DISCORD_TOKEN = 'token';
+    process.env.DISCORD_APPLICATION_ID = 'app-id';
     process.env.DATABASE_URL = 'postgresql://localhost/db';
     process.env.LAVALINK_PASSWORD = 'pass';
   });

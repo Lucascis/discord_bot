@@ -1,4 +1,4 @@
-import { prisma } from '../src';
+import { prisma } from '../src/index.js';
 
 async function main() {
   await prisma.guildConfig.create({ data: { guildId: '123', language: 'en' } });
