@@ -101,6 +101,7 @@ const commands = [
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
+import { withTimeout } from './util.js';
 
 async function main() {
   const appId = env.DISCORD_APPLICATION_ID;
@@ -110,22 +111,22 @@ async function main() {
   if (guildId) {
     logger.info({ appId, guildId }, 'Registering guild commands');
     if (env.COMMANDS_CLEANUP_ON_START) {
-      try { await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
+      try { await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }), 15000, 'guild-cleanup'); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
     }
-    await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
-    try { await rest.put(Routes.applicationCommands(appId), { body: [] }); logger.info('Cleared global commands'); } catch (_e) { /* ignore */ }
+    await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands }), 20000, 'guild-register');
+    try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
     try {
-      const g = await rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown[];
-      const gl = await rest.get(Routes.applicationCommands(appId)) as unknown[];
-      logger.info({ guildCount: g.length, globalCount: gl.length }, 'Command registry state');
+      const g = (await withTimeout(rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown as Promise<unknown[]>, 15000, 'guild-get')) || [];
+      const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || [];
+      logger.info({ guildCount: (g as unknown[]).length, globalCount: (gl as unknown[]).length }, 'Command registry state');
     } catch { /* ignore */ }
   } else {
     logger.info({ appId }, 'Registering global commands');
     if (env.COMMANDS_CLEANUP_ON_START) {
-      try { await rest.put(Routes.applicationCommands(appId), { body: [] }); logger.info('Cleared global commands (pre)'); } catch (_e) { /* ignore */ }
+      try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clean-pre'); logger.info('Cleared global commands (pre)'); } catch { /* ignore */ }
     }
-    await rest.put(Routes.applicationCommands(appId), { body: commands });
-    try { const gl = await rest.get(Routes.applicationCommands(appId)) as unknown[]; logger.info({ globalCount: gl.length }, 'Command registry state'); } catch { /* ignore */ }
+    await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register');
+    try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get2')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Command registry state'); } catch { /* ignore */ }
   }
 
   await client.login(env.DISCORD_TOKEN);
