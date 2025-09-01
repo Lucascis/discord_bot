@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ensurePlayback, type LLPlayer, type LLTrack } from '../src/autoplay.js';
 
-function mkTrack(uri = 'u1'): LLTrack { return { info: { title: 't', uri } } as any; }
+function mkTrack(uri = 'u1'): LLTrack { return { info: { title: 't', uri } } as LLTrack; }
 
 describe('ensurePlayback', () => {
   it('plays immediately when not playing and not paused (even if current still set)', async () => {
@@ -11,9 +11,9 @@ describe('ensurePlayback', () => {
     const player: LLPlayer = {
       playing: false,
       paused: false,
-      queue: { current: mkTrack('old'), tracks: [], add: add as any },
-      play: play as any,
-      skip: skip as any,
+      queue: { current: mkTrack('old'), tracks: [], add: async (t: LLTrack) => { add(t); } },
+      play: async (opts: { clientTrack: LLTrack }) => { play(opts); },
+      skip: async () => { skip(); },
     };
     const res = await ensurePlayback(player, mkTrack('new'));
     expect(res).toBe('played');
@@ -29,9 +29,9 @@ describe('ensurePlayback', () => {
     const player: LLPlayer = {
       playing: true,
       paused: false,
-      queue: { current: mkTrack('cur'), tracks: [], add: add as any },
-      play: play as any,
-      skip: skip as any,
+      queue: { current: mkTrack('cur'), tracks: [], add: async (t: LLTrack) => { add(t); } },
+      play: async (opts: { clientTrack: LLTrack }) => { play(opts); },
+      skip: async () => { skip(); },
     };
     const res = await ensurePlayback(player, mkTrack('next'));
     expect(res).toBe('queued');
@@ -39,4 +39,3 @@ describe('ensurePlayback', () => {
     expect(play).not.toHaveBeenCalled();
   });
 });
-

@@ -156,11 +156,12 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
           await player.play({ clientTrack: first });
           // Seed related tracks on first play
           try {
+            const userId = data.userId;
             const seeded = await seedRelatedQueue(
               player as unknown as import('./autoplay.js').LLPlayer,
               first as unknown as import('./autoplay.js').LLTrack,
               async (q: string) => {
-                const r = await player.search({ query: q }, { id: (data as any).userId || 'system' } as { id: string });
+                const r = await player.search({ query: q }, { id: userId || 'system' } as { id: string });
                 return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
               },
               10,
@@ -546,7 +547,7 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   try {
     const info = (pick as { info?: { title?: string; uri?: string } }).info;
     logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri }, 'automix: picked candidate');
-  } catch {}
+  } catch (_e) { /* ignore */ }
   await ensurePlayback(player as unknown as import('./autoplay.js').LLPlayer, pick as unknown as import('./autoplay.js').LLTrack);
   // Si la cola queda corta, volver a sembrar relacionados para mantener reproducción continua
   try {

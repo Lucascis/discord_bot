@@ -5,9 +5,6 @@ import {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   PermissionsBitField,
 } from 'discord.js';
 import { env } from '@discord-bot/config';
@@ -227,10 +224,9 @@ client.on('guildDelete', (g) => {
   nowLive.delete(g.id);
 });
 client.on('channelDelete', (ch) => {
-  // @ts-ignore - partial channel type
-  const id = (ch as any).id as string;
+  const id = (ch as unknown as { id?: string } | null)?.id;
   for (const [gid, live] of nowLive) {
-    if (live.channelId === id) nowLive.delete(gid);
+    if (id && live.channelId === id) nowLive.delete(gid);
   }
 });
 

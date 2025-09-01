@@ -72,10 +72,12 @@ export async function ensurePlayback(player: LLPlayer, track: LLTrack): Promise<
 
 // Seed related tracks into queue on first play
 export async function seedRelatedQueue(player: LLPlayer, base: LLTrack, search: SearchFn, limit = 10): Promise<number> {
-  const infoBase = (base?.info || {}) as any;
-  const title = (infoBase.title ?? '').toString().trim();
-  const author = (infoBase.author ?? infoBase.artist ?? '').toString().trim();
-  const uri = (infoBase.uri ?? '').toString();
+  const infoBase = (base?.info || {}) as Record<string, unknown>;
+  const title = typeof infoBase.title === 'string' ? infoBase.title.trim() : '';
+  const author = typeof infoBase.author === 'string'
+    ? infoBase.author.trim()
+    : (typeof (infoBase as Record<string, unknown>).artist === 'string' ? ((infoBase as Record<string, unknown>).artist as string).trim() : '');
+  const uri = typeof infoBase.uri === 'string' ? infoBase.uri : '';
   const queries = buildAutomixCandidates(title, author, uri);
   const seenKey = new Set<string>();
   const seenTitle = new Set<string>();
@@ -85,11 +87,15 @@ export async function seedRelatedQueue(player: LLPlayer, base: LLTrack, search: 
     try {
       const res = await search(q);
       for (const t of res.tracks) {
-        const info = (t.info || {}) as any;
-        const key = (info.uri ?? info.identifier ?? info.title ?? JSON.stringify(info)).toString();
+        const info = (t.info || {}) as Record<string, unknown>;
+        const uriStr = typeof info['uri'] === 'string' ? (info['uri'] as string) : undefined;
+        const identStr = typeof info['identifier'] === 'string' ? (info['identifier'] as string) : undefined;
+        const titleStr = typeof info['title'] === 'string' ? (info['title'] as string) : undefined;
+        const key = (uriStr ?? identStr ?? titleStr ?? JSON.stringify(info));
         if (!key || seenKey.has(key)) continue;
-        if (info.uri === uri) continue;
-        const candNorm = normalizeTitle(String(info.title ?? ''));
+        if (uriStr && uriStr === uri) continue;
+        const candTitle = titleStr ?? '';
+        const candNorm = normalizeTitle(candTitle);
         if (candNorm && (candNorm === baseNorm || seenTitle.has(candNorm))) continue;
         seenKey.add(key);
         if (candNorm) seenTitle.add(candNorm);
@@ -111,7 +117,7 @@ export function normalizeTitle(raw: string): string {
   // remove content in brackets and parentheses
   s = s.replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, ' ');
   // remove trailing segments that indicate remix/edit/version (and their leading text)
-  s = s.replace(/[-–—:\s]+[^-()\[\]{}]*\b(remix|rework|edit|mix|version|vip|extended|radio|club|dub|bootleg)\b.*$/g, ' ');
+  s = s.replace(/[-–—:\s]+.*\b(remix|rework|edit|mix|version|vip|extended|radio|club|dub|bootleg)\b.*$/g, ' ');
   // remove featuring segments first (token + following words)
   s = s.replace(/(featuring|feat\.?|ft\.)\s+[\w\s.-]+/g, ' ');
   // remove tokens commonly used for remixes/versions
