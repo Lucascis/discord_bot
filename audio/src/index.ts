@@ -21,6 +21,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay.js';
+import { shouldAutomixAfterSkip } from './logic.js';
 
 const redisUrl = env.REDIS_URL;
 const redisPub = createClient({ url: redisUrl });
@@ -196,21 +197,30 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
       if (player) {
         const prev = player.queue.current as { info?: { title?: string; author?: string; uri?: string } } | undefined;
         const qlen = player.queue.tracks.length;
-        if (qlen > 0) await player.skip(); else await player.stopPlaying(true, false);
-        // Dar tiempo a que se estabilice y ver si quedó sin reproducción ni cola
-        await delay(900);
-        try {
-          if ((player.repeatMode ?? 'off') === 'off' && !(player.playing || player.queue.current) && player.queue.tracks.length === 0) {
+        // Acción rápida con timeout para evitar bloqueo
+        const op = qlen > 0 ? player.skip() : player.stopPlaying(true, false);
+        await Promise.race([op.catch(() => undefined), delay(2000)]);
+        // Manejo post-skip en background para no bloquear el bus de comandos
+        void (async () => {
+          try {
+            await delay(900);
             const enabled = await isAutomixEnabled(player.guildId);
-            if (enabled && prev) {
+            const state = {
+              repeatMode: (player.repeatMode ?? 'off') as 'off'|'track'|'queue',
+              playing: !!player.playing,
+              hasCurrent: !!player.queue.current,
+              queueLen: player.queue.tracks.length,
+              autoplayEnabled: enabled,
+            };
+            if (prev && shouldAutomixAfterSkip(state)) {
               logger.info({ guildId: player.guildId }, 'audio: skip on empty queue with autoplay → enqueue automix');
               await enqueueAutomix(player, prev);
             }
+            await saveQueue(data.guildId, player);
+          } catch (e) {
+            logger.error({ e }, 'audio: post-skip automix failed');
           }
-        } catch (e) {
-          logger.error({ e }, 'audio: post-skip automix failed');
-        }
-        await saveQueue(data.guildId, player);
+        })();
       }
       return;
     }
