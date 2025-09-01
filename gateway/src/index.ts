@@ -21,7 +21,8 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import crypto from 'node:crypto';
 import type { TextChannel } from 'discord.js';
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers] });
+// Avoid privileged GuildMembers intent to prevent DisallowedIntents login failures
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 
 function hasDjOrAdmin(
   interaction: import('discord.js').ButtonInteraction | import('discord.js').ChatInputCommandInteraction,
@@ -110,7 +111,11 @@ async function main() {
 
   // 1) Login primero para que el bot aparezca online y pueda responder
   try {
-    await withTimeout(client.login(env.DISCORD_TOKEN), 20000, 'discord-login');
+    const res = await withTimeout(client.login(env.DISCORD_TOKEN), 20000, 'discord-login');
+    if (!res) {
+      logger.error('Login timed out or failed. Check DISCORD_TOKEN and intents. Will retry in 10s.');
+      setTimeout(() => { void withTimeout(client.login(env.DISCORD_TOKEN), 20000, 'discord-login-retry'); }, 10000);
+    }
   } catch (e) {
     logger.error({ e }, 'Login failed');
   }
@@ -786,7 +791,7 @@ const healthServer = http.createServer(async (req, res) => {
   if (!req.url) return;
   if (req.url.startsWith('/health')) {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, ready: client.isReady }));
     return;
   }
   if (req.url.startsWith('/metrics')) {
