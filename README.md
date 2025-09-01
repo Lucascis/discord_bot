@@ -23,6 +23,8 @@ pnpm install
 pnpm dev
 ```
 
+- Guía de contribución y checklist previa al commit: `docs/CONTRIBUTING.md`.
+
 ### Tests
 ```bash
 pnpm test

@@ -259,6 +259,21 @@ client.on('channelDelete', (ch) => {
   }
 });
 
+// Cuando el bot se desconecta del canal de voz, olvidamos el mensaje vivo para
+// evitar seguir editando uno antiguo. Al volver a reproducir, se creará uno nuevo al final.
+client.on('voiceStateUpdate', (oldState, newState) => {
+  try {
+    const meId = client.user?.id;
+    if (!meId) return;
+    // Evento propio del bot
+    if (newState.member?.user?.id !== meId && oldState.member?.user?.id !== meId) return;
+    // Desconexión: channelId -> null
+    if (oldState.channelId && !newState.channelId) {
+      nowLive.delete(newState.guild.id);
+    }
+  } catch { /* ignore */ }
+});
+
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   try {
@@ -320,9 +335,18 @@ client.on('interactionCreate', async (interaction) => {
       ])) as PlayAck | null;
       if (!ack) {
         await interaction.editReply({ content: `▶️ Queued: ${query}` });
+        if (interaction.guildId && interaction.channelId) {
+          // Intentar relocalizar aun si el ack no llegó a tiempo
+          setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!, true); }, 600);
+          setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1500);
+        }
       } else if ('ok' in ack && ack.ok) {
         await interaction.editReply({ content: `▶️ Queued: [${ack.title}](${ack.uri ?? query})` });
-        // No crear el mensaje aquí; la UI se auto-crea/actualiza con los push del servicio de audio
+        // Relocalizar el reproductor al fondo para mayor visibilidad
+        if (interaction.guildId && interaction.channelId) {
+          void ensureLiveNow(interaction.guildId, interaction.channelId, true);
+          setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1200);
+        }
       } else {
         await interaction.editReply({ content: `No results for: ${query}` });
       }
