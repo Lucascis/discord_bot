@@ -123,25 +123,31 @@ async function main() {
   // 2) Registrar comandos en background (no bloquear inicio)
   void (async () => {
     try {
+      let guildRegistered = false;
       if (guildId) {
         logger.info({ appId, guildId }, 'Registering guild commands');
         if (env.COMMANDS_CLEANUP_ON_START) {
           try { await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }), 15000, 'guild-cleanup'); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
         }
-        await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands }), 20000, 'guild-register');
-        try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
+        const reg = await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands }), 20000, 'guild-register');
+        guildRegistered = !!reg;
         try {
           const g = (await withTimeout(rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown as Promise<unknown[]>, 15000, 'guild-get')) || [];
-          const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || [];
-          logger.info({ guildCount: (g as unknown[]).length, globalCount: (gl as unknown[]).length }, 'Command registry state');
+          logger.info({ guildCount: (g as unknown[]).length }, 'Guild command registry state');
         } catch { /* ignore */ }
-      } else {
-        logger.info({ appId }, 'Registering global commands');
-        if (env.COMMANDS_CLEANUP_ON_START) {
-          try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clean-pre'); logger.info('Cleared global commands (pre)'); } catch { /* ignore */ }
+      }
+
+      if (!guildRegistered) {
+        // Fallback: register global commands so the bot siempre tiene comandos disponibles
+        logger.warn({ appId, guildId }, 'Guild registration failed or not configured; registering global commands as fallback');
+        if (!env.COMMANDS_CLEANUP_ON_START) {
+          // no-op
         }
-        await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register');
-        try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get2')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Command registry state'); } catch { /* ignore */ }
+        await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register-fallback');
+        try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Global command registry state'); } catch { /* ignore */ }
+      } else if (env.COMMANDS_CLEANUP_ON_START) {
+        // Opcional: si registramos por guild correctamente, limpiar globales para evitar duplicados
+        try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
       }
     } catch (e) {
       logger.error({ e }, 'command registration failed');
