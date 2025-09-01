@@ -7,8 +7,17 @@ ERR()  { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
 
 need() { command -v "$1" >/dev/null 2>&1 || { ERR "Missing command: $1"; exit 1; }; }
 
-need docker-compose
 need curl
+
+# Detect docker compose binary
+if command -v docker-compose >/dev/null 2>&1; then
+  DC="docker-compose"
+elif docker compose version >/dev/null 2>&1; then
+  DC="docker compose"
+else
+  ERR "Docker Compose not found. Install Docker Desktop (or docker-compose)."
+  exit 1
+fi
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 PLUGINS_DIR="$ROOT_DIR/lavalink/plugins" # not used in remote mode, kept for reference
@@ -27,13 +36,25 @@ if [ -z "${SPOTIFY_CLIENT_ID:-}" ] || [ -z "${SPOTIFY_CLIENT_SECRET:-}" ]; then
   WARN "Create a Spotify app: https://developer.spotify.com/dashboard"
 fi
 
+RESET_FLAG="${RESET:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --reset|-r) RESET_FLAG=1 ; shift ;;
+  esac
+done
+
+if [ "$RESET_FLAG" = "1" ]; then
+  WARN "Reset flag enabled: removing containers and volumes"
+  $DC down -v --remove-orphans || true
+fi
+
 INFO "Starting data services (postgres, redis)"
-docker-compose up -d postgres redis
+$DC up -d --build postgres redis
 
 # Remote plugin mode: no local JAR downloads; Lavalink will fetch plugins configured in application.yml
 
 INFO "Starting Lavalink (remote plugins)"
-docker-compose up -d lavalink
+$DC up -d --build lavalink
 
 INFO "Waiting for Lavalink /v4/info"
 out=""
@@ -46,7 +67,7 @@ done
 
 if ! echo "$out" | grep -q 'sourceManagers'; then
   ERR "Lavalink /v4/info not ready. Check lavalink logs. Aborting."
-  docker-compose logs --no-color lavalink | tail -n 100 || true
+  $DC logs --no-color lavalink | tail -n 100 || true
   exit 1
 fi
 
@@ -54,17 +75,15 @@ echo "$out" | jq . >/dev/null 2>&1 || true
 if echo "$out" | grep -q 'youtube'; then INFO "YouTube source detected"; else ERR "YouTube NOT detected in /v4/info."; exit 1; fi
 if echo "$out" | grep -qi 'lavasrc'; then INFO "LavaSrc plugin detected"; else ERR "LavaSrc NOT detected in /v4/info."; exit 1; fi
 
-INFO "Installing deps and running DB migrations"
-if ! command -v pnpm >/dev/null 2>&1; then
-  corepack enable pnpm >/dev/null 2>&1 || true
-fi
+INFO "Building application images"
+$DC build
 
-cd "$ROOT_DIR"
-pnpm install
-DATABASE_URL=${DATABASE_URL_LOCAL:-postgresql://postgres:postgres@localhost:5432/discord} pnpm db:migrate
+INFO "Running DB migrations inside the api service (deploy)"
+# Apply pending migrations without creating new ones
+$DC run --rm -T api pnpm --filter @discord-bot/database exec prisma migrate deploy
 
 INFO "Starting application services (gateway, api, audio, worker)"
-docker-compose up -d gateway api audio worker
+$DC up -d --build gateway api audio worker
 
 wait_http() {
   local url="$1"; local name="$2"; local tries=60

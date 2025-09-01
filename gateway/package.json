@@ -13,6 +13,7 @@
     "discord.js": "^14.13.0",
     "@discordjs/rest": "^1.7.0",
     "@discord-bot/config": "workspace:*",
+    "@discord-bot/database": "workspace:*",
     "@discord-bot/logger": "workspace:*",
     "redis": "^4.6.13",
     "prom-client": "^15.1.3",

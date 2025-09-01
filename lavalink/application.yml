@@ -18,6 +18,7 @@ lavalink:
       tremolo: true
       rotation: true
       lowPass: true
+    playerUpdateInterval: 1
 
   # Plugins (carga remota)
   plugins:

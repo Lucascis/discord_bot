@@ -13,12 +13,16 @@ import {
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
 import { createClient } from 'redis';
+import { prisma } from '@discord-bot/database';
+import { getAutomixEnabled, setAutomixEnabled } from './flags.js';
+import { buildControls, resolveTextChannel, type UiState } from './ui.js';
 import http from 'node:http';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import crypto from 'node:crypto';
+import type { TextChannel } from 'discord.js';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers] });
 
@@ -104,19 +108,131 @@ const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
 async function main() {
   const appId = env.DISCORD_APPLICATION_ID;
   const guildId = env.DISCORD_GUILD_ID;
+  logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS, COMMANDS_CLEANUP_ON_START: env.COMMANDS_CLEANUP_ON_START, appId, guildId }, 'Gateway startup config');
 
   if (guildId) {
     logger.info({ appId, guildId }, 'Registering guild commands');
+    if (env.COMMANDS_CLEANUP_ON_START) {
+      try { await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
+    }
     await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands });
+    try { await rest.put(Routes.applicationCommands(appId), { body: [] }); logger.info('Cleared global commands'); } catch (_e) { /* ignore */ }
+    try {
+      const g = await rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown[];
+      const gl = await rest.get(Routes.applicationCommands(appId)) as unknown[];
+      logger.info({ guildCount: g.length, globalCount: gl.length }, 'Command registry state');
+    } catch { /* ignore */ }
   } else {
     logger.info({ appId }, 'Registering global commands');
+    if (env.COMMANDS_CLEANUP_ON_START) {
+      try { await rest.put(Routes.applicationCommands(appId), { body: [] }); logger.info('Cleared global commands (pre)'); } catch (_e) { /* ignore */ }
+    }
     await rest.put(Routes.applicationCommands(appId), { body: commands });
+    try { const gl = await rest.get(Routes.applicationCommands(appId)) as unknown[]; logger.info({ globalCount: gl.length }, 'Command registry state'); } catch { /* ignore */ }
   }
 
   await client.login(env.DISCORD_TOKEN);
 }
 
 main().catch((err) => logger.error(err));
+
+// Controls builder (reused across messages)
+
+// Live Now Playing message (per guild)
+type NowLive = { channelId: string; messageId: string; lastEdit?: number; state?: UiState & { trackUri?: string } };
+const nowLive = new Map<string, NowLive>();
+
+async function fetchNowPlaying(guildId: string) {
+  const requestId = crypto.randomUUID();
+  const channel = `discord-bot:response:${requestId}`;
+  type NowPlayingResponse = { title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused?: boolean; repeatMode?: 'off' | 'track' | 'queue' } | null;
+  const response: Promise<NowPlayingResponse> = new Promise((resolve) => {
+    const handler = async (message: string, chan: string) => {
+      if (chan !== channel) return;
+      try { resolve(JSON.parse(message)); } finally { await redisSub.unsubscribe(channel); }
+    };
+    redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
+  });
+  await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'nowplaying', guildId, requestId }));
+  redisPubCounter.labels('discord-bot:commands').inc();
+  const data = (await Promise.race([
+    response,
+    new Promise((res) => setTimeout(() => res(null), 1500)),
+  ])) as NowPlayingResponse;
+  return data;
+}
+
+function buildNowEmbed(data: NonNullable<Awaited<ReturnType<typeof fetchNowPlaying>>>) {
+  const total = data.durationMs || 0;
+  const pos = data.positionMs || 0;
+  const pct = total > 0 ? Math.min(1, pos / total) : 0;
+  const barLen = 20;
+  const filled = Math.min(barLen - 1, Math.round(pct * barLen));
+  const bar = '▬'.repeat(filled) + '🔘' + '▬'.repeat(Math.max(0, barLen - filled - 1));
+  const fmt = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${m}:${ss.toString().padStart(2, '0')}`;
+  };
+  const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
+  const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : undefined);
+  const embed = new EmbedBuilder()
+    .setTitle('Now Playing')
+    .setDescription(`[${data.title}](${data.uri})`)
+    .addFields(
+      { name: 'Author', value: data.author ?? 'Unknown', inline: true },
+      { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false },
+    )
+    .setColor(0x57f287);
+  if (thumb) embed.setThumbnail(thumb);
+  return embed;
+}
+
+async function ensureLiveNow(guildId: string, channelId: string, forceRelocate = false) {
+  const data = await fetchNowPlaying(guildId);
+  const channel = await resolveTextChannel(client, channelId);
+  if (!channel) return;
+  const autoplayOn = await getAutomixEnabled(guildId);
+  // Quick approximation for initial controls
+  const loopMode = (data?.repeatMode as 'off' | 'track' | 'queue') || 'off';
+  const hasTrack = !!data;
+  const canSeek = !!data && !data.isStream;
+  const queueLen = 0;
+  const controls = buildControls({ autoplayOn, loopMode, paused: false, hasTrack, queueLen, canSeek });
+  if (!data) { return; }
+  const embed = buildNowEmbed(data);
+  const existing = nowLive.get(guildId);
+  if (existing) {
+    const msg = await channel.messages.fetch(existing.messageId).catch(() => null);
+    if (msg && !forceRelocate) await msg.edit({ embeds: [embed], components: controls });
+    else {
+      const sent = await channel.send({ embeds: [embed], components: controls });
+      if (msg) await msg.delete().catch(() => undefined);
+      nowLive.set(guildId, { channelId, messageId: sent.id });
+      return;
+    }
+  } else {
+    const sent = await channel.send({ embeds: [embed], components: controls });
+    nowLive.set(guildId, { channelId, messageId: sent.id });
+  }
+  // No interval here; updates are driven by push events from audio (playerUpdate)
+  nowLive.set(guildId, { channelId, messageId: (nowLive.get(guildId)?.messageId as string) || '' });
+}
+
+// push update subscription is set after Redis connection (see later)
+
+// Cleanup live message state when guild or channel is removed
+client.on('guildDelete', (g) => {
+  nowLive.delete(g.id);
+});
+client.on('channelDelete', (ch) => {
+  // @ts-ignore - partial channel type
+  const id = (ch as any).id as string;
+  for (const [gid, live] of nowLive) {
+    if (live.channelId === id) nowLive.delete(gid);
+  }
+});
 
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -172,36 +288,22 @@ client.on('interactionCreate', async (interaction) => {
         }),
       );
       redisPubCounter.labels('discord-bot:commands').inc();
-      const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('music:toggle').setLabel('⏯️ Play/Pause').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:skip').setLabel('⏭️ Skip').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('music:stop').setLabel('⏹️ Stop').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('music:loop').setLabel('🔁 Loop').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('music:shuffle').setLabel('🔀 Shuffle').setStyle(ButtonStyle.Secondary),
-      );
-      const controls2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('music:voldown').setLabel('🔉 Vol -').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:volup').setLabel('🔊 Vol +').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:queue').setLabel('🗒️ Queue').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:now').setLabel('⏱️ Now').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('music:clear').setLabel('🧹 Clear').setStyle(ButtonStyle.Secondary),
-      );
+      // For queued ack, we keep the message minimal; controls live on Now Playing
       const ack = (await Promise.race([
         response,
         new Promise<null>((res) => setTimeout(() => res(null), 2500)),
       ])) as PlayAck | null;
       if (!ack) {
-        await interaction.editReply({ content: `Queued: ${query}`, components: [controls, controls2] });
+        await interaction.editReply({ content: `▶️ Queued: ${query}` });
       } else if ('ok' in ack && ack.ok) {
-        const embed = new EmbedBuilder()
-          .setTitle('Queued')
-          .setDescription(`[${ack.title}](${ack.uri ?? query})`)
-          .setThumbnail(ack.artworkUrl ?? null)
-          .setColor(0x5865f2)
-          .setFooter({ text: 'Use the controls below to manage playback' });
-        await interaction.editReply({ embeds: [embed], components: [controls, controls2] });
+        await interaction.editReply({ content: `▶️ Queued: [${ack.title}](${ack.uri ?? query})` });
+        // Crear/actualizar reproductor y relocalizarlo al pie del canal
+        if (interaction.guildId && interaction.channelId) {
+          void ensureLiveNow(interaction.guildId, interaction.channelId, true);
+          setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1200);
+        }
       } else {
-        await interaction.editReply({ content: `No results for: ${query}`, components: [controls, controls2] });
+        await interaction.editReply({ content: `No results for: ${query}` });
       }
       return;
     }
@@ -313,53 +415,21 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.commandName === 'nowplaying') {
       await interaction.deferReply({ ephemeral: true });
-      const requestId = crypto.randomUUID();
-      const channel = `discord-bot:response:${requestId}`;
-      type NowPlayingResponse = { title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string } | null;
-      const response: Promise<NowPlayingResponse> = new Promise((resolve) => {
-        const handler = async (message: string, chan: string) => {
-          if (chan !== channel) return;
-          try { resolve(JSON.parse(message)); } finally { await redisSub.unsubscribe(channel); }
-        };
-        redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
-      });
-      await redisPub.publish(
-        'discord-bot:commands',
-        JSON.stringify({ type: 'nowplaying', guildId: interaction.guildId, requestId }),
-      );
-      redisPubCounter.labels('discord-bot:commands').inc();
-      const data: NowPlayingResponse = (await Promise.race([
-        response,
-        new Promise((res) => setTimeout(() => res(null), 1500)),
-      ])) as NowPlayingResponse;
-      if (!data) {
-        await interaction.editReply('No track playing.');
-        return;
-      }
-      const total = data.durationMs || 0;
-      const pos = data.positionMs || 0;
-      const pct = total > 0 ? Math.min(1, pos / total) : 0;
-      const barLen = 20;
-      const filled = Math.min(barLen - 1, Math.round(pct * barLen));
-      const bar = '─'.repeat(filled) + '●' + '─'.repeat(Math.max(0, barLen - filled - 1));
-      const fmt = (ms: number) => {
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        const ss = s % 60;
-        return `${m}:${ss.toString().padStart(2, '0')}`;
+      if (!interaction.guildId) { await interaction.editReply('This command is guild-only.'); return; }
+      const data = await fetchNowPlaying(interaction.guildId);
+      if (!data) { await interaction.editReply('No track playing.'); return; }
+      const embed = buildNowEmbed(data);
+      const autoplayOn = await getAutomixEnabled(interaction.guildId);
+      const state: UiState = {
+        autoplayOn,
+        loopMode: (data.repeatMode as 'off'|'track'|'queue') || 'off',
+        paused: !!data.paused,
+        hasTrack: true,
+        queueLen: 0,
+        canSeek: !data.isStream,
       };
-      const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
-      const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : null);
-      const embed = new EmbedBuilder()
-        .setTitle('Now Playing')
-        .setDescription(`[${data.title}](${data.uri})`)
-        .addFields(
-          { name: 'Author', value: data.author ?? 'Unknown', inline: true },
-          { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false },
-        )
-        .setThumbnail(thumb)
-        .setColor(0x57f287);
-      await interaction.editReply({ embeds: [embed] });
+      const controls = buildControls(state);
+      await interaction.editReply({ embeds: [embed], components: controls });
       return;
     }
     if (interaction.commandName === 'queue') {
@@ -397,7 +467,10 @@ client.on('interactionCreate', async (interaction) => {
     }
   } catch (err) {
     logger.error({ err }, 'interaction error');
-    if (!interaction.replied) await interaction.reply({ content: 'Error', ephemeral: true });
+    try {
+      if (interaction.deferred || interaction.replied) await interaction.followUp({ content: 'Error', ephemeral: true });
+      else await interaction.reply({ content: 'Error', ephemeral: true });
+    } catch (_) { /* ignore double replies */ }
   }
 });
 
@@ -408,6 +481,74 @@ const redisSub = createClient({ url: redisUrl });
 
 await redisPub.connect();
 await redisSub.connect();
+
+// Subscribe to UI push updates from audio and update the live message efficiently
+const rawMs = env.NOWPLAYING_UPDATE_MS ?? 5000;
+const uiIntervalMs = Math.max(1000, Math.min(60000, Number.isFinite(rawMs as number) ? (rawMs as number) : 5000));
+
+await redisSub.subscribe('discord-bot:ui:now', async (message) => {
+  try {
+    const data = JSON.parse(message) as { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused?: boolean; repeatMode?: 'off'|'track'|'queue'; queueLen?: number; hasTrack?: boolean; canSeek?: boolean };
+    if (!data || !data.guildId) return;
+    if (data.paused) return; // don't update while paused
+    let live = nowLive.get(data.guildId);
+    if (!live) {
+      // Try to create the live message automatically using stored textChannelId
+      try {
+        const q = await prisma.queue.findFirst({ where: { guildId: data.guildId }, select: { textChannelId: true } });
+        const chId = q?.textChannelId;
+        if (chId) {
+          const ch = client.channels.cache.get(chId) as TextChannel | null;
+          const channel = ch ?? (await client.channels.fetch(chId).catch(() => null) as TextChannel | null);
+          if (channel) {
+            const embed = buildNowEmbed({ title: data.title, uri: data.uri, author: data.author, durationMs: data.durationMs, positionMs: data.positionMs, isStream: data.isStream, artworkUrl: data.artworkUrl } as { title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string });
+            const state: UiState = {
+              autoplayOn: await getAutomixEnabled(data.guildId),
+              loopMode: data.repeatMode ?? 'off',
+              paused: !!data.paused,
+              hasTrack: data.hasTrack ?? true,
+              queueLen: data.queueLen ?? 0,
+              canSeek: data.canSeek ?? !data.isStream,
+            };
+            const controls = buildControls(state);
+            const sent = await channel.send({ embeds: [embed], components: controls });
+            nowLive.set(data.guildId, { channelId: channel.id, messageId: sent.id, lastEdit: Date.now(), state: { ...state, trackUri: data.uri } });
+            live = nowLive.get(data.guildId);
+          }
+        }
+      } catch (e) {
+        logger.error({ e }, 'ui:now auto-create failed');
+        return;
+      }
+      if (!live) return; // couldn't create automatically
+    }
+    const now = Date.now();
+    if (live.lastEdit && now - live.lastEdit < uiIntervalMs) return; // debounce edits
+    const ch = client.channels.cache.get(live.channelId) as TextChannel | null;
+    if (!ch) return;
+    const msg = await ch.messages.fetch(live.messageId).catch(() => null);
+    const embed = buildNowEmbed({ title: data.title, uri: data.uri, author: data.author, durationMs: data.durationMs, positionMs: data.positionMs, isStream: data.isStream, artworkUrl: data.artworkUrl } as { title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string });
+    const state: UiState = {
+      autoplayOn: await getAutomixEnabled(data.guildId),
+      loopMode: data.repeatMode ?? 'off',
+      paused: !!data.paused,
+      hasTrack: data.hasTrack ?? true,
+      queueLen: data.queueLen ?? 0,
+      canSeek: data.canSeek ?? !data.isStream,
+    };
+    const controls = buildControls(state);
+    // Always edit the same message; do not recreate per track
+    if (!msg) {
+      const newMsg = await ch.send({ embeds: [embed], components: controls });
+      nowLive.set(data.guildId, { channelId: live.channelId, messageId: newMsg.id, lastEdit: now, state: { ...state, trackUri: data.uri } });
+    } else {
+      await msg.edit({ embeds: [embed], components: controls });
+      nowLive.set(data.guildId, { ...live, lastEdit: now, state: { ...state, trackUri: data.uri } });
+    }
+  } catch (e) {
+    logger.error({ e }, 'ui:now update failed');
+  }
+});
 
 client.on('raw', async (d) => {
   try {
@@ -441,32 +582,101 @@ client.on('interactionCreate', async (interaction) => {
   const guildId = interaction.guildId;
   const id = interaction.customId;
   try {
+    if (!guildId) { await interaction.reply({ content: 'Guild-only control.', ephemeral: true }); return; }
     if (!hasDjOrAdmin(interaction)) return await interaction.reply({ content: `Requires ${env.DJ_ROLE_NAME} role.`, ephemeral: true });
     switch (id) {
       case 'music:toggle':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'toggle' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'toggle', guildId }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        // restart live updater shortly after toggling (resume or pause)
+        if (interaction.channelId) setTimeout(() => { void ensureLiveNow(guildId, interaction.channelId!); }, 700);
+        return;
       case 'music:skip':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'skip' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'skip', guildId }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
       case 'music:stop':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'stop' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'stop', guildId }));
-        break;
-      case 'music:loop':
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
+      case 'music:loop': {
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'loop-toggle' }, 'button');
+        const live = nowLive.get(guildId);
+        const cur = live?.state?.loopMode ?? 'off';
+        const next = cur === 'off' ? 'track' : cur === 'track' ? 'queue' : 'off';
+        const autoplay = live?.state?.autoplayOn ?? (await getAutomixEnabled(guildId));
+        if (next !== 'off' && autoplay) {
+          await setAutomixEnabled(guildId, false);
+        }
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loop', guildId }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        if (interaction.channelId) void ensureLiveNow(guildId, interaction.channelId);
+        return;
+      }
       case 'music:shuffle':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'shuffle' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'shuffle', guildId }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
+      case 'music:seekback':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'seek', deltaMs: -10000 }, 'button');
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seekAdjust', guildId, deltaMs: -10000 }));
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
+      case 'music:seekfwd':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'seek', deltaMs: 10000 }, 'button');
+        await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seekAdjust', guildId, deltaMs: 10000 }));
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
       case 'music:volup':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'volume', delta: 10 }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'volumeAdjust', guildId, delta: 10 }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
       case 'music:voldown':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'volume', delta: -10 }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'volumeAdjust', guildId, delta: -10 }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
       case 'music:clear':
+        await interaction.deferUpdate();
+        logger.info({ guildId, userId: interaction.user.id, action: 'clear' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'clear', guildId }));
-        break;
+        redisPubCounter.labels('discord-bot:commands').inc();
+        return;
+      case 'music:autoplay':
+      case 'music:automix': { // legacy id support
+        await interaction.deferUpdate();
+        const current = await getAutomixEnabled(guildId);
+        const next = !current;
+        logger.info({ guildId, userId: interaction.user.id, action: 'autoplay', enabled: next }, 'button');
+        await setAutomixEnabled(guildId, next);
+        if (next) {
+          await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loopSet', guildId, mode: 'off' }));
+          redisPubCounter.labels('discord-bot:commands').inc();
+          const live = nowLive.get(guildId);
+          const queueLen = live?.state?.queueLen ?? 0;
+          const hasTrack = live?.state?.hasTrack ?? false;
+          if (hasTrack && queueLen === 0) {
+            await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seedRelated', guildId }));
+            redisPubCounter.labels('discord-bot:commands').inc();
+          }
+        }
+        if (interaction.channelId) void ensureLiveNow(guildId, interaction.channelId);
+        return;
+      }
       case 'music:queue': {
         const requestId = crypto.randomUUID();
         const channel = `discord-bot:response:${requestId}`;
@@ -478,6 +688,7 @@ client.on('interactionCreate', async (interaction) => {
           };
           redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
         });
+        logger.info({ guildId, userId: interaction.user.id, action: 'queue' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'queue', guildId, requestId }));
         redisPubCounter.labels('discord-bot:commands').inc();
         const data = (await Promise.race([
@@ -504,6 +715,7 @@ client.on('interactionCreate', async (interaction) => {
           };
           redisSub.subscribe(channel, (msg) => handler(msg, channel)).catch(() => undefined);
         });
+        logger.info({ guildId, userId: interaction.user.id, action: 'now' }, 'button');
         await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'nowplaying', guildId, requestId }));
         redisPubCounter.labels('discord-bot:commands').inc();
         const data = (await Promise.race([
@@ -526,7 +738,7 @@ client.on('interactionCreate', async (interaction) => {
             return `${m}:${ss.toString().padStart(2, '0')}`;
           };
           const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
-          const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : null);
+          const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : undefined);
           const embed = new EmbedBuilder()
             .setTitle('Now Playing')
             .setDescription(`[${data.title}](${data.uri})`)
@@ -534,14 +746,14 @@ client.on('interactionCreate', async (interaction) => {
               { name: 'Author', value: data.author ?? 'Unknown', inline: true },
               { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false },
             )
-            .setThumbnail(thumb)
             .setColor(0x57f287);
+          if (thumb) embed.setThumbnail(thumb);
           await interaction.reply({ embeds: [embed], ephemeral: true });
         }
         return;
       }
     }
-    await interaction.reply({ content: 'OK', ephemeral: true });
+    // Most handlers use deferUpdate() and do not send an extra message.
   } catch (e) {
     logger.error({ e }, 'button error');
     if (!interaction.replied) await interaction.reply({ content: 'Error', ephemeral: true });

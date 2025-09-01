@@ -112,6 +112,45 @@ YouTube “Please sign in” durante reproducción:
   - Activá Deezer para playback directo: `.env` → `DEEZER_ENABLED=true` y `DEEZER_ARL=<cookie arl>`.
   - (Avanzado) Usar `yt-dlp` como backend: requiere instalar el binario en la imagen de Lavalink y habilitar `plugins.lavasrc.ytdlp`.
 
+## 7) UI/UX: Now Playing y Controles
+
+- Now Playing en vivo:
+  - Lavalink envía `playerUpdate` cada 1s (configurado en `lavalink/application.yml` → `lavalink.server.playerUpdateInterval: 1`).
+  - El bot edita el mensaje como máximo cada `NOWPLAYING_UPDATE_MS` (clamp 1000–60000). Setealo en `.env`.
+  - Durante pausa no se edita; al reanudar vuelve a actualizar.
+- Controles dinámicos:
+  - Play/Pause, Seek ±10s, Skip, Stop, Shuffle, Queue, Clear, Loop, Autoplay.
+  - Se pintan/deshabilitan según estado (cola vacía, stream sin seek, loop activo, autoplay activo, etc.).
+  - Autoplay ON fuerza Loop OFF para evitar conflictos.
+
+Variables relevantes en `.env`:
+
+```
+# Intervalo mínimo entre ediciones del Now Playing (ms). Recomendado: 1000–5000
+NOWPLAYING_UPDATE_MS=3000
+
+# Limpieza de comandos en el arranque (una vez, opcional)
+COMMANDS_CLEANUP_ON_START=false
+```
+
+## 8) Deploy / Producción
+
+- Desde cero (limpia volúmenes, reconstruye, migra y arranca):
+
+```
+make prod-reset
+```
+
+- Migraciones en entorno existente:
+
+```
+make migrate-deploy
+```
+
+- Notas comandos:
+  - Si usás `DISCORD_GUILD_ID`, el gateway registra por guild y limpia comandos globales para evitar duplicados.
+  - Si en el preview ves “Integración desconocida”, es otra app/bot en el servidor: quitá la integración vieja en Discord → Server Settings → Integrations.
+
 Base de datos (errores Prisma P2021):
 - Si aparece `PrismaClientKnownRequestError P2021` (tabla Queue no existe), corré migraciones:
   - Local: `pnpm --filter @discord-bot/database prisma:migrate`
@@ -166,4 +205,28 @@ Credenciales para LavaSrc:
 ## 10) Próximos pasos (premium)
 - Implementar el puente `sendToShard` entre `audio` y el gateway para enviar eventos de voz a Discord (por ejemplo exponiendo el `client` vía IPC o un proceso único).
 - Agregar intents `GuildVoiceStates` (ya habilitado en el gateway) y permisos en el bot si se requieren más capacidades.
- - Embeds enriquecidos (portada, progreso), controles adicionales (loop, volumen +/- como botones dedicados), persistencia de colas, sharding.
+- Embeds enriquecidos (portada, progreso), controles adicionales (loop, volumen +/- como botones dedicados), persistencia de colas, sharding.
+
+---
+
+## Anexo A — Autoplay, cola relacionada y rebuild sin caché
+
+- Autoplay:
+  - En el primer `/play`, se siembran automáticamente hasta 10 temas relacionados en la cola.
+  - Si la cola se queda corta (< 3) al dispararse el autoplay, se vuelven a agregar hasta 10 relacionados para mantener reproducción continua.
+  - Al usar `Skip` con autoplay y cola vacía, se arranca un tema relacionado al anterior.
+
+- Now Playing:
+  - Si no existe el mensaje, el gateway lo crea al recibir el primer push de estado desde `audio` o tras un reintento de ~1.2s luego de `/play`.
+  - Se edita siempre el mismo mensaje; no se recrea por cada track.
+
+- Rebuild sin caché (tras cambios en el código):
+```
+docker compose build --no-cache gateway audio
+docker compose up -d
+```
+
+- Tests:
+```
+pnpm -w -r build && pnpm -w test
+```

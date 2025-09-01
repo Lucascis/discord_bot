@@ -144,6 +144,9 @@ importers:
       '@discord-bot/config':
         specifier: workspace:*
         version: link:../packages/config
+      '@discord-bot/database':
+        specifier: workspace:*
+        version: link:../packages/database
       '@discord-bot/logger':
         specifier: workspace:*
         version: link:../packages/logger

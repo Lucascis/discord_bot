@@ -17,6 +17,10 @@ const envSchema = z.object({
   WORKER_HTTP_PORT: z.coerce.number().default(3003),
   // Permissions
   DJ_ROLE_NAME: z.string().default('DJ'),
+  // UI/UX
+  NOWPLAYING_UPDATE_MS: z.coerce.number().default(5000),
+  // Commands maintenance
+  COMMANDS_CLEANUP_ON_START: z.coerce.boolean().default(false),
   // LavaSrc optional credentials
   SPOTIFY_CLIENT_ID: z.string().optional(),
   SPOTIFY_CLIENT_SECRET: z.string().optional(),

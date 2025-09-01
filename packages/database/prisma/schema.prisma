@@ -62,4 +62,5 @@ model FeatureFlag {
   guildId   String
   name      String
   enabled   Boolean  @default(false)
+  @@unique([guildId, name])
 }
