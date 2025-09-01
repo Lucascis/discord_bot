@@ -123,8 +123,12 @@ async function main() {
   // 2) Registrar comandos en background (no bloquear inicio)
   void (async () => {
     try {
+      const scope = (env.COMMANDS_SCOPE || 'global') as 'global'|'guild'|'both';
+      const doGlobal = scope === 'global' || scope === 'both';
+      const doGuild = scope === 'guild' || scope === 'both';
+
       let guildRegistered = false;
-      if (guildId) {
+      if (doGuild && guildId) {
         logger.info({ appId, guildId }, 'Registering guild commands');
         if (env.COMMANDS_CLEANUP_ON_START) {
           try { await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }), 15000, 'guild-cleanup'); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
@@ -137,16 +141,16 @@ async function main() {
         } catch { /* ignore */ }
       }
 
-      if (!guildRegistered) {
-        // Fallback: register global commands so the bot siempre tiene comandos disponibles
-        logger.warn({ appId, guildId }, 'Guild registration failed or not configured; registering global commands as fallback');
-        if (!env.COMMANDS_CLEANUP_ON_START) {
-          // no-op
-        }
-        await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register-fallback');
-        try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Global command registry state'); } catch { /* ignore */ }
+      if (doGlobal || !guildRegistered) {
+        // Registrar global de forma estable; no limpiar salvo que el usuario lo pida explícitamente
+        const label = doGlobal ? 'global-register' : 'global-register-fallback';
+        await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, label);
+        try {
+          const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || [];
+          logger.info({ globalCount: (gl as unknown[]).length }, 'Global command registry state');
+        } catch { /* ignore */ }
       } else if (env.COMMANDS_CLEANUP_ON_START) {
-        // Opcional: si registramos por guild correctamente, limpiar globales para evitar duplicados
+        // Si solo queremos guild y el usuario pidió cleanup, limpiar los globales
         try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
       }
     } catch (e) {
@@ -198,9 +202,10 @@ function buildNowEmbed(data: NonNullable<Awaited<ReturnType<typeof fetchNowPlayi
   };
   const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/);
   const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : undefined);
+  const description = data.uri ? `[${data.title}](${data.uri})` : `${data.title}`;
   const embed = new EmbedBuilder()
     .setTitle('Now Playing')
-    .setDescription(`[${data.title}](${data.uri})`)
+    .setDescription(description)
     .addFields(
       { name: 'Author', value: data.author ?? 'Unknown', inline: true },
       { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false },
@@ -238,7 +243,7 @@ async function ensureLiveNow(guildId: string, channelId: string, forceRelocate =
     nowLive.set(guildId, { channelId, messageId: sent.id });
   }
   // No interval here; updates are driven by push events from audio (playerUpdate)
-  nowLive.set(guildId, { channelId, messageId: (nowLive.get(guildId)?.messageId as string) || '' });
+  // (Do not overwrite messageId here to avoid losing the reference and duplicating messages)
 }
 
 // push update subscription is set after Redis connection (see later)
@@ -317,11 +322,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: `▶️ Queued: ${query}` });
       } else if ('ok' in ack && ack.ok) {
         await interaction.editReply({ content: `▶️ Queued: [${ack.title}](${ack.uri ?? query})` });
-        // Crear/actualizar reproductor y relocalizarlo al pie del canal
-        if (interaction.guildId && interaction.channelId) {
-          void ensureLiveNow(interaction.guildId, interaction.channelId, true);
-          setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1200);
-        }
+        // No crear el mensaje aquí; la UI se auto-crea/actualiza con los push del servicio de audio
       } else {
         await interaction.editReply({ content: `No results for: ${query}` });
       }

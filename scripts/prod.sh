@@ -75,8 +75,24 @@ echo "$out" | jq . >/dev/null 2>&1 || true
 if echo "$out" | grep -q 'youtube'; then INFO "YouTube source detected"; else ERR "YouTube NOT detected in /v4/info."; exit 1; fi
 if echo "$out" | grep -qi 'lavasrc'; then INFO "LavaSrc plugin detected"; else ERR "LavaSrc NOT detected in /v4/info."; exit 1; fi
 
-INFO "Building application images"
-$DC build
+build_images() {
+  INFO "Building application images"
+  # First attempt with BuildKit and normal cache
+  if ! $DC build --progress plain; then
+    WARN "Compose build failed. Pruning buildx cache and retrying without cache..."
+    # Prune buildx caches to avoid containerd snapshot corruption issues
+    docker buildx prune -af >/dev/null 2>&1 || true
+    if ! $DC build --no-cache --progress plain; then
+      WARN "Retry with legacy builder (DOCKER_BUILDKIT=0) and no cache..."
+      DOCKER_BUILDKIT=0 $DC build --no-cache || {
+        ERR "Image build failed even after fallbacks. Consider: 'docker system prune -af' and retry."
+        exit 1
+      }
+    fi
+  fi
+}
+
+build_images
 
 INFO "Running DB migrations inside the api service (deploy)"
 # Apply pending migrations without creating new ones

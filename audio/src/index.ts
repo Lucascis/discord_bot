@@ -21,7 +21,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay.js';
-import { shouldAutomixAfterSkip } from './logic.js';
+import { shouldAutomixAfterSkip, shouldSeedOnFirstPlay } from './logic.js';
 
 const redisUrl = env.REDIS_URL;
 const redisPub = createClient({ url: redisUrl });
@@ -153,23 +153,40 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
       logger.info({ tracks: res.tracks.length }, 'audio: search results');
       if (res.tracks.length > 0) {
         const first = res.tracks[0] as Track | UnresolvedTrack;
+        // Evaluar gate de seed ANTES de iniciar la reproducción para capturar el estado "idle"
+        let seedOnFirst = false;
+        try {
+          const autoplayEnabled = await isAutomixEnabled(data.guildId);
+          seedOnFirst = shouldSeedOnFirstPlay({
+            autoplayEnabled,
+            playing: player.playing,
+            paused: player.paused,
+            hasCurrent: !!player.queue.current,
+          });
+        } catch { /* ignore and proceed without seeding */ }
+
         if (!player.playing && !player.paused && !player.queue.current) {
           await player.play({ clientTrack: first });
-          // Seed related tracks on first play
-          try {
-            const userId = data.userId;
-            const seeded = await seedRelatedQueue(
-              player as unknown as import('./autoplay.js').LLPlayer,
-              first as unknown as import('./autoplay.js').LLTrack,
-              async (q: string) => {
-                const r = await player.search({ query: q }, { id: userId || 'system' } as { id: string });
-                return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
-              },
-              10,
-            );
-            if (seeded > 0) logger.info({ guildId: data.guildId, seeded }, 'audio: seeded related tracks');
-          } catch (e) {
-            logger.error({ e }, 'audio: failed to seed related queue');
+          // Seed related tracks en segundo plano si corresponde
+          if (seedOnFirst) {
+            void (async () => {
+              try {
+                const userId = data.userId;
+                const seeded = await seedRelatedQueue(
+                  player as unknown as import('./autoplay.js').LLPlayer,
+                  first as unknown as import('./autoplay.js').LLTrack,
+                  async (q: string) => {
+                    const r = await player.search({ query: q }, { id: userId || 'system' } as { id: string });
+                    return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
+                  },
+                  10,
+                );
+                if (seeded > 0) logger.info({ guildId: data.guildId, seeded }, 'audio: seeded related tracks');
+                await saveQueue(data.guildId, player, data.voiceChannelId, data.textChannelId);
+              } catch (e) {
+                logger.error({ e }, 'audio: failed to seed related queue');
+              }
+            })();
           }
         } else {
           // Priority insertion for subsequent user adds
@@ -215,6 +232,11 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
             if (prev && shouldAutomixAfterSkip(state)) {
               logger.info({ guildId: player.guildId }, 'audio: skip on empty queue with autoplay → enqueue automix');
               await enqueueAutomix(player, prev);
+            } else {
+              // Sin autoplay y sin cola: empujar estado Idle para refrescar UI
+              if (!state.playing && !state.hasCurrent && state.queueLen === 0) {
+                await pushIdleState(player);
+              }
             }
             await saveQueue(data.guildId, player);
           } catch (e) {
@@ -244,8 +266,11 @@ await redisSub.subscribe('discord-bot:commands', async (message) => {
     }
     if (data.type === 'stop') {
       const player = manager.getPlayer(data.guildId);
-      if (player) await player.stopPlaying(true, false);
-      if (player) await saveQueue(data.guildId, player);
+      if (player) {
+        await player.stopPlaying(true, false);
+        await pushIdleState(player);
+        await saveQueue(data.guildId, player);
+      }
       return;
     }
     if (data.type === 'volume') {
@@ -436,6 +461,24 @@ manager.on('trackError', async (player, track) => {
   }
 });
 
+// Handle track stuck (e.g., problematic streams) similar to trackError
+manager.on('trackStuck', async (player, track) => {
+  try {
+    if (player.queue.tracks.length > 0) {
+      await player.skip();
+      await saveQueue(player.guildId, player);
+      return;
+    }
+    if ((player.repeatMode ?? 'off') === 'off' && !(player.playing || player.queue.current)) {
+      if (await isAutomixEnabled(player.guildId)) {
+        try { await enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } }); } catch (e) { logger.error({ e }, 'automix after trackStuck failed'); }
+      }
+    }
+  } catch (e) {
+    logger.error({ e }, 'trackStuck handler failed');
+  }
+});
+
 // Metrics logic for 'discord-bot:commands' is now handled in the main command handler (see line 82).
 
 const healthServer = http.createServer(async (req, res) => {
@@ -601,7 +644,14 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
     if (player.playing || player.queue.current || player.queue.tracks.length > 0) return;
     // Autoplay habilitado?
     const enabled = await isAutomixEnabled(player.guildId);
-    if (!enabled) { logger.info({ guildId: player.guildId }, 'audio: autoplay disabled'); return; }
+    if (!enabled) {
+      logger.info({ guildId: player.guildId }, 'audio: autoplay disabled');
+      // Nada en cola y autoplay off → publicar estado Idle para actualizar UI
+      if (!(player.playing || player.queue.current) && player.queue.tracks.length === 0) {
+        await pushIdleState(player);
+      }
+      return;
+    }
     await enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } });
   } catch (e) {
     logger.error({ e }, 'automix failed');
@@ -641,6 +691,29 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
       queueLen: player.queue.tracks.length,
       hasTrack: !!player.queue.current,
       canSeek: !current.info.isStream,
+    };
+    await redisPub.publish('discord-bot:ui:now', JSON.stringify(payload));
+  } catch { /* ignore */ }
+}
+
+// Push an explicit idle UI state (no current track) so Gateway can
+// render controls enabled for autoplay while disabling playback actions.
+async function pushIdleState(player: import('lavalink-client').Player) {
+  try {
+    const payload = {
+      guildId: player.guildId,
+      title: 'Nothing playing',
+      uri: undefined as string | undefined,
+      author: undefined as string | undefined,
+      durationMs: 0,
+      positionMs: 0,
+      isStream: false,
+      artworkUrl: undefined as string | undefined,
+      paused: false,
+      repeatMode: (player.repeatMode ?? 'off') as 'off' | 'track' | 'queue',
+      queueLen: player.queue.tracks.length,
+      hasTrack: false,
+      canSeek: false,
     };
     await redisPub.publish('discord-bot:ui:now', JSON.stringify(payload));
   } catch { /* ignore */ }

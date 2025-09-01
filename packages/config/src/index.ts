@@ -21,6 +21,8 @@ const envSchema = z.object({
   NOWPLAYING_UPDATE_MS: z.coerce.number().default(5000),
   // Commands maintenance
   COMMANDS_CLEANUP_ON_START: z.coerce.boolean().default(false),
+  // Command registration scope: global | guild | both
+  COMMANDS_SCOPE: z.enum(['global', 'guild', 'both']).default('global'),
   // LavaSrc optional credentials
   SPOTIFY_CLIENT_ID: z.string().optional(),
   SPOTIFY_CLIENT_SECRET: z.string().optional(),

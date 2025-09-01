@@ -22,3 +22,15 @@ export function shouldAutomixAfterSkip(s: SkipState): boolean {
 export function shouldUseSkip(queueLen: number): boolean {
   return (queueLen ?? 0) > 0;
 }
+
+export type FirstPlayState = {
+  autoplayEnabled: boolean;
+  playing?: boolean;
+  paused?: boolean;
+  hasCurrent?: boolean;
+};
+
+export function shouldSeedOnFirstPlay(s: FirstPlayState): boolean {
+  if (!s) return false;
+  return !!s.autoplayEnabled && !s.playing && !s.paused && !s.hasCurrent;
+}

@@ -34,6 +34,7 @@ Para orquestación completa con healthchecks, métricas y migraciones, ver `make
 - Desactivado por defecto (persistente por guild en DB). Al activarlo, se mantiene entre reinicios.
 - Si está activo y la cola queda vacía al finalizar una canción, se añade un tema relacionado y se rellena la cola si está corta.
 - Si está activo y presionás Skip con cola vacía, se arranca un tema relacionado al anterior.
+- Si Autoplay está apagado y termina la reproducción (o hacés Skip con cola vacía), la UI muestra "Nada reproduciéndose" y permite activar Autoplay con un click.
 
 ## Observabilidad
 - Métricas Prometheus expuestas en cada servicio (`/metrics`).
