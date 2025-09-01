@@ -23,6 +23,13 @@ pnpm install
 pnpm dev
 ```
 
+### Tests
+```bash
+pnpm test
+```
+- Los tests no requieren build previo: `vitest.config.ts` aliasa los paquetes del workspace a sus fuentes (`@discord-bot/database`, `@discord-bot/logger`, `@discord-bot/config`).
+- Si agregás un nuevo paquete del workspace que se importe en código testeado, recordá añadir su alias en `vitest.config.ts` para evitar fallas en CI por falta de `dist/`.
+
 ## Docker
 ```bash
 docker-compose up --build
