@@ -108,28 +108,40 @@ async function main() {
   const guildId = env.DISCORD_GUILD_ID;
   logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS, COMMANDS_CLEANUP_ON_START: env.COMMANDS_CLEANUP_ON_START, appId, guildId }, 'Gateway startup config');
 
-  if (guildId) {
-    logger.info({ appId, guildId }, 'Registering guild commands');
-    if (env.COMMANDS_CLEANUP_ON_START) {
-      try { await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }), 15000, 'guild-cleanup'); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
-    }
-    await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands }), 20000, 'guild-register');
-    try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
-    try {
-      const g = (await withTimeout(rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown as Promise<unknown[]>, 15000, 'guild-get')) || [];
-      const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || [];
-      logger.info({ guildCount: (g as unknown[]).length, globalCount: (gl as unknown[]).length }, 'Command registry state');
-    } catch { /* ignore */ }
-  } else {
-    logger.info({ appId }, 'Registering global commands');
-    if (env.COMMANDS_CLEANUP_ON_START) {
-      try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clean-pre'); logger.info('Cleared global commands (pre)'); } catch { /* ignore */ }
-    }
-    await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register');
-    try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get2')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Command registry state'); } catch { /* ignore */ }
+  // 1) Login primero para que el bot aparezca online y pueda responder
+  try {
+    await withTimeout(client.login(env.DISCORD_TOKEN), 20000, 'discord-login');
+  } catch (e) {
+    logger.error({ e }, 'Login failed');
   }
 
-  await client.login(env.DISCORD_TOKEN);
+  // 2) Registrar comandos en background (no bloquear inicio)
+  void (async () => {
+    try {
+      if (guildId) {
+        logger.info({ appId, guildId }, 'Registering guild commands');
+        if (env.COMMANDS_CLEANUP_ON_START) {
+          try { await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: [] }), 15000, 'guild-cleanup'); logger.info('Cleaned guild commands'); } catch (e) { logger.error({ e }, 'Guild cleanup failed'); }
+        }
+        await withTimeout(rest.put(Routes.applicationGuildCommands(appId, guildId), { body: commands }), 20000, 'guild-register');
+        try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clear'); logger.info('Cleared global commands'); } catch { /* ignore */ }
+        try {
+          const g = (await withTimeout(rest.get(Routes.applicationGuildCommands(appId, guildId)) as unknown as Promise<unknown[]>, 15000, 'guild-get')) || [];
+          const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get')) || [];
+          logger.info({ guildCount: (g as unknown[]).length, globalCount: (gl as unknown[]).length }, 'Command registry state');
+        } catch { /* ignore */ }
+      } else {
+        logger.info({ appId }, 'Registering global commands');
+        if (env.COMMANDS_CLEANUP_ON_START) {
+          try { await withTimeout(rest.put(Routes.applicationCommands(appId), { body: [] }), 15000, 'global-clean-pre'); logger.info('Cleared global commands (pre)'); } catch { /* ignore */ }
+        }
+        await withTimeout(rest.put(Routes.applicationCommands(appId), { body: commands }), 20000, 'global-register');
+        try { const gl = (await withTimeout(rest.get(Routes.applicationCommands(appId)) as unknown as Promise<unknown[]>, 15000, 'global-get2')) || []; logger.info({ globalCount: (gl as unknown[]).length }, 'Command registry state'); } catch { /* ignore */ }
+      }
+    } catch (e) {
+      logger.error({ e }, 'command registration failed');
+    }
+  })();
 }
 
 main().catch((err) => logger.error(err));
