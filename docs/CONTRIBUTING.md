@@ -1,6 +1,6 @@
 # Contribuir / Flujo de desarrollo
 
-Este proyecto usa pnpm workspaces, Vitest y commitlint. Para evitar roturas en CI y comportamientos inesperados en Discord, seguí estos pasos antes de comitear.
+Este proyecto usa pnpm workspaces, Vitest y commitlint. Requiere Node 22+ y pnpm 8+. Para evitar roturas en CI y comportamientos inesperados en Discord, seguí estos pasos antes de comitear.
 
 ## Checklist previa al commit
 

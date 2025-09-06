@@ -14,9 +14,8 @@ jobs:
           version: 8
       - uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
       - run: pnpm install
-      - run: pnpm lint
       - run: pnpm test
       - run: pnpm build

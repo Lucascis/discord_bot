@@ -23,6 +23,9 @@ model Queue {
   voiceChannelId String?
   textChannelId  String?
   items     QueueItem[]
+  
+  @@index([guildId])
+  @@index([guildId, createdAt])
 }
 
 model QueueItem {
@@ -34,6 +37,9 @@ model QueueItem {
   duration    Int
   createdAt   DateTime @default(now())
   queue       Queue    @relation(fields: [queueId], references: [id])
+  
+  @@index([queueId])
+  @@index([queueId, createdAt])
 }
 
 model UserProfile {
@@ -48,6 +54,10 @@ model AuditLog {
   userId    String
   action    String
   createdAt DateTime @default(now())
+  
+  @@index([guildId])
+  @@index([userId])
+  @@index([guildId, createdAt])
 }
 
 model RateLimit {
@@ -55,6 +65,8 @@ model RateLimit {
   key       String   @unique
   count     Int      @default(0)
   expiresAt DateTime
+  
+  @@index([expiresAt])
 }
 
 model FeatureFlag {

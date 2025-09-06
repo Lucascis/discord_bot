@@ -1,77 +1,205 @@
 services:
+  # Database service
   postgres:
-    image: postgres:15
+    image: postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: discord
+      # Performance optimizations
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Custom PostgreSQL configuration for production
+      - ./config/postgres.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d discord"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
+    networks:
+      - discord-network
+
+  # Redis cache service
   redis:
-    image: redis:7
+    image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+      # Redis configuration for production
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+    networks:
+      - discord-network
+
+  # Lavalink audio server
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4
     environment:
       SERVER_PORT: 2333
       LAVALINK_SERVER_PASSWORD: youshallnotpass
+      # Memory optimization for Lavalink
+      JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
     env_file: .env
     ports:
       - "2333:2333"
-    depends_on: []
     volumes:
-      - ./lavalink/application.yml:/opt/Lavalink/application.yml
-      # Se puede montar si querés persistir la cache de plugins; no es obligatorio con carga remota.
-      # - ./lavalink/plugins:/opt/Lavalink/plugins
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - lavalink_logs:/opt/Lavalink/logs
+    healthcheck:
+      test: ["CMD-SHELL", "AUTH=$(printenv LAVALINK_SERVER_PASSWORD); curl -sf -H \"Authorization: $$AUTH\" http://localhost:2333/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
+    networks:
+      - discord-network
+
+  # Discord Gateway Service
   gateway:
     build:
       context: .
       dockerfile: Dockerfile
+      target: production
     command: node gateway/dist/index.js
     env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
     depends_on:
-      - postgres
-      - lavalink
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lavalink:
+        condition: service_healthy
     ports:
       - "3001:3001"
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - discord-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # REST API Service  
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    command: node api/dist/index.js
+      target: production
+    command: ["sh", "-lc", "npx --yes prisma migrate deploy --schema /app/packages/database/prisma/schema.prisma && node api/dist/index.js"]
     env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - discord-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Audio Processing Service
   audio:
     build:
       context: .
       dockerfile: Dockerfile
+      target: production
     command: node audio/dist/index.js
     env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3002
     depends_on:
-      - lavalink
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lavalink:
+        condition: service_healthy
     ports:
       - "3002:3002"
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - discord-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Background Worker Service
   worker:
     build:
       context: .
       dockerfile: Dockerfile
+      target: production
     command: node worker/dist/index.js
     env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3003
     depends_on:
-      - postgres
-      - lavalink
+      postgres:
+        condition: service_healthy
+      lavalink:
+        condition: service_healthy
     ports:
       - "3003:3003"
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - discord-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  lavalink_logs:
+    driver: local
+
+# Custom network for service isolation
+networks:
+  discord-network:
+    driver: bridge

@@ -13,7 +13,7 @@ vi.mock('@discord-bot/database', () => {
 });
 
 import { prisma } from '@discord-bot/database';
-import { getAutomixEnabled, setAutomixEnabled } from '../src/flags.js';
+import { getAutomixEnabled, setAutomixEnabled, clearFlagCache } from '../src/flags.js';
 
 describe('flags helpers', () => {
   type FnMock = ReturnType<typeof vi.fn>;
@@ -22,6 +22,8 @@ describe('flags helpers', () => {
     ff.findUnique.mockReset();
     ff.update.mockReset();
     ff.create.mockReset();
+    // Clear cache before each test to avoid interference
+    clearFlagCache();
   });
 
   it('getAutomixEnabled prefers "autoplay" but supports legacy "automix"', async () => {
@@ -32,10 +34,13 @@ describe('flags helpers', () => {
     const a = await getAutomixEnabled('g1');
     expect(a).toBe(false);
 
+    // Clear cache to test different scenario
+    clearFlagCache();
+    
     ff.findUnique
       .mockResolvedValueOnce(null) // autoplay
       .mockResolvedValueOnce({ enabled: true }); // automix (legacy)
-    const b = await getAutomixEnabled('g1');
+    const b = await getAutomixEnabled('g2'); // Use different guild ID to avoid cache conflicts
     expect(b).toBe(true);
   });
 

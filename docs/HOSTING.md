@@ -51,3 +51,7 @@ Muchos proveedores han cambiado sus planes gratuitos. Revisa t√©rminos actuales:
 - Comandos no aparecen: usa `DISCORD_GUILD_ID` en `.env` en desarrollo para registro instant√°neo por guild.
 - P2021 (tabla no existe): ejecuta migraciones (`make migrate-deploy` o `pnpm --filter @discord-bot/database prisma:migrate`).
 
+
+- Migraciones Prisma: el servicio pi corre prisma migrate deploy autom·ticamente al iniciar (no necesitas correrlo manualmente).
+- P2021 (tabla no existe): si usas un entorno sin Compose o pi fuera de orquestaciÛn, aplica migraciones con pnpm --filter @discord-bot/database prisma:migrate o 
+px prisma migrate deploy.

@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm audit:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm test:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(pnpm update:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm -r exec tsc --noEmit)",
+      "Bash(pnpm install:*)",
+      "Bash(del \"packages\\config\\test\\validation.test.ts\")",
+      "Bash(npm test)",
+      "Bash(timeout 30 pnpm test gateway/test/errors.test.ts)",
+      "Bash(timeout 30 pnpm test audio/test/performance.test.ts)",
+      "Bash(timeout 60 pnpm test)",
+      "Bash(timeout 30 pnpm test packages/logger/test/health.test.ts)",
+      "Bash(timeout 15 pnpm test:*)",
+      "Bash(timeout 120 pnpm test)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(timeout 30 pnpm test gateway/test/flags.test.ts)",
+      "Bash(docker build:*)",
+      "Bash(docker-compose:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

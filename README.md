@@ -5,7 +5,7 @@ Bot de música para Discord construido en TypeScript con pnpm workspaces. Arquit
 Documentación ampliada en `docs/SETUP.md` y `docs/HOSTING.md`.
 
 ## Requisitos
-- Node.js 20+
+- Node.js 22+
 - pnpm 8+
 - Docker (para entorno de desarrollo)
 

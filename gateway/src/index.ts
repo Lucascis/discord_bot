@@ -8,11 +8,23 @@ import {
   PermissionsBitField,
 } from 'discord.js';
 import { env } from '@discord-bot/config';
-import { logger } from '@discord-bot/logger';
+import { logger, HealthChecker, CommonHealthChecks } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
 import { getAutomixEnabled, setAutomixEnabled } from './flags.js';
 import { buildControls, resolveTextChannel, type UiState } from './ui.js';
+import { 
+  validateSearchQuery, 
+  validateInteger, 
+  validateLoopMode, 
+  validateSnowflake,
+  sanitizeDisplayText 
+} from './validation.js';
+import {
+  handleInteractionError,
+  withErrorHandling,
+  withTimeout
+} from './errors.js';
 import http from 'node:http';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -102,7 +114,7 @@ const commands = [
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
-import { withTimeout } from './util.js';
+// withTimeout is now imported from errors.js
 
 async function main() {
   const appId = env.DISCORD_APPLICATION_ID;
@@ -274,9 +286,17 @@ client.on('voiceStateUpdate', (oldState, newState) => {
   } catch { /* ignore */ }
 });
 
-client.on('interactionCreate', async (interaction) => {
+client.on('interactionCreate', withErrorHandling(async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   try {
+    // Validate guild ID for security
+    if (interaction.guildId) {
+      const guildValidation = validateSnowflake(interaction.guildId, 'Guild ID');
+      if (!guildValidation.success) {
+        await interaction.reply({ content: 'Invalid guild context.', ephemeral: true });
+        return;
+      }
+    }
     const hasControl = hasDjOrAdmin(interaction);
     const requireDJ = async () => {
       if (!hasControl) {
@@ -297,7 +317,15 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.commandName === 'play') {
       if (!(await allow('play', 5))) return await interaction.reply({ content: 'Too many requests. Try later.', ephemeral: true });
-      const query = interaction.options.getString('query', true);
+      const rawQuery = interaction.options.getString('query', true);
+      
+      // Validate and sanitize the search query
+      const queryValidation = validateSearchQuery(rawQuery);
+      if (!queryValidation.success) {
+        await interaction.reply({ content: `Invalid query: ${queryValidation.error}`, ephemeral: true });
+        return;
+      }
+      const query = queryValidation.data!;
       const voice = interaction.guild?.members.cache.get(interaction.user.id)?.voice
         .channelId;
       if (!voice) {
@@ -334,21 +362,23 @@ client.on('interactionCreate', async (interaction) => {
         new Promise<null>((res) => setTimeout(() => res(null), 2500)),
       ])) as PlayAck | null;
       if (!ack) {
-        await interaction.editReply({ content: `▶️ Queued: ${query}` });
+        await interaction.editReply({ content: `▶️ Queued: ${sanitizeDisplayText(query, 100)}` });
         if (interaction.guildId && interaction.channelId) {
           // Intentar relocalizar aun si el ack no llegó a tiempo
           setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!, true); }, 600);
           setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1500);
         }
       } else if ('ok' in ack && ack.ok) {
-        await interaction.editReply({ content: `▶️ Queued: [${ack.title}](${ack.uri ?? query})` });
+        const sanitizedTitle = sanitizeDisplayText(ack.title, 100);
+        const sanitizedUri = ack.uri ?? sanitizeDisplayText(query, 100);
+        await interaction.editReply({ content: `▶️ Queued: [${sanitizedTitle}](${sanitizedUri})` });
         // Relocalizar el reproductor al fondo para mayor visibilidad
         if (interaction.guildId && interaction.channelId) {
           void ensureLiveNow(interaction.guildId, interaction.channelId, true);
           setTimeout(() => { void ensureLiveNow(interaction.guildId!, interaction.channelId!); }, 1200);
         }
       } else {
-        await interaction.editReply({ content: `No results for: ${query}` });
+        await interaction.editReply({ content: `No results for: ${sanitizeDisplayText(query, 100)}` });
       }
       return;
     }
@@ -394,7 +424,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.commandName === 'loop') {
       if (!(await requireDJ())) return;
       if (!(await allow('loop'))) return await interaction.reply({ content: 'Slow down.', ephemeral: true });
-      const mode = interaction.options.getString('mode', true) as 'off' | 'track' | 'queue';
+      const rawMode = interaction.options.getString('mode', true);
+      const modeValidation = validateLoopMode(rawMode);
+      if (!modeValidation.success) {
+        await interaction.reply({ content: `Invalid loop mode: ${modeValidation.error}`, ephemeral: true });
+        return;
+      }
+      const mode = modeValidation.data;
       await interaction.deferReply({ ephemeral: true });
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loopSet', guildId: interaction.guildId, mode }));
       redisPubCounter.labels('discord-bot:commands').inc();
@@ -403,7 +439,13 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.commandName === 'seek') {
       if (!(await requireDJ())) return;
-      const seconds = interaction.options.getInteger('seconds', true);
+      const rawSeconds = interaction.options.getInteger('seconds', true);
+      const secondsValidation = validateInteger(rawSeconds, 0, 86400, 'seconds');
+      if (!secondsValidation.success) {
+        await interaction.reply({ content: `Invalid seek position: ${secondsValidation.error}`, ephemeral: true });
+        return;
+      }
+      const seconds = secondsValidation.data!; // Safe because we checked validation.success above
       await interaction.deferReply({ ephemeral: true });
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seek', guildId: interaction.guildId, positionMs: Math.max(0, seconds) * 1000 }));
       redisPubCounter.labels('discord-bot:commands').inc();
@@ -420,7 +462,13 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.commandName === 'remove') {
       if (!(await requireDJ())) return;
-      const index = interaction.options.getInteger('index', true);
+      const rawIndex = interaction.options.getInteger('index', true);
+      const indexValidation = validateInteger(rawIndex, 1, 1000, 'track index');
+      if (!indexValidation.success) {
+        await interaction.reply({ content: `Invalid track index: ${indexValidation.error}`, ephemeral: true });
+        return;
+      }
+      const index = indexValidation.data;
       await interaction.deferReply({ ephemeral: true });
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'remove', guildId: interaction.guildId, index }));
       redisPubCounter.labels('discord-bot:commands').inc();
@@ -437,8 +485,23 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.commandName === 'move') {
       if (!(await requireDJ())) return;
-      const from = interaction.options.getInteger('from', true);
-      const to = interaction.options.getInteger('to', true);
+      const rawFrom = interaction.options.getInteger('from', true);
+      const rawTo = interaction.options.getInteger('to', true);
+      
+      const fromValidation = validateInteger(rawFrom, 1, 1000, 'from position');
+      const toValidation = validateInteger(rawTo, 1, 1000, 'to position');
+      
+      if (!fromValidation.success) {
+        await interaction.reply({ content: `Invalid from position: ${fromValidation.error}`, ephemeral: true });
+        return;
+      }
+      if (!toValidation.success) {
+        await interaction.reply({ content: `Invalid to position: ${toValidation.error}`, ephemeral: true });
+        return;
+      }
+      
+      const from = fromValidation.data;
+      const to = toValidation.data;
       await interaction.deferReply({ ephemeral: true });
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'move', guildId: interaction.guildId, from, to }));
       redisPubCounter.labels('discord-bot:commands').inc();
@@ -448,7 +511,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.commandName === 'volume') {
       if (!(await requireDJ())) return;
       if (!(await allow('volume'))) return await interaction.reply({ content: 'Slow down.', ephemeral: true });
-      const percent = interaction.options.getInteger('percent', true);
+      const rawPercent = interaction.options.getInteger('percent', true);
+      const percentValidation = validateInteger(rawPercent, 0, 200, 'volume percent');
+      if (!percentValidation.success) {
+        await interaction.reply({ content: `Invalid volume: ${percentValidation.error}`, ephemeral: true });
+        return;
+      }
+      const percent = percentValidation.data;
       await interaction.deferReply({ ephemeral: true });
       await redisPub.publish(
         'discord-bot:commands',
@@ -510,14 +579,10 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply({ embeds: [embed] });
       return;
     }
-  } catch (err) {
-    logger.error({ err }, 'interaction error');
-    try {
-      if (interaction.deferred || interaction.replied) await interaction.followUp({ content: 'Error', ephemeral: true });
-      else await interaction.reply({ content: 'Error', ephemeral: true });
-    } catch (_) { /* ignore double replies */ }
+  } catch (error) {
+    await handleInteractionError(error as Error, interaction, 'chat_command');
   }
-});
+}, 'interaction_handler'));
 
 // Redis bridge: forward Discord RAW to audio and send payloads from audio to Discord shards
 const redisUrl = env.REDIS_URL;
@@ -557,7 +622,11 @@ await redisSub.subscribe('discord-bot:ui:now', async (message) => {
             };
             const controls = buildControls(state);
             const sent = await channel.send({ embeds: [embed], components: controls });
-            nowLive.set(data.guildId, { channelId: channel.id, messageId: sent.id, lastEdit: Date.now(), state: { ...state, trackUri: data.uri } });
+            const stateWithUri: UiState & { trackUri?: string } = { ...state };
+            if (data.uri !== undefined) {
+              stateWithUri.trackUri = data.uri;
+            }
+            nowLive.set(data.guildId, { channelId: channel.id, messageId: sent.id, lastEdit: Date.now(), state: stateWithUri });
             live = nowLive.get(data.guildId);
           }
         }
@@ -585,10 +654,18 @@ await redisSub.subscribe('discord-bot:ui:now', async (message) => {
     // Always edit the same message; do not recreate per track
     if (!msg) {
       const newMsg = await ch.send({ embeds: [embed], components: controls });
-      nowLive.set(data.guildId, { channelId: live.channelId, messageId: newMsg.id, lastEdit: now, state: { ...state, trackUri: data.uri } });
+      const stateWithUri1: UiState & { trackUri?: string } = { ...state };
+      if (data.uri !== undefined) {
+        stateWithUri1.trackUri = data.uri;
+      }
+      nowLive.set(data.guildId, { channelId: live.channelId, messageId: newMsg.id, lastEdit: now, state: stateWithUri1 });
     } else {
       await msg.edit({ embeds: [embed], components: controls });
-      nowLive.set(data.guildId, { ...live, lastEdit: now, state: { ...state, trackUri: data.uri } });
+      const stateWithUri2: UiState & { trackUri?: string } = { ...state };
+      if (data.uri !== undefined) {
+        stateWithUri2.trackUri = data.uri;
+      }
+      nowLive.set(data.guildId, { ...live, lastEdit: now, state: stateWithUri2 });
     }
   } catch (e) {
     logger.error({ e }, 'ui:now update failed');
@@ -622,12 +699,19 @@ await redisSub.subscribe('discord-bot:to-discord', async (message) => {
 });
 
 // Button Interactions
-client.on('interactionCreate', async (interaction) => {
+client.on('interactionCreate', withErrorHandling(async (interaction) => {
   if (!interaction.isButton()) return;
   const guildId = interaction.guildId;
   const id = interaction.customId;
   try {
     if (!guildId) { await interaction.reply({ content: 'Guild-only control.', ephemeral: true }); return; }
+    
+    // Validate guild ID for security
+    const guildValidation = validateSnowflake(guildId, 'Guild ID');
+    if (!guildValidation.success) {
+      await interaction.reply({ content: 'Invalid guild context.', ephemeral: true });
+      return;
+    }
     if (!hasDjOrAdmin(interaction)) return await interaction.reply({ content: `Requires ${env.DJ_ROLE_NAME} role.`, ephemeral: true });
     switch (id) {
       case 'music:toggle':
@@ -799,11 +883,19 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
     // Most handlers use deferUpdate() and do not send an extra message.
-  } catch (e) {
-    logger.error({ e }, 'button error');
-    if (!interaction.replied) await interaction.reply({ content: 'Error', ephemeral: true });
+  } catch (error) {
+    await handleInteractionError(error as Error, interaction, 'button_interaction');
   }
-});
+}, 'button_handler'));
+
+// Health Check Setup
+const healthChecker = new HealthChecker('gateway', '1.0.0');
+
+// Register health checks
+healthChecker.register('discord', () => CommonHealthChecks.discordBot(client));
+healthChecker.register('redis', () => CommonHealthChecks.redis(redisPub));
+healthChecker.register('database', () => CommonHealthChecks.database(prisma));
+healthChecker.register('memory', () => CommonHealthChecks.memory(1024));
 
 // Metrics and Health server
 const registry = new Registry();
@@ -820,9 +912,32 @@ client.on('interactionCreate', (i) => {
 
 const healthServer = http.createServer(async (req, res) => {
   if (!req.url) return;
+  
+  // Enhanced health endpoint
   if (req.url.startsWith('/health')) {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, ready: client.isReady }));
+    try {
+      const health = await healthChecker.check();
+      const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+      
+      res.writeHead(statusCode, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(health, null, 2));
+    } catch (error) {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        service: 'gateway',
+        status: 'unhealthy',
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      }));
+    }
+    return;
+  }
+  
+  // Simple readiness probe
+  if (req.url.startsWith('/ready')) {
+    const ready = client.isReady();
+    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ready, timestamp: new Date().toISOString() }));
     return;
   }
   if (req.url.startsWith('/metrics')) {

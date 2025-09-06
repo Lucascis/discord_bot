@@ -8,6 +8,7 @@
     "dev": "pnpm --filter gateway dev",
     "dev:all": "pnpm -r --parallel dev",
     "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "start": "pnpm -r start",
     "postinstall": "pnpm --filter @discord-bot/database prisma:generate",

@@ -1,0 +1,333 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  MemoryManager,
+  PerformanceTracker,
+  SearchThrottler,
+  batchQueueSaver
+} from '../src/performance.js';
+
+// Mock dependencies
+vi.mock('@discord-bot/logger', () => ({
+  logger: {
+    warn: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn()
+  }
+}));
+
+vi.mock('@discord-bot/database', () => ({
+  prisma: {
+    queue: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      upsert: vi.fn()
+    },
+    queueItem: {
+      deleteMany: vi.fn(),
+      createMany: vi.fn()
+    }
+  }
+}));
+
+describe('Performance Module', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('MemoryManager', () => {
+    it('should be a singleton', () => {
+      const instance1 = MemoryManager.getInstance();
+      const instance2 = MemoryManager.getInstance();
+      expect(instance1).toBe(instance2);
+    });
+
+    it('should start and stop monitoring', () => {
+      const manager = MemoryManager.getInstance();
+      
+      manager.startMonitoring(1000);
+      // Should not start monitoring twice
+      manager.startMonitoring(1000);
+      
+      manager.stopMonitoring();
+      manager.stopMonitoring(); // Should handle multiple stops gracefully
+    });
+
+    it('should provide memory statistics', () => {
+      const manager = MemoryManager.getInstance();
+      const stats = manager.getMemoryStats();
+      
+      expect(stats).toHaveProperty('heapUsed');
+      expect(stats).toHaveProperty('heapTotal');
+      expect(stats).toHaveProperty('external');
+      expect(stats).toHaveProperty('rss');
+      
+      expect(typeof stats.heapUsed).toBe('number');
+      expect(typeof stats.heapTotal).toBe('number');
+      expect(typeof stats.external).toBe('number');
+      expect(typeof stats.rss).toBe('number');
+    });
+
+    it('should detect high memory usage', () => {
+      const manager = MemoryManager.getInstance();
+      
+      // Mock high memory usage
+      const originalMemoryUsage = process.memoryUsage;
+      process.memoryUsage = vi.fn().mockReturnValue({
+        heapUsed: 2 * 1024 * 1024 * 1024, // 2GB
+        heapTotal: 2.5 * 1024 * 1024 * 1024,
+        external: 100 * 1024 * 1024,
+        rss: 3 * 1024 * 1024 * 1024
+      });
+      
+      manager.startMonitoring(100);
+      
+      // Advance timer to trigger memory check
+      vi.advanceTimersByTime(150);
+      
+      manager.stopMonitoring();
+      
+      // Restore original function
+      process.memoryUsage = originalMemoryUsage;
+    });
+  });
+
+  describe('PerformanceTracker', () => {
+    beforeEach(() => {
+      PerformanceTracker.reset();
+    });
+
+    it('should measure async operations', async () => {
+      const mockFn = vi.fn().mockResolvedValue('success');
+      
+      const result = await PerformanceTracker.measure('test_operation', mockFn);
+      
+      expect(result).toBe('success');
+      expect(mockFn).toHaveBeenCalledOnce();
+      
+      const metrics = PerformanceTracker.getMetrics();
+      expect(metrics).toHaveProperty('test_operation');
+      expect(metrics.test_operation.count).toBe(1);
+      expect(metrics.test_operation.avgTime).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should measure sync operations', () => {
+      const mockFn = vi.fn().mockReturnValue('sync_result');
+      
+      const result = PerformanceTracker.measureSync('sync_operation', mockFn);
+      
+      expect(result).toBe('sync_result');
+      expect(mockFn).toHaveBeenCalledOnce();
+      
+      const metrics = PerformanceTracker.getMetrics();
+      expect(metrics.sync_operation.count).toBe(1);
+    });
+
+    it('should handle errors and still record metrics', async () => {
+      const mockFn = vi.fn().mockRejectedValue(new Error('operation failed'));
+      
+      await expect(
+        PerformanceTracker.measure('failing_operation', mockFn)
+      ).rejects.toThrow('operation failed');
+      
+      const metrics = PerformanceTracker.getMetrics();
+      expect(metrics.failing_operation.count).toBe(1);
+    });
+
+    it('should aggregate multiple measurements', async () => {
+      const mockFn = vi.fn()
+        .mockResolvedValueOnce('result1')
+        .mockResolvedValueOnce('result2')
+        .mockResolvedValueOnce('result3');
+      
+      await PerformanceTracker.measure('multi_operation', () => mockFn());
+      await PerformanceTracker.measure('multi_operation', () => mockFn());
+      await PerformanceTracker.measure('multi_operation', () => mockFn());
+      
+      const metrics = PerformanceTracker.getMetrics();
+      const multiOp = metrics.multi_operation;
+      
+      expect(multiOp.count).toBe(3);
+      expect(multiOp.avgTime).toBeGreaterThanOrEqual(0);
+      expect(multiOp.minTime).toBeLessThanOrEqual(multiOp.maxTime);
+    });
+
+    it('should reset metrics', () => {
+      PerformanceTracker.measureSync('test_op', () => 'result');
+      
+      let metrics = PerformanceTracker.getMetrics();
+      expect(Object.keys(metrics)).toHaveLength(1);
+      
+      PerformanceTracker.reset();
+      
+      metrics = PerformanceTracker.getMetrics();
+      expect(Object.keys(metrics)).toHaveLength(0);
+    });
+  });
+
+  describe('SearchThrottler', () => {
+    beforeEach(() => {
+      SearchThrottler.reset();
+    });
+
+    afterEach(() => {
+      SearchThrottler.reset();
+    });
+
+    it('should throttle concurrent operations', async () => {
+      const mockFn = vi.fn().mockImplementation(() => Promise.resolve('result'));
+      const promises: Promise<any>[] = [];
+      
+      // Start 10 concurrent operations (more than max of 5)
+      for (let i = 0; i < 10; i++) {
+        promises.push(SearchThrottler.throttle(() => mockFn()));
+      }
+      
+      // Wait for all operations to complete
+      await Promise.all(promises);
+      
+      const finalStats = SearchThrottler.getStats();
+      expect(finalStats.concurrent).toBe(0);
+      expect(finalStats.waiting).toBe(0);
+      expect(mockFn).toHaveBeenCalledTimes(10);
+    });
+
+    it('should handle operation failures gracefully', async () => {
+      const mockFn = vi.fn().mockRejectedValue(new Error('operation failed'));
+      
+      await expect(
+        SearchThrottler.throttle(mockFn)
+      ).rejects.toThrow('operation failed');
+      
+      // Throttler should still be available for new operations
+      const stats = SearchThrottler.getStats();
+      expect(stats.concurrent).toBe(0);
+    });
+
+    it('should provide accurate statistics', async () => {
+      const stats1 = SearchThrottler.getStats();
+      expect(stats1.maxConcurrent).toBe(5);
+      expect(stats1.concurrent).toBe(0);
+      expect(stats1.waiting).toBe(0);
+    });
+  });
+
+  describe('BatchQueueSaver', () => {
+    const mockPlayer = {
+      guildId: 'test-guild',
+      queue: {
+        current: {
+          info: {
+            title: 'Current Song',
+            uri: 'https://example.com/current',
+            duration: 180000
+          },
+          requester: { id: 'user123' }
+        },
+        tracks: [
+          {
+            info: {
+              title: 'Next Song',
+              uri: 'https://example.com/next',
+              duration: 200000
+            },
+            requester: { id: 'user456' }
+          }
+        ]
+      }
+    };
+
+    it('should batch multiple queue updates', async () => {
+      const { prisma } = await import('@discord-bot/database');
+      
+      // Mock database responses
+      (prisma.queue.findFirst as any).mockResolvedValue({ id: 'queue-123' });
+      (prisma.queue.update as any).mockResolvedValue({ id: 'queue-123' });
+      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as any).mockResolvedValue({ count: 2 });
+      
+      // Schedule multiple updates rapidly
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any, 'voice1', 'text1');
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any, 'voice1', 'text1');
+      batchQueueSaver.scheduleUpdate('guild2', mockPlayer as any, 'voice2', 'text2');
+      
+      // Advance time to trigger batch processing
+      vi.advanceTimersByTime(1100);
+      
+      // Wait for async operations to complete
+      await vi.runAllTimersAsync();
+      
+      // Should have processed the batched updates
+      expect(prisma.queue.findFirst).toHaveBeenCalled();
+      expect(prisma.queueItem.createMany).toHaveBeenCalled();
+    });
+
+    it('should handle database errors gracefully', async () => {
+      const { prisma } = await import('@discord-bot/database');
+      
+      // Mock database error
+      (prisma.queue.findFirst as any).mockRejectedValue(new Error('Database error'));
+      
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any);
+      
+      vi.advanceTimersByTime(1100);
+      await vi.runAllTimersAsync();
+      
+      // Should not throw, error should be logged
+      expect(prisma.queue.findFirst).toHaveBeenCalled();
+    });
+
+    it('should flush pending updates immediately', async () => {
+      const { prisma } = await import('@discord-bot/database');
+      
+      (prisma.queue.findFirst as any).mockResolvedValue(null);
+      (prisma.queue.create as any).mockResolvedValue({ id: 'new-queue-123' });
+      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as any).mockResolvedValue({ count: 1 });
+      
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any);
+      
+      // Flush immediately without waiting for batch timeout
+      await batchQueueSaver.flush();
+      
+      expect(prisma.queue.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            guildId: 'guild1'
+          })
+        })
+      );
+    });
+
+    it('should handle empty queues correctly', async () => {
+      const { prisma } = await import('@discord-bot/database');
+      
+      const emptyPlayer = {
+        guildId: 'empty-guild',
+        queue: { current: null, tracks: [] }
+      };
+      
+      (prisma.queue.findFirst as any).mockResolvedValue({ id: 'queue-456' });
+      (prisma.queue.update as any).mockResolvedValue({ id: 'queue-456' });
+      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 5 });
+      
+      batchQueueSaver.scheduleUpdate('empty-guild', emptyPlayer as any);
+      
+      vi.advanceTimersByTime(1100);
+      await vi.runAllTimersAsync();
+      
+      expect(prisma.queueItem.deleteMany).toHaveBeenCalledWith({
+        where: { queueId: 'queue-456' }
+      });
+      
+      // Should not try to create items for empty queue
+      expect(prisma.queueItem.createMany).not.toHaveBeenCalled();
+    });
+  });
+});
