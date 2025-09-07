@@ -118,8 +118,11 @@ class BatchQueueSaver {
         });
       }
 
+      // Ensure queue has id property after creation/update
+      const queueWithId = queue as { id: string };
+
       // Clear and rebuild queue items
-      await prisma.queueItem.deleteMany({ where: { queueId: queue.id } });
+      await prisma.queueItem.deleteMany({ where: { queueId: queueWithId.id } });
       
       const items: Array<{
         title: string;
@@ -135,9 +138,9 @@ class BatchQueueSaver {
         items.push({
           title: current.info.title ?? 'Unknown',
           url: current.info.uri,
-          requestedBy: current.requester?.id ?? 'unknown',
+          requestedBy: (current.requester as { id?: string })?.id ?? 'unknown',
           duration: Math.floor((current.info.duration ?? 0) / 1000),
-          queueId: queue.id
+          queueId: queueWithId.id
         });
       }
       
@@ -147,9 +150,9 @@ class BatchQueueSaver {
         items.push({
           title: track.info.title ?? 'Unknown',
           url: track.info.uri,
-          requestedBy: track.requester?.id ?? 'unknown',
+          requestedBy: (track.requester as { id?: string })?.id ?? 'unknown',
           duration: Math.floor((track.info.duration ?? 0) / 1000),
-          queueId: queue.id
+          queueId: queueWithId.id
         });
       }
       

@@ -141,4 +141,4 @@ export interface QueueSnapshot {
 // Global caches for audio system
 export const searchCache = new MemoryCache<SearchResult>(2000, 600000); // 10 minutes for search results
 export const automixCache = new MemoryCache<boolean>(500, 300000); // 5 minutes for automix flags
-export const queueCache = new MemoryCache<QueueSnapshot | null>(200, 60000); // 1 minute for queue snapshots
+export const queueCache = new MemoryCache<any>(200, 60000); // 1 minute for queue snapshots

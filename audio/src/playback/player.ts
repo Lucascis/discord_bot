@@ -7,7 +7,7 @@ export function createAndConnectPlayer(
   const options = {
     guildId: opts.guildId,
     voiceChannelId: opts.voiceChannelId,
-    textChannelId: opts.textChannelId,
+    ...(opts.textChannelId ? { textChannelId: opts.textChannelId } : {}),
     selfDeaf: true,
     volume: opts.volume ?? 100,
   };

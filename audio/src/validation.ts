@@ -112,7 +112,7 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
 
   const guildValidation = validateSnowflake(msg.guildId, 'Guild ID');
   if (!guildValidation.success) {
-    return { success: false, error: guildValidation.error };
+    return { success: false, error: guildValidation.error || 'Invalid guild ID' };
   }
 
   // Validate specific command types
@@ -135,20 +135,20 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
 
     const queryValidation = validateSearchQuery(msg.query);
     if (!queryValidation.success) {
-      return { success: false, error: queryValidation.error };
+      return { success: false, error: queryValidation.error || 'Invalid query' };
     }
 
     msg.query = queryValidation.data;
 
     // Validate channel IDs
     const voiceValidation = validateSnowflake(msg.voiceChannelId, 'Voice Channel ID');
-    if (!voiceValidation.success) return { success: false, error: voiceValidation.error };
+    if (!voiceValidation.success) return { success: false, error: voiceValidation.error || 'Invalid voice channel ID' };
 
     const textValidation = validateSnowflake(msg.textChannelId, 'Text Channel ID');
-    if (!textValidation.success) return { success: false, error: textValidation.error };
+    if (!textValidation.success) return { success: false, error: textValidation.error || 'Invalid text channel ID' };
 
     const userValidation = validateSnowflake(msg.userId, 'User ID');
-    if (!userValidation.success) return { success: false, error: userValidation.error };
+    if (!userValidation.success) return { success: false, error: userValidation.error || 'Invalid user ID' };
   }
 
   if (msg.type === 'volume') {

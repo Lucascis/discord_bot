@@ -11,7 +11,7 @@ export async function smartSearch(
 ): Promise<SearchResultLike> {
   const isUrl = /^https?:\/\//i.test(query);
   const cacheKey = `search:${query}:${userId}`;
-  let res = isUrl ? undefined : searchCache.get(cacheKey);
+  let res: any = isUrl ? undefined : searchCache.get(cacheKey);
   if (!res) {
     res = await SearchThrottler.throttle(() =>
       PerformanceTracker.measure('search', () =>
@@ -21,10 +21,10 @@ export async function smartSearch(
         )
       )
     );
-    if ((res?.tracks?.length ?? 0) > 0 && !isUrl) {
+    if ((res?.tracks?.length ?? 0) > 0 && !isUrl && res) {
       searchCache.set(cacheKey, res, 300000);
     }
   }
-  return res as SearchResultLike;
+  return res ?? { tracks: [] };
 }
 

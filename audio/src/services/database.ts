@@ -84,7 +84,7 @@ export async function resumeQueues(manager: LavalinkManager, maxResume: number =
   }
 }
 
-interface QueueWithItems {
+export interface QueueWithItems {
   id: string;
   guildId: string;
   voiceChannelId: string | null;
@@ -116,14 +116,14 @@ export async function getQueueCached(guildId: string): Promise<QueueWithItems | 
             take: 50
           }
         }
-      });
+      }) as QueueWithItems | null;
       queueCache.set(cacheKey, queueData || null, 30000);
     } catch (error) {
       logger.error({ error, guildId }, 'Failed to fetch queue from database');
       return null;
     }
   }
-  return queueData;
+  return queueData as QueueWithItems | null;
 }
 
 export function invalidateQueueCache(guildId: string): void {

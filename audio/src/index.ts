@@ -119,7 +119,7 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
 await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (message) => {
   let data: CommandMessage | undefined;
   try {
-    const rawData = JSON.parse(message);
+    const rawData = JSON.parse(String(message));
     
     // Validate command message structure and content for security
     // This prevents malformed commands and injection attacks
