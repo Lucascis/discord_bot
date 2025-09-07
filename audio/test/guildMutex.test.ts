@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { guildMutex } from '../src/guildMutex.js';
 
 describe('GuildMutex', () => {
@@ -134,7 +134,7 @@ describe('GuildMutex', () => {
 
   it('should handle rapid sequential calls', async () => {
     const results: number[] = [];
-    const tasks: Promise<any>[] = [];
+    const tasks: Promise<number>[] = [];
 
     // Create 100 rapid sequential tasks
     for (let i = 0; i < 100; i++) {
@@ -157,7 +157,7 @@ describe('GuildMutex', () => {
   it('should not interfere between different guilds under heavy load', async () => {
     const guild1Results: number[] = [];
     const guild2Results: number[] = [];
-    const tasks: Promise<any>[] = [];
+    const tasks: Promise<number>[] = [];
 
     // Create interleaved tasks for two guilds
     for (let i = 0; i < 50; i++) {
@@ -189,7 +189,7 @@ describe('GuildMutex', () => {
 
   it('should properly clean up completed chains', async () => {
     // This test verifies memory management by ensuring completed chains don't accumulate
-    const tasks: Promise<any>[] = [];
+    const tasks: Promise<number>[] = [];
 
     // Run many tasks across different guilds
     for (let guildNum = 0; guildNum < 10; guildNum++) {

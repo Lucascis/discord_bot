@@ -1,10 +1,10 @@
 import { logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
-import type { Player } from 'lavalink-client';
+import type { Player, Track } from 'lavalink-client';
 import { queueCache } from './cache.js';
 
 // Connection pool for Redis operations
-let redisPoolSize = 0;
+const redisPoolSize = 0;
 const maxRedisConnections = 10;
 
 export function getRedisConnectionMetrics() {
@@ -130,7 +130,7 @@ class BatchQueueSaver {
       }> = [];
       
       // Add current track
-      const current = player.queue.current as any;
+      const current = player.queue.current as Track | null;
       if (current?.info?.uri) {
         items.push({
           title: current.info.title ?? 'Unknown',
@@ -142,7 +142,7 @@ class BatchQueueSaver {
       }
       
       // Add queue tracks
-      for (const track of player.queue.tracks as any[]) {
+      for (const track of player.queue.tracks as Track[]) {
         if (!track.info?.uri) continue;
         items.push({
           title: track.info.title ?? 'Unknown',
@@ -297,7 +297,12 @@ export class PerformanceTracker {
     minTime: number;
     maxTime: number;
   }> {
-    const result: Record<string, any> = {};
+    const result: Record<string, {
+      avgTime: number;
+      count: number;
+      minTime: number;
+      maxTime: number;
+    }> = {};
     
     for (const [operation, data] of this.metrics.entries()) {
       result[operation] = {

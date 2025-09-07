@@ -239,7 +239,7 @@ describe('errors', () => {
 
       const error = new ValidationError('Invalid command');
       
-      await handleInteractionError(error, mockInteraction as any, 'test_context');
+      await handleInteractionError(error, mockInteraction as unknown as import('discord.js').Interaction, 'test_context');
       
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -266,7 +266,7 @@ describe('errors', () => {
 
       const error = new Error('Generic error');
       
-      await handleInteractionError(error, mockInteraction as any);
+      await handleInteractionError(error, mockInteraction as unknown as import('discord.js').Interaction);
       
       expect(mockInteraction.followUp).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -294,7 +294,7 @@ describe('errors', () => {
 
       const error = new RateLimitError();
       
-      await handleInteractionError(error, mockInteraction as any);
+      await handleInteractionError(error, mockInteraction as unknown as import('discord.js').Interaction);
       
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({

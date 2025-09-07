@@ -37,7 +37,7 @@ export class LavalinkError extends AudioError {
 /**
  * Higher-order function to wrap async functions with error handling
  */
-export function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
+export function withErrorHandling<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   context?: string,
 ): T {
@@ -139,7 +139,7 @@ export async function safeRedisOperation<T>(
 /**
  * Safe JSON parsing with error handling
  */
-export function safeParse<T = any>(json: string, defaultValue: T, context?: string): T {
+export function safeParse<T = unknown>(json: string, defaultValue: T, context?: string): T {
   try {
     return JSON.parse(json);
   } catch (error) {

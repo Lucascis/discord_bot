@@ -39,10 +39,10 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
     }
   }
 
-  // Remove control characters and sanitize
+  // Remove control characters and sanitize  
   const sanitized = trimmed
     .replace(/[<>'"]/g, '') // Remove HTML/script injection chars
-    .replace(/[\x00-\x1f\x7f-\x9f]/g, '') // Remove control characters
+    .replace(/\p{C}/gu, '') // Remove control characters using Unicode property
     .slice(0, 1000); // Ensure length limit
 
   return { success: true, data: sanitized };
@@ -63,15 +63,36 @@ export function validateSnowflake(id: string | null | undefined, name = 'ID'): V
   return { success: true, data: id };
 }
 
+// Interface for command message structure
+export interface CommandMessage {
+  type: string;
+  guildId: string;
+  query?: string;
+  voiceChannelId?: string;
+  textChannelId?: string;
+  userId?: string;
+  percent?: number;
+  mode?: string;
+  delta?: number;
+  positionMs?: number;
+  deltaMs?: number;
+  index?: number;
+  from?: number;
+  to?: number;
+  requestId?: string;
+}
+
 /**
  * Validates command message structure
  */
-export function validateCommandMessage(data: any): ValidationResult<any> {
+export function validateCommandMessage(data: unknown): ValidationResult<CommandMessage> {
   if (!data || typeof data !== 'object') {
     return { success: false, error: 'Invalid command data' };
   }
 
-  if (!data.type || typeof data.type !== 'string') {
+  const msg = data as Record<string, unknown>;
+
+  if (!msg.type || typeof msg.type !== 'string') {
     return { success: false, error: 'Command type is required' };
   }
 
@@ -81,120 +102,120 @@ export function validateCommandMessage(data: any): ValidationResult<any> {
     'shuffle', 'remove', 'clear', 'move', 'seedRelated'
   ];
 
-  if (!validTypes.includes(data.type)) {
-    return { success: false, error: `Unknown command type: ${data.type}` };
+  if (!validTypes.includes(msg.type)) {
+    return { success: false, error: `Unknown command type: ${msg.type}` };
   }
 
-  if (!data.guildId || typeof data.guildId !== 'string') {
+  if (!msg.guildId || typeof msg.guildId !== 'string') {
     return { success: false, error: 'Guild ID is required' };
   }
 
-  const guildValidation = validateSnowflake(data.guildId, 'Guild ID');
+  const guildValidation = validateSnowflake(msg.guildId, 'Guild ID');
   if (!guildValidation.success) {
-    return guildValidation;
+    return { success: false, error: guildValidation.error };
   }
 
   // Validate specific command types
-  if (data.type === 'play') {
-    if (!data.query || typeof data.query !== 'string') {
+  if (msg.type === 'play') {
+    if (!msg.query || typeof msg.query !== 'string') {
       return { success: false, error: 'Query is required for play command' };
     }
 
-    if (!data.voiceChannelId || typeof data.voiceChannelId !== 'string') {
+    if (!msg.voiceChannelId || typeof msg.voiceChannelId !== 'string') {
       return { success: false, error: 'Voice channel ID is required for play command' };
     }
 
-    if (!data.textChannelId || typeof data.textChannelId !== 'string') {
+    if (!msg.textChannelId || typeof msg.textChannelId !== 'string') {
       return { success: false, error: 'Text channel ID is required for play command' };
     }
 
-    if (!data.userId || typeof data.userId !== 'string') {
+    if (!msg.userId || typeof msg.userId !== 'string') {
       return { success: false, error: 'User ID is required for play command' };
     }
 
-    const queryValidation = validateSearchQuery(data.query);
+    const queryValidation = validateSearchQuery(msg.query);
     if (!queryValidation.success) {
-      return queryValidation;
+      return { success: false, error: queryValidation.error };
     }
 
-    data.query = queryValidation.data;
+    msg.query = queryValidation.data;
 
     // Validate channel IDs
-    const voiceValidation = validateSnowflake(data.voiceChannelId, 'Voice Channel ID');
-    if (!voiceValidation.success) return voiceValidation;
+    const voiceValidation = validateSnowflake(msg.voiceChannelId, 'Voice Channel ID');
+    if (!voiceValidation.success) return { success: false, error: voiceValidation.error };
 
-    const textValidation = validateSnowflake(data.textChannelId, 'Text Channel ID');
-    if (!textValidation.success) return textValidation;
+    const textValidation = validateSnowflake(msg.textChannelId, 'Text Channel ID');
+    if (!textValidation.success) return { success: false, error: textValidation.error };
 
-    const userValidation = validateSnowflake(data.userId, 'User ID');
-    if (!userValidation.success) return userValidation;
+    const userValidation = validateSnowflake(msg.userId, 'User ID');
+    if (!userValidation.success) return { success: false, error: userValidation.error };
   }
 
-  if (data.type === 'volume') {
-    if (typeof data.percent !== 'number' || !Number.isInteger(data.percent)) {
+  if (msg.type === 'volume') {
+    if (typeof msg.percent !== 'number' || !Number.isInteger(msg.percent)) {
       return { success: false, error: 'Volume percent must be an integer' };
     }
-    if (data.percent < 0 || data.percent > 200) {
+    if (msg.percent < 0 || msg.percent > 200) {
       return { success: false, error: 'Volume percent must be between 0 and 200' };
     }
   }
 
-  if (data.type === 'loopSet') {
-    if (!data.mode || typeof data.mode !== 'string') {
+  if (msg.type === 'loopSet') {
+    if (!msg.mode || typeof msg.mode !== 'string') {
       return { success: false, error: 'Loop mode is required' };
     }
-    if (!['off', 'track', 'queue'].includes(data.mode)) {
+    if (!['off', 'track', 'queue'].includes(msg.mode)) {
       return { success: false, error: 'Invalid loop mode. Must be one of: off, track, queue' };
     }
   }
 
-  if (data.type === 'volumeAdjust') {
-    if (typeof data.delta !== 'number' || !Number.isInteger(data.delta)) {
+  if (msg.type === 'volumeAdjust') {
+    if (typeof msg.delta !== 'number' || !Number.isInteger(msg.delta)) {
       return { success: false, error: 'Volume delta must be an integer' };
     }
   }
 
-  if (data.type === 'seek') {
-    if (typeof data.positionMs !== 'number' || !Number.isInteger(data.positionMs)) {
+  if (msg.type === 'seek') {
+    if (typeof msg.positionMs !== 'number' || !Number.isInteger(msg.positionMs)) {
       return { success: false, error: 'Position in milliseconds must be an integer' };
     }
-    if (data.positionMs < 0) {
+    if (msg.positionMs < 0) {
       return { success: false, error: 'Position must be non-negative' };
     }
   }
 
-  if (data.type === 'seekAdjust') {
-    if (typeof data.deltaMs !== 'number' || !Number.isInteger(data.deltaMs)) {
+  if (msg.type === 'seekAdjust') {
+    if (typeof msg.deltaMs !== 'number' || !Number.isInteger(msg.deltaMs)) {
       return { success: false, error: 'Delta in milliseconds must be an integer' };
     }
   }
 
-  if (data.type === 'remove') {
-    if (typeof data.index !== 'number' || !Number.isInteger(data.index)) {
+  if (msg.type === 'remove') {
+    if (typeof msg.index !== 'number' || !Number.isInteger(msg.index)) {
       return { success: false, error: 'Index must be an integer' };
     }
-    if (data.index < 1) {
+    if (msg.index < 1) {
       return { success: false, error: 'Index must be at least 1' };
     }
   }
 
-  if (data.type === 'move') {
-    if (typeof data.from !== 'number' || !Number.isInteger(data.from)) {
+  if (msg.type === 'move') {
+    if (typeof msg.from !== 'number' || !Number.isInteger(msg.from)) {
       return { success: false, error: 'From index must be an integer' };
     }
-    if (typeof data.to !== 'number' || !Number.isInteger(data.to)) {
+    if (typeof msg.to !== 'number' || !Number.isInteger(msg.to)) {
       return { success: false, error: 'To index must be an integer' };
     }
-    if (data.from < 1 || data.to < 1) {
+    if (msg.from < 1 || msg.to < 1) {
       return { success: false, error: 'Indices must be at least 1' };
     }
   }
 
-  if (['nowplaying', 'queue'].includes(data.type)) {
-    if (!data.requestId || typeof data.requestId !== 'string') {
+  if (['nowplaying', 'queue'].includes(msg.type)) {
+    if (!msg.requestId || typeof msg.requestId !== 'string') {
       return { success: false, error: 'Request ID is required for this command' };
     }
   }
 
-  return { success: true, data };
+  return { success: true, data: msg as unknown as CommandMessage };
 }

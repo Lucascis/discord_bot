@@ -4,7 +4,45 @@ export interface HealthCheckResult {
   status: 'healthy' | 'unhealthy' | 'degraded';
   message?: string;
   responseTime?: number;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
+}
+
+// Database client interface
+interface DatabaseClient {
+  $queryRaw(query: TemplateStringsArray): Promise<unknown>;
+}
+
+// Redis client interface
+interface RedisClient {
+  ping(): Promise<string>;
+}
+
+// Discord client interface
+interface DiscordClientStatus {
+  isReady(): boolean;
+  readyTimestamp: number | null;
+  user?: { tag: string } | null;
+  guilds: { cache: { size: number } };
+  users: { cache: { size: number } };
+  ws: { ping: number };
+}
+
+// Lavalink manager interface
+interface LavalinkManager {
+  nodeManager?: {
+    nodes: Map<string, LavalinkNode>;
+  };
+}
+
+interface LavalinkNode {
+  id: string;
+  connected: boolean;
+  stats?: {
+    cpu?: {
+      systemLoad: number;
+      lavalinkLoad: number;
+    };
+  };
 }
 
 export interface ServiceHealth {
@@ -135,7 +173,7 @@ export const CommonHealthChecks = {
   /**
    * Database connectivity check
    */
-  async database(prisma: any): Promise<HealthCheckResult> {
+  async database(prisma: DatabaseClient): Promise<HealthCheckResult> {
     const start = Date.now();
     try {
       await prisma.$queryRaw`SELECT 1`;
@@ -156,7 +194,7 @@ export const CommonHealthChecks = {
   /**
    * Redis connectivity check
    */
-  async redis(client: any): Promise<HealthCheckResult> {
+  async redis(client: RedisClient): Promise<HealthCheckResult> {
     const start = Date.now();
     try {
       const result = await client.ping();
@@ -184,7 +222,7 @@ export const CommonHealthChecks = {
   /**
    * Discord bot readiness check
    */
-  async discordBot(client: any): Promise<HealthCheckResult> {
+  async discordBot(client: DiscordClientStatus): Promise<HealthCheckResult> {
     const start = Date.now();
     try {
       if (!client.isReady()) {
@@ -226,11 +264,11 @@ export const CommonHealthChecks = {
   /**
    * Lavalink nodes health check
    */
-  async lavalink(manager: any): Promise<HealthCheckResult> {
+  async lavalink(manager: LavalinkManager): Promise<HealthCheckResult> {
     const start = Date.now();
     try {
       const nodes = manager.nodeManager?.nodes || new Map();
-      const nodeStatuses = Array.from(nodes.values()).map((node: any) => ({
+      const nodeStatuses = Array.from(nodes.values()).map((node: LavalinkNode) => ({
         id: node.id,
         connected: node.connected,
         stats: node.stats,

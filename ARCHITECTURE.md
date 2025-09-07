@@ -8,7 +8,7 @@ This Discord music bot is built as a sophisticated microservices architecture wi
 
 ### Microservices Structure
 
-The bot consists of 4 main services communicating via Redis pub/sub and sharing a PostgreSQL database:
+The bot consists of 4 main services communicating via Redis pub/sub and sharing a PostgreSQL database. Each service is built using modern TypeScript with strict typing, comprehensive error handling, and production-ready patterns:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -48,21 +48,111 @@ The bot consists of 4 main services communicating via Redis pub/sub and sharing 
 
 ## Service Details
 
-### Gateway Service (`gateway/`)
+### Gateway Service (Port 3001)
 
-**Primary Responsibility**: Discord interaction handling and command processing
+**Recent Modernization (FASE 1)**:
+- ✅ **Modular Architecture**: Extracted into `handlers/`, `services/`, and `commands/` directories
+- ✅ **Unified Command System**: Implemented `@discord-bot/commands` package with decorators and middleware
+- ✅ **Type Safety**: Full TypeScript coverage with zero ESLint issues
+- ✅ **Handler Separation**: Interaction, voice, and ready handlers properly decoupled
+
+**Core Responsibilities**:
+- Discord.js v14 client management and event handling
+- Slash command processing with unified command framework
+- Button interaction handling with proper validation
+- Voice state monitoring and cleanup
+- Rate limiting and permission validation
+
+**Architecture Pattern**:
+```typescript
+// Command System with Decorators
+@RequiresDJ
+@RateLimit(5, 60)
+@Category('music')
+class PlayCommand extends BaseCommand {
+  async execute(context: CommandContext): Promise<CommandExecutionResult> {
+    // Command logic with full type safety
+  }
+}
+
+// Service Layer
+export interface DiscordServiceContext {
+  client: Client;
+  nowLive: Map<string, any>;
+}
+```
+
+**Key Files Structure**:
+```
+gateway/src/
+├── handlers/           # Event handlers
+│   ├── interaction.ts  # Button interactions
+│   ├── voice.ts       # Voice state updates
+│   └── ready.ts       # Ready and guild events
+├── services/          # Service layer
+│   ├── discord.ts     # Discord client management
+│   ├── redis.ts       # Redis pub/sub
+│   └── validation.ts  # Input validation & rate limiting
+└── commands/          # Legacy command handlers (migrating to packages/commands)
+```
+
+## Unified Command System (@discord-bot/commands)
+
+**New Package Architecture (FASE 1.4)**:
+The bot now uses a unified command system with modern TypeScript patterns, decorators, and middleware:
+
+```
+packages/commands/src/
+├── base/
+│   ├── command.ts     # Abstract BaseCommand class
+│   └── decorators.ts  # @RequiresDJ, @RateLimit, @Category decorators
+└── middleware/
+    ├── validation.ts  # Permission & rate limit middleware
+    └── logging.ts     # Command execution logging
+```
 
 **Key Features**:
-- Discord.js v14 integration with slash commands
+- **Type Safety**: Full TypeScript interfaces for all command contexts
+- **Decorator Support**: `@RequiresDJ`, `@RateLimit(5, 60)`, `@Category('music')`
+- **Middleware Chain**: Validation, logging, and permission checks
+- **Error Handling**: Comprehensive error handling with user-friendly messages
+- **Rate Limiting**: Per-guild, per-user, per-command rate limits
+
+**Example Usage**:
+```typescript
+@RequiresDJ
+@RateLimit(3, 30)
+@Category('music')
+class VolumeCommand extends BaseCommand {
+  buildSlashCommand() {
+    return new SlashCommandBuilder()
+      .setName('volume')
+      .setDescription('Set playback volume')
+      .addIntegerOption(opt => opt.setName('percent').setRequired(true));
+  }
+  
+  async execute(context: CommandContext): Promise<CommandExecutionResult> {
+    // Validation, permissions, and rate limiting handled by middleware
+    const volume = context.interaction.options.getInteger('percent', true);
+    // Command logic...
+    return { success: true };
+  }
+}
+```
+
+### Audio Service (Port 3002)
+
+**Primary Responsibility**: Music playback, queue management, and audio processing
 - Interactive button-based controls
 - User permission management (DJ roles)
 - Rate limiting and input validation
 - Error handling with user feedback
 
 **Main Components**:
-- `index.ts`: Discord client setup and event handlers
+- `index.ts`: Discord client setup, registro de slash commands y enrutador a clases
 - `flags.ts`: Feature flag management with caching
 - `validation.ts`: Input sanitization and security
+- `@discord-bot/commands`: Paquete con BaseCommand, middleware y comandos (play/queue/settings)
 
 ### Audio Service (`audio/`)
 

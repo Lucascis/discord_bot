@@ -23,8 +23,8 @@ describe('validation', () => {
     });
 
     it('should reject null/undefined queries', () => {
-      expect(validateSearchQuery(null as any).success).toBe(false);
-      expect(validateSearchQuery(undefined as any).success).toBe(false);
+      expect(validateSearchQuery(null as unknown as string).success).toBe(false);
+      expect(validateSearchQuery(undefined as unknown as string).success).toBe(false);
     });
 
     it('should reject overly long queries', () => {
@@ -139,7 +139,7 @@ describe('validation', () => {
       ];
 
       for (const id of invalidIds) {
-        const result = validateSnowflake(id as any);
+        const result = validateSnowflake(id as unknown as string);
         expect(result.success).toBe(false);
       }
     });
@@ -236,8 +236,8 @@ describe('validation', () => {
 
     it('should handle empty/invalid input', () => {
       expect(sanitizeDisplayText('')).toBe('');
-      expect(sanitizeDisplayText(null as any)).toBe('');
-      expect(sanitizeDisplayText(undefined as any)).toBe('');
+      expect(sanitizeDisplayText(null as unknown as string)).toBe('');
+      expect(sanitizeDisplayText(undefined as unknown as string)).toBe('');
     });
 
     it('should preserve normal text', () => {

@@ -44,7 +44,7 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
   // Sanitize the query by removing dangerous characters but preserve URLs and normal search terms
   const sanitized = trimmed
     .replace(/[<>'"]/g, '') // Remove HTML/script injection chars
-    .replace(/[\x00-\x1f\x7f-\x9f]/g, ''); // Remove control characters
+    .replace(/\p{C}/gu, ''); // Remove control characters using Unicode property
 
   return { success: true, data: sanitized };
 }
@@ -74,7 +74,7 @@ export function validateInteger(value: number, min?: number, max?: number, name 
 export function validateLoopMode(mode: string): ValidationResult<'off' | 'track' | 'queue'> {
   const validModes = ['off', 'track', 'queue'] as const;
   
-  if (!validModes.includes(mode as any)) {
+  if (!validModes.includes(mode as 'off' | 'track' | 'queue')) {
     return { success: false, error: `Invalid loop mode. Must be one of: ${validModes.join(', ')}` };
   }
 

@@ -251,7 +251,7 @@ describe('Audio Command Validation', () => {
       ];
 
       for (const input of invalidInputs) {
-        const result = validateCommandMessage(input as any);
+        const result = validateCommandMessage(input as unknown);
         if (result.success) {
           console.log('Unexpected success for input:', input);
         }

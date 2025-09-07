@@ -110,7 +110,35 @@ export class MemoryCache<T> {
   }
 }
 
+// Type definitions for cached data
+export interface SearchResult {
+  tracks: Array<{
+    title: string;
+    uri: string;
+    duration: number;
+    author: string;
+    thumbnail?: string;
+  }>;
+  source: string;
+  query: string;
+  timestamp: number;
+}
+
+export interface QueueSnapshot {
+  tracks: Array<{
+    title: string;
+    uri: string;
+    duration: number;
+    author: string;
+    requester: string;
+  }>;
+  position: number;
+  volume: number;
+  paused: boolean;
+  loopMode: 'off' | 'track' | 'queue';
+}
+
 // Global caches for audio system
-export const searchCache = new MemoryCache<any>(2000, 600000); // 10 minutes for search results
+export const searchCache = new MemoryCache<SearchResult>(2000, 600000); // 10 minutes for search results
 export const automixCache = new MemoryCache<boolean>(500, 300000); // 5 minutes for automix flags
-export const queueCache = new MemoryCache<any>(200, 60000); // 1 minute for queue snapshots
+export const queueCache = new MemoryCache<QueueSnapshot | null>(200, 60000); // 1 minute for queue snapshots

@@ -182,7 +182,7 @@ describe('Performance Module', () => {
 
     it('should throttle concurrent operations', async () => {
       const mockFn = vi.fn().mockImplementation(() => Promise.resolve('result'));
-      const promises: Promise<any>[] = [];
+      const promises: Promise<string>[] = [];
       
       // Start 10 concurrent operations (more than max of 5)
       for (let i = 0; i < 10; i++) {
@@ -247,15 +247,15 @@ describe('Performance Module', () => {
       const { prisma } = await import('@discord-bot/database');
       
       // Mock database responses
-      (prisma.queue.findFirst as any).mockResolvedValue({ id: 'queue-123' });
-      (prisma.queue.update as any).mockResolvedValue({ id: 'queue-123' });
-      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 0 });
-      (prisma.queueItem.createMany as any).mockResolvedValue({ count: 2 });
+      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue({ id: 'queue-123' });
+      (prisma.queue.update as vi.MockedFunction<typeof prisma.queue.update>).mockResolvedValue({ id: 'queue-123' });
+      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as vi.MockedFunction<typeof prisma.queueItem.createMany>).mockResolvedValue({ count: 2 });
       
       // Schedule multiple updates rapidly
-      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any, 'voice1', 'text1');
-      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any, 'voice1', 'text1');
-      batchQueueSaver.scheduleUpdate('guild2', mockPlayer as any, 'voice2', 'text2');
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as unknown as import('lavalink-client').Player, 'voice1', 'text1');
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as unknown as import('lavalink-client').Player, 'voice1', 'text1');
+      batchQueueSaver.scheduleUpdate('guild2', mockPlayer as unknown as import('lavalink-client').Player, 'voice2', 'text2');
       
       // Advance time to trigger batch processing
       vi.advanceTimersByTime(1100);
@@ -272,9 +272,9 @@ describe('Performance Module', () => {
       const { prisma } = await import('@discord-bot/database');
       
       // Mock database error
-      (prisma.queue.findFirst as any).mockRejectedValue(new Error('Database error'));
+      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockRejectedValue(new Error('Database error'));
       
-      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any);
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as unknown as import('lavalink-client').Player);
       
       vi.advanceTimersByTime(1100);
       await vi.runAllTimersAsync();
@@ -286,12 +286,12 @@ describe('Performance Module', () => {
     it('should flush pending updates immediately', async () => {
       const { prisma } = await import('@discord-bot/database');
       
-      (prisma.queue.findFirst as any).mockResolvedValue(null);
-      (prisma.queue.create as any).mockResolvedValue({ id: 'new-queue-123' });
-      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 0 });
-      (prisma.queueItem.createMany as any).mockResolvedValue({ count: 1 });
+      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue(null);
+      (prisma.queue.create as vi.MockedFunction<typeof prisma.queue.create>).mockResolvedValue({ id: 'new-queue-123' });
+      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as vi.MockedFunction<typeof prisma.queueItem.createMany>).mockResolvedValue({ count: 1 });
       
-      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as any);
+      batchQueueSaver.scheduleUpdate('guild1', mockPlayer as unknown as import('lavalink-client').Player);
       
       // Flush immediately without waiting for batch timeout
       await batchQueueSaver.flush();
@@ -313,11 +313,11 @@ describe('Performance Module', () => {
         queue: { current: null, tracks: [] }
       };
       
-      (prisma.queue.findFirst as any).mockResolvedValue({ id: 'queue-456' });
-      (prisma.queue.update as any).mockResolvedValue({ id: 'queue-456' });
-      (prisma.queueItem.deleteMany as any).mockResolvedValue({ count: 5 });
+      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue({ id: 'queue-456' });
+      (prisma.queue.update as vi.MockedFunction<typeof prisma.queue.update>).mockResolvedValue({ id: 'queue-456' });
+      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 5 });
       
-      batchQueueSaver.scheduleUpdate('empty-guild', emptyPlayer as any);
+      batchQueueSaver.scheduleUpdate('empty-guild', emptyPlayer as unknown as import('lavalink-client').Player);
       
       vi.advanceTimersByTime(1100);
       await vi.runAllTimersAsync();

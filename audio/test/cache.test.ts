@@ -206,7 +206,7 @@ describe('MemoryCache', () => {
 
   describe('edge cases', () => {
     it('should handle storing different data types', () => {
-      const cache = new MemoryCache<any>();
+      const cache = new MemoryCache<unknown>();
       
       cache.set('string', 'text');
       cache.set('number', 42);

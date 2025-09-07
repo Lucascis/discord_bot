@@ -79,7 +79,7 @@ export async function handleInteractionError(
   }, 'Interaction error occurred');
 
   let userMessage = 'An error occurred while processing your request.';
-  let ephemeral = true;
+  const ephemeral = true;
 
   if (error instanceof ValidationError) {
     userMessage = `Invalid input: ${error.message}`;
@@ -112,7 +112,7 @@ export async function handleInteractionError(
 /**
  * Higher-order function to wrap async functions with error handling
  */
-export function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
+export function withErrorHandling<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   context?: string,
 ): T {
@@ -168,7 +168,7 @@ export async function withTimeout<T>(
 /**
  * Safe JSON parsing with error handling
  */
-export function safeParse<T = any>(json: string, defaultValue: T): T {
+export function safeParse<T = unknown>(json: string, defaultValue: T): T {
   try {
     return JSON.parse(json);
   } catch (error) {

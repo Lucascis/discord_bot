@@ -326,7 +326,7 @@ describe('CommonHealthChecks', () => {
         isReady: true
       };
 
-      const result = await CommonHealthChecks.redis(mockRedis as any);
+      const result = await CommonHealthChecks.redis(mockRedis as unknown as Parameters<typeof CommonHealthChecks.redis>[0]);
 
       expect(result.status).toBe('healthy');
       expect(result.message).toContain('Redis connection healthy');
@@ -340,7 +340,7 @@ describe('CommonHealthChecks', () => {
         isReady: false
       };
 
-      const result = await CommonHealthChecks.redis(mockRedis as any);
+      const result = await CommonHealthChecks.redis(mockRedis as unknown as Parameters<typeof CommonHealthChecks.redis>[0]);
 
       expect(result.status).toBe('unhealthy');
       expect(result.message).toContain('Redis connection failed');
@@ -353,7 +353,7 @@ describe('CommonHealthChecks', () => {
         isReady: true
       };
 
-      const result = await CommonHealthChecks.redis(mockRedis as any);
+      const result = await CommonHealthChecks.redis(mockRedis as unknown as Parameters<typeof CommonHealthChecks.redis>[0]);
 
       expect(result.status).toBe('unhealthy');
       expect(result.message).toContain('Ping timeout');
@@ -366,7 +366,7 @@ describe('CommonHealthChecks', () => {
         $queryRaw: vi.fn().mockResolvedValue([{ result: 1 }])
       };
 
-      const result = await CommonHealthChecks.database(mockPrisma as any);
+      const result = await CommonHealthChecks.database(mockPrisma as unknown as Parameters<typeof CommonHealthChecks.database>[0]);
 
       expect(result.status).toBe('healthy');
       expect(result.message).toContain('Database connection healthy');
@@ -378,7 +378,7 @@ describe('CommonHealthChecks', () => {
         $queryRaw: vi.fn().mockRejectedValue(new Error('Connection timeout'))
       };
 
-      const result = await CommonHealthChecks.database(mockPrisma as any);
+      const result = await CommonHealthChecks.database(mockPrisma as unknown as Parameters<typeof CommonHealthChecks.database>[0]);
 
       expect(result.status).toBe('unhealthy');
       expect(result.message).toContain('Database connection failed');
@@ -405,7 +405,7 @@ describe('CommonHealthChecks', () => {
         }
       };
 
-      const result = await CommonHealthChecks.lavalink(mockManager as any);
+      const result = await CommonHealthChecks.lavalink(mockManager as unknown as Parameters<typeof CommonHealthChecks.lavalink>[0]);
 
       expect(result.status).toBe('healthy');
       expect(result.message).toContain('Lavalink nodes healthy');
@@ -419,7 +419,7 @@ describe('CommonHealthChecks', () => {
         }
       };
 
-      const result = await CommonHealthChecks.lavalink(mockManager as any);
+      const result = await CommonHealthChecks.lavalink(mockManager as unknown as Parameters<typeof CommonHealthChecks.lavalink>[0]);
 
       expect(result.status).toBe('unhealthy');
       expect(result.message).toContain('No Lavalink nodes connected');
@@ -443,7 +443,7 @@ describe('CommonHealthChecks', () => {
         }
       };
 
-      const result = await CommonHealthChecks.lavalink(mockManager as any);
+      const result = await CommonHealthChecks.lavalink(mockManager as unknown as Parameters<typeof CommonHealthChecks.lavalink>[0]);
 
       expect(result.status).toBe('degraded');
       expect(result.message).toContain('High load detected');

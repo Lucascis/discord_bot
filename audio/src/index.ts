@@ -1,14 +1,10 @@
 import {
-  LavalinkManager,
-  type LavalinkNode,
-  type GuildShardPayload,
   type VoicePacket,
   type VoiceServer,
   type VoiceState,
   type ChannelDeletePacket,
   type Track,
   type UnresolvedTrack,
-  type BotClientOptions,
 } from 'lavalink-client';
 import { env } from '@discord-bot/config';
 import { logger, HealthChecker, CommonHealthChecks } from '@discord-bot/logger';
@@ -27,7 +23,7 @@ import { validateCommandMessage } from './validation.js';
 import { 
   withErrorHandling
 } from './errors.js';
-import { searchCache, automixCache, queueCache } from './cache.js';
+import { automixCache } from './cache.js';
 import { 
   batchQueueSaver, 
   MemoryManager, 
@@ -47,62 +43,22 @@ logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS }, 'Audio startup c
 const memoryManager = MemoryManager.getInstance();
 memoryManager.startMonitoring();
 
-const manager = new LavalinkManager({
-  nodes: [
-    {
-      id: 'main',
-      host: env.LAVALINK_HOST,
-      port: env.LAVALINK_PORT,
-      authorization: env.LAVALINK_PASSWORD,
-    },
-  ],
-  sendToShard: async (guildId, payload: GuildShardPayload) => {
-    try {
-      await redisPub.publish(
-        'discord-bot:to-discord',
-        JSON.stringify({ guildId, payload }),
-      );
-    } catch (e) {
-      logger.error({ e }, 'failed to publish to-discord payload');
-    }
-  },
-  client: {
-    id: env.DISCORD_APPLICATION_ID,
-    username: 'discord-bot',
-  },
-});
+import { createLavalinkManager, initManager } from './services/lavalink.js';
 
-manager.nodeManager.on('connect', (node: LavalinkNode) =>
-  logger.info(`Node ${node.id} connected`),
-);
-manager.nodeManager.on('error', (node: LavalinkNode, error: Error) =>
-  logger.error({ error }, `Node ${node.id} error`),
-);
+const manager = createLavalinkManager(async (guildId, payload) => {
+  try {
+    await redisPub.publish(
+      'discord-bot:to-discord',
+      JSON.stringify({ guildId, payload }),
+    );
+  } catch (e) {
+    logger.error({ e }, 'failed to publish to-discord payload');
+  }
+});
 
 export { manager };
 
-// Helper: wait until Lavalink REST is ready (plugins loaded)
-async function waitForLavalinkRestReady(maxWaitMs = 60000) {
-  const deadline = Date.now() + maxWaitMs;
-  const url = `http://${env.LAVALINK_HOST}:${env.LAVALINK_PORT}/v4/info`;
-  const headers = { Authorization: env.LAVALINK_PASSWORD } as Record<string, string>;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url, { headers });
-      if (res.ok) {
-        // Basic sanity: response is JSON and contains version/plugins keys
-        const j = (await res.json()) as { version?: unknown; plugins?: unknown };
-        if (j && j.version !== undefined && j.plugins !== undefined) return true;
-      }
-    } catch { /* ignore until deadline */ }
-    await delay(1000);
-  }
-  return false;
-}
-
-// Initialize manager, but wait for Lavalink to be ready first to avoid race conditions
-await waitForLavalinkRestReady();
-await manager.init({ id: env.DISCORD_APPLICATION_ID, username: 'discord-bot' } as BotClientOptions);
+await initManager(manager);
 
 // Ensure at least one node connect event (best-effort)
 await new Promise<void>((resolve) => {
@@ -197,37 +153,9 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       });
       await player.connect();
       
-      /**
-       * STAGE 2: Intelligent Search with Performance Optimizations
-       * 
-       * Multi-layered approach to track searching:
-       * 1. Check memory cache first (5-minute TTL)
-       * 2. Use search throttling to prevent API abuse
-       * 3. Track search performance metrics
-       * 4. Cache successful results for future use
-       */
-      const cacheKey = `search:${playData.query}:${playData.userId}`;
-      const isUrl = /^https?:\/\//i.test(playData.query);
-      // Avoid caching direct URLs to prevent any mismatch from stale entries
-      let res = isUrl ? undefined : searchCache.get(cacheKey);
-      
-      if (!res) {
-        // Throttle concurrent searches to prevent API rate limits and server overload
-        res = await SearchThrottler.throttle(() =>
-          PerformanceTracker.measure('search', () =>
-            player.search(
-              { query: playData.query },
-              { id: playData.userId } as { id: string },
-            )
-          )
-        );
-        
-        // Cache successful search results to reduce future API calls
-        // Only cache results with tracks to avoid caching errors
-        if (res.tracks.length > 0) {
-          searchCache.set(cacheKey, res, 300000); // 5 minutes cache
-        }
-      }
+      // STAGE 2: Intelligent Search with Performance Optimizations (extracted)
+      const { smartSearch } = await import('./playback/search.js');
+      const res = await smartSearch(player, playData.query, playData.userId);
       logger.info({ tracks: res.tracks.length }, 'audio: search results');
       
       /**
@@ -241,6 +169,7 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       if (res.tracks.length > 0) {
         let chosen = res.tracks[0] as Track | UnresolvedTrack;
         // If a YouTube URL was provided, try to pick the exact video-id match
+        const isUrl = /^https?:\/\//i.test(playData.query);
         if (isUrl) {
           try {
             const u = new URL(playData.query);
@@ -733,149 +662,15 @@ process.on('SIGTERM', async () => {
 });
 
 // Persistence helpers
-async function saveQueue(guildId: string, player: import('lavalink-client').Player, voiceChannelId?: string, textChannelId?: string) {
-  try {
-    let queue = await prisma.queue.findFirst({ where: { guildId }, select: { id: true } });
-    if (!queue) {
-      queue = await prisma.queue.create({ data: { guildId, voiceChannelId: voiceChannelId ?? null, textChannelId: textChannelId ?? null }, select: { id: true } });
-    } else {
-      await prisma.queue.update({ where: { id: queue.id }, data: { voiceChannelId: voiceChannelId ?? null, textChannelId: textChannelId ?? null } });
-    }
-    // Clear existing items and insert new snapshot (current + upcoming)
-    await prisma.queueItem.deleteMany({ where: { queueId: queue.id } });
-    const items: Array<{ title: string; url: string; requestedBy: string; duration: number }> = [];
-    const current = player.queue.current as { info?: { title?: string; uri?: string; duration?: number }; requester?: { id?: string } } | undefined;
-    if (current?.info?.uri) {
-      items.push({
-        title: current.info.title ?? 'Unknown',
-        url: current.info.uri,
-        requestedBy: current.requester?.id ?? 'unknown',
-        duration: Math.floor((current.info.duration ?? 0) / 1000),
-      });
-    }
-    for (const t of player.queue.tracks as Array<{ info?: { title?: string; uri?: string; duration?: number }; requester?: { id?: string } }>) {
-      if (!t.info?.uri) continue;
-      items.push({
-        title: t.info.title ?? 'Unknown',
-        url: t.info.uri,
-        requestedBy: t.requester?.id ?? 'unknown',
-        duration: Math.floor((t.info.duration ?? 0) / 1000),
-      });
-    }
-    if (items.length > 0) {
-      await prisma.queueItem.createMany({
-        data: items.map((it) => ({ ...it, queueId: queue.id })),
-      });
-    }
-    
-    // Invalidate cache after queue update
-    invalidateQueueCache(guildId);
-  } catch (e) {
-    logger.error({ e }, 'failed to save queue');
-  }
-}
+import { saveQueue, resumeQueues, getQueueCached as _getQueueCached } from './services/database.js';
 
-async function resumeQueues() {
-  try {
-    // Only fetch queues that have items and voice channels, with limited fields
-    const queues = await prisma.queue.findMany({ 
-      where: {
-        voiceChannelId: { not: null },
-        items: { some: {} } // Only queues that have at least one item
-      },
-      select: {
-        guildId: true,
-        voiceChannelId: true,
-        textChannelId: true,
-        items: {
-          select: {
-            title: true,
-            url: true
-          },
-          orderBy: { createdAt: 'asc' },
-          take: 25 // Limit to first 25 items for performance
-        }
-      }
-    });
-    for (const q of queues) {
-      if (q.items.length === 0) continue;
-      if (!q.voiceChannelId) continue; // cannot resume without voice channel
-      const playerOptions: { guildId: string; voiceChannelId: string; textChannelId?: string; selfDeaf: true; volume: number } = {
-        guildId: q.guildId, 
-        voiceChannelId: q.voiceChannelId, 
-        selfDeaf: true, 
-        volume: 100
-      };
-      
-      if (q.textChannelId) {
-        playerOptions.textChannelId = q.textChannelId;
-      }
-      
-      const player = manager.createPlayer(playerOptions);
-      await player.connect();
-      // Limitar reanudación para evitar sobrecarga en arranque
-      const maxResume = 25;
-      for (const it of q.items.slice(0, maxResume)) {
-        const res = await player.search({ query: it.url || it.title }, { id: 'system' } as { id: string });
-        if (res.tracks.length > 0) {
-          if (!player.playing && !player.paused && !player.queue.current) {
-            await player.play({ clientTrack: res.tracks[0] as Track | UnresolvedTrack });
-          } else {
-            await player.queue.add(res.tracks[0] as Track | UnresolvedTrack);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    logger.error({ e }, 'failed to resume queues');
-  }
-}
-
-void resumeQueues();
+void resumeQueues(manager);
 
 // Cached queue loading for better performance (exported for future use)
-export async function getQueueCached(guildId: string): Promise<any | null> {
-  const cacheKey = `queue:${guildId}`;
-  let queueData = queueCache.get(cacheKey);
-  
-  if (queueData === undefined) {
-    try {
-      queueData = await prisma.queue.findFirst({
-        where: { guildId },
-        select: {
-          id: true,
-          guildId: true,
-          voiceChannelId: true,
-          textChannelId: true,
-          items: {
-            select: {
-              id: true,
-              title: true,
-              url: true,
-              requestedBy: true,
-              duration: true
-            },
-            orderBy: { createdAt: 'asc' },
-            take: 50 // Reasonable limit for cache
-          }
-        }
-      });
-      
-      // Cache for 30 seconds - queues change frequently
-      queueCache.set(cacheKey, queueData || null, 30000);
-    } catch (error) {
-      logger.error({ error, guildId }, 'Failed to fetch queue from database');
-      return null;
-    }
-  }
-  
-  return queueData;
-}
+export async function getQueueCached(guildId: string) { return _getQueueCached(guildId); }
 
 // Invalidate queue cache when queue is updated
-function invalidateQueueCache(guildId: string): void {
-  queueCache.delete(`queue:${guildId}`);
-}
+// invalidateQueueCache moved to services/database
 
 // --- Automix (simple heuristic): when queue is empty after a track ends, enqueue a similar track if enabled ---
 async function isAutomixEnabled(guildId: string): Promise<boolean> {
