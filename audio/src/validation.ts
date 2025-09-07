@@ -5,7 +5,8 @@ export interface ValidationResult<T> {
 }
 
 /**
- * Validates search query for audio system
+ * Validates and sanitizes search query for audio system
+ * Focuses on preventing XSS and obvious injection attempts while preserving music search functionality
  */
 export function validateSearchQuery(query: string): ValidationResult<string> {
   if (!query || typeof query !== 'string') {
@@ -22,15 +23,22 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
     return { success: false, error: 'Query too long (max 1000 characters)' };
   }
 
-  // Check for suspicious patterns that could be injection attempts
+  // Focus on the most critical security patterns for music bot context
   const suspiciousPatterns = [
+    // XSS and script injection (most important for a Discord bot)
     /<script[^>]*>.*?<\/script>/gi,
+    /<iframe[^>]*>.*?<\/iframe>/gi,
     /javascript:/gi,
-    /data:text\/html/gi,
     /vbscript:/gi,
+    /data:text\/html/gi,
     /on\w+\s*=/gi,
-    /eval\s*\(/gi,
-    /expression\s*\(/gi
+    
+    // Command injection (obvious cases)
+    /;\s*(rm|del|format|shutdown|reboot)/gi,
+    /\|\s*(nc|netcat|curl|wget|bash|sh|cmd)/gi,
+    
+    // Null bytes (always malicious)
+    /\x00/gi,
   ];
 
   for (const pattern of suspiciousPatterns) {
@@ -39,11 +47,23 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
     }
   }
 
-  // Remove control characters and sanitize  
-  const sanitized = trimmed
-    .replace(/[<>'"]/g, '') // Remove HTML/script injection chars
-    .replace(/\p{C}/gu, '') // Remove control characters using Unicode property
-    .slice(0, 1000); // Ensure length limit
+  // Light sanitization that preserves most music-related content
+  let sanitized = trimmed
+    // Remove HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Remove null bytes and other dangerous control characters
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    // Remove multiple spaces
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Final length check after sanitization
+  if (sanitized.length === 0) {
+    return { success: false, error: 'Query becomes empty after sanitization' };
+  }
+
+  // Ensure final length limit
+  sanitized = sanitized.slice(0, 1000);
 
   return { success: true, data: sanitized };
 }
