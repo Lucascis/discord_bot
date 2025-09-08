@@ -22,8 +22,8 @@ describe('UI controls', () => {
 
   it('disables Queue button when queue is empty', () => {
     const controls = buildControls({ autoplayOn: false, loopMode: 'off', paused: false, hasTrack: true, queueLen: 0, canSeek: true });
-    const row2 = controls[1] as unknown as { components: Array<{ data?: { custom_id?: string; disabled?: boolean } }> };
-    const btns = row2.components;
+    const row3 = controls[2] as unknown as { components: Array<{ data?: { custom_id?: string; disabled?: boolean } }> };
+    const btns = row3.components;
     const queueBtn = btns.find((b) => b.data?.custom_id === 'music:queue');
     expect(queueBtn).toBeTruthy();
     expect(queueBtn.data.disabled).toBe(true);

@@ -1,4 +1,4 @@
-import { logger } from '@discord-bot/logger';
+import { logger, captureError, addBreadcrumb, setTags } from '@discord-bot/logger';
 
 export class AudioError extends Error {
   constructor(
@@ -36,6 +36,7 @@ export class LavalinkError extends AudioError {
 
 /**
  * Higher-order function to wrap async functions with error handling
+ * Enhanced with Sentry integration for better error tracking
  */
 export function withErrorHandling<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
@@ -43,16 +44,38 @@ export function withErrorHandling<T extends (...args: unknown[]) => Promise<unkn
 ): T {
   return (async (...args: Parameters<T>) => {
     try {
+      // Add breadcrumb for function execution
+      if (context) {
+        addBreadcrumb(`Executing ${context}`, 'function', 'info');
+      }
+      
       return await fn(...args);
     } catch (error) {
+      const errorInstance = error instanceof Error ? error : new Error(String(error));
+      
+      // Set context tags for Sentry
+      if (context) {
+        setTags({ context, service: 'audio' });
+      }
+      
+      // Capture error in Sentry with enriched context
+      const sentryId = captureError(errorInstance, {
+        function: fn.name || 'anonymous',
+        context,
+        args: args.map(arg => typeof arg === 'object' ? '[object]' : String(arg)),
+        timestamp: new Date().toISOString()
+      });
+      
       logger.error({
         error: {
-          name: error instanceof Error ? error.name : 'Unknown',
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
+          name: errorInstance.name,
+          message: errorInstance.message,
+          stack: errorInstance.stack,
         },
         context,
+        sentryId: sentryId || undefined,
       }, 'Error in audio system');
+      
       throw error;
     }
   }) as T;
@@ -76,6 +99,15 @@ export async function withRetry<T>(
       lastError = error instanceof Error ? error : new Error(String(error));
       
       if (attempt === maxAttempts) {
+        // Capture final failure in Sentry
+        const sentryId = captureError(lastError, {
+          context,
+          attempt,
+          maxAttempts,
+          operationType: 'retry',
+          finalFailure: true
+        });
+        
         logger.error({
           error: {
             name: lastError.name,
@@ -85,6 +117,7 @@ export async function withRetry<T>(
           context,
           attempt,
           maxAttempts,
+          sentryId: sentryId || undefined,
         }, 'Operation failed after all retry attempts');
         break;
       }

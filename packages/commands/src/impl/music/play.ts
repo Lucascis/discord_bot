@@ -39,8 +39,22 @@ export class PlayCommand extends BaseCommand {
     }
     const query = queryValidation.data!;
 
-    const member = interaction.guild?.members.cache.get(userId);
-    const voice = member?.voice?.channelId;
+    // Robust voice channel resolve without requiring privileged GuildMembers intent
+    let voice: string | null | undefined = interaction.guild?.voiceStates?.cache.get(userId)?.channelId;
+    if (!voice) {
+      // Fallback to interaction.member when available
+      const asMember = (interaction.member as { voice?: { channelId?: string | null } } | null);
+      voice = asMember?.voice?.channelId ?? null;
+    }
+    if (!voice && interaction.guild) {
+      // Best-effort fetch of member; allowed without privileged intent for a single user
+      try {
+        const fetched = await interaction.guild.members.fetch(userId);
+        voice = fetched?.voice?.channelId ?? null;
+      } catch {
+        // ignore fetch errors; will handle as not-in-voice below
+      }
+    }
     if (!voice) {
       await interaction.reply({ content: 'Join a voice channel first.', ephemeral: true });
       return { success: false, error: 'no_voice' };
@@ -85,6 +99,11 @@ export class PlayCommand extends BaseCommand {
       }
     } else {
       await interaction.editReply({ content: `No results for: ${query}` });
+    }
+
+    // CRITICAL FIX: Always try to ensure UI exists regardless of ack state
+    if (guildId && channelId && ensureLiveNow) {
+      setTimeout(() => { void ensureLiveNow(guildId, channelId, true); }, 2000);
     }
 
     return { success: true };

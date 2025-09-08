@@ -7,7 +7,7 @@ import {
   type UnresolvedTrack,
 } from 'lavalink-client';
 import { env } from '@discord-bot/config';
-import { logger, HealthChecker, CommonHealthChecks } from '@discord-bot/logger';
+import { logger, HealthChecker, CommonHealthChecks, initializeSentry } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
 import http from 'node:http';
@@ -38,6 +38,15 @@ const redisSub = createClient({ url: redisUrl });
 await redisPub.connect();
 await redisSub.connect();
 logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS }, 'Audio startup config');
+
+// Initialize Sentry error monitoring
+await initializeSentry({
+  ...(env.SENTRY_DSN && { dsn: env.SENTRY_DSN }),
+  environment: env.SENTRY_ENVIRONMENT,
+  serviceName: 'audio',
+  tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
+  profilesSampleRate: env.SENTRY_PROFILES_SAMPLE_RATE
+});
 
 // Initialize performance monitoring
 const memoryManager = MemoryManager.getInstance();
@@ -187,6 +196,19 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         }
         const first = chosen;
         
+        // Validate track duration - reject tracks longer than 5 hours
+        const MAX_DURATION_MS = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
+        const trackInfo = first as { info?: { duration?: number; title?: string } };
+        if (trackInfo.info?.duration && trackInfo.info.duration > MAX_DURATION_MS) {
+          logger.warn({ guildId: playData.guildId, duration: trackInfo.info.duration, title: trackInfo.info.title }, 'Track rejected: exceeds 5-hour limit');
+          if (playData.requestId) {
+            await redisPub.publish(`discord-bot:response:${playData.requestId}`, JSON.stringify({
+              error: 'Track duration exceeds 5-hour limit'
+            }));
+          }
+          return;
+        }
+        
         /**
          * STAGE 3A: Autoplay Seeding Logic
          * 
@@ -215,6 +237,16 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
          */
         if (!player.playing && !player.paused && !player.queue.current) {
           await player.play({ clientTrack: first });
+          
+          // CRITICAL FIX: Force UI creation after immediate playback
+          void (async () => {
+            try {
+              await delay(800); // Wait for player state to stabilize
+              await pushNowPlaying(player);
+            } catch (e) {
+              logger.error({ e }, 'Failed to push initial UI state');
+            }
+          })();
           
           /**
            * STAGE 3C: Background Autoplay Seeding
@@ -276,35 +308,52 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       if (player) {
         const prev = player.queue.current as { info?: { title?: string; author?: string; uri?: string } } | undefined;
         const qlen = player.queue.tracks.length;
-        // Acción rápida con timeout para evitar bloqueo
-        const op = qlen > 0 ? player.skip() : player.stopPlaying(true, false);
-        await Promise.race([op.catch(() => undefined), delay(2000)]);
-        // Manejo post-skip en background para no bloquear el bus de comandos
-        void (async () => {
-          try {
-            await delay(900);
-            const enabled = await isAutomixEnabledCached(player.guildId);
-            const state = {
-              repeatMode: (player.repeatMode ?? 'off') as 'off'|'track'|'queue',
-              playing: !!player.playing,
-              hasCurrent: !!player.queue.current,
-              queueLen: player.queue.tracks.length,
-              autoplayEnabled: enabled,
-            };
-            if (prev && shouldAutomixAfterSkip(state)) {
-              logger.info({ guildId: player.guildId }, 'audio: skip on empty queue with autoplay → enqueue automix');
-              await enqueueAutomix(player, prev);
-            } else {
-              // Sin autoplay y sin cola: empujar estado Idle para refrescar UI
-              if (!state.playing && !state.hasCurrent && state.queueLen === 0) {
-                await pushIdleState(player);
-              }
-            }
-            batchQueueSaver.scheduleUpdate(data.guildId, player);
-          } catch (e) {
-            logger.error({ e }, 'audio: post-skip automix failed');
+        
+        try {
+          // Perform skip operation with better error handling
+          if (qlen > 0) {
+            await player.skip();
+          } else {
+            await player.stopPlaying(true, false);
           }
-        })();
+          
+          // Wait for player state to stabilize
+          await delay(1200); // Increased from 900ms for better stability
+          
+          // Check autoplay conditions more robustly
+          const enabled = await isAutomixEnabledCached(player.guildId);
+          const currentState = {
+            repeatMode: (player.repeatMode ?? 'off') as 'off'|'track'|'queue',
+            playing: !!player.playing,
+            hasCurrent: !!player.queue.current,
+            queueLen: player.queue.tracks.length,
+            autoplayEnabled: enabled,
+          };
+          
+          const shouldAutoplay = shouldAutomixAfterSkip(currentState);
+          logger.info({ 
+            guildId: player.guildId, 
+            shouldAutoplay, 
+            state: currentState 
+          }, 'skip: autoplay evaluation');
+          
+          if (prev && shouldAutoplay) {
+            logger.info({ guildId: player.guildId }, 'skip: triggering autoplay for empty queue');
+            await enqueueAutomix(player, prev);
+          } else if (!shouldAutoplay && currentState.queueLen === 0 && !currentState.playing) {
+            // Ensure UI updates for idle state
+            await pushIdleState(player);
+          }
+          
+          batchQueueSaver.scheduleUpdate(data.guildId, player);
+          
+        } catch (e) {
+          logger.error({ e, guildId: player.guildId }, 'skip operation failed');
+          // Ensure UI state consistency even on errors
+          if (!player.playing && !player.queue.current) {
+            await pushIdleState(player);
+          }
+        }
       }
       return;
     }
@@ -361,24 +410,52 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       if (!player) return;
       try {
         const enabled = await isAutomixEnabledCached(player.guildId);
-        if (!enabled) return;
+        if (!enabled) {
+          logger.info({ guildId: data.guildId }, 'seedRelated: autoplay disabled, skipping');
+          return;
+        }
+        
         const current = player.queue.current as { info?: { title?: string; uri?: string } } | undefined;
-        if (!current?.info || player.queue.tracks.length > 0) return;
+        if (!current?.info) {
+          logger.warn({ guildId: data.guildId }, 'seedRelated: no current track to base recommendations on');
+          return;
+        }
+        
+        // Allow seeding even with existing queue, but limit to prevent over-population
+        const currentQueueLen = player.queue.tracks.length;
+        const maxSeedTarget = 10;
+        const seedAmount = Math.max(0, maxSeedTarget - currentQueueLen);
+        
+        if (seedAmount <= 0) {
+          logger.info({ guildId: data.guildId, currentQueueLen }, 'seedRelated: queue already sufficiently populated');
+          return;
+        }
+        
+        logger.info({ 
+          guildId: data.guildId, 
+          currentQueueLen, 
+          seedAmount,
+          trackTitle: current.info.title 
+        }, 'seedRelated: seeding tracks');
+        
         const seeded = await seedRelatedQueue(
           player as unknown as import('./autoplay.js').LLPlayer,
           current as unknown as import('./autoplay.js').LLTrack,
           async (q: string) => {
-            const r = await player.search({ query: q }, { id: 'automix' } as { id: string });
+            const r = await player.search({ query: q }, { id: 'seed-related' } as { id: string });
             return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
           },
-          10,
+          seedAmount,
         );
+        
         if (seeded > 0) {
-          logger.info({ guildId: data.guildId, seeded }, 'audio: seedRelated command added tracks');
+          logger.info({ guildId: data.guildId, seeded }, 'seedRelated: successfully added tracks');
           batchQueueSaver.scheduleUpdate(data.guildId, player);
+        } else {
+          logger.warn({ guildId: data.guildId }, 'seedRelated: no suitable tracks found');
         }
       } catch (e) {
-        logger.error({ e }, 'audio: seedRelated failed');
+        logger.error({ e, guildId: data.guildId }, 'seedRelated command failed');
       }
       return;
     }
@@ -784,7 +861,7 @@ manager.on('playerUpdate', (playerJson) => {
 async function pushNowPlaying(player: import('lavalink-client').Player) {
   try {
     const guildId = player.guildId;
-    if (player.paused) return;
+    // CRITICAL FIX: Remove paused state blocking - UI should update regardless of pause state
     const now = Date.now();
     const last = lastUiPush.get(guildId) ?? 0;
     if (now - last < minUiInterval) return;

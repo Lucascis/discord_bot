@@ -1,0 +1,74 @@
+version: 2
+updates:
+  # Enable version updates for npm packages
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "@lucascisterna"
+    assignees:
+      - "@lucascisterna"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      # Group Discord.js related packages
+      discord-packages:
+        patterns:
+          - "discord.js"
+          - "@discordjs/*"
+      # Group Sentry packages
+      sentry-packages:
+        patterns:
+          - "@sentry/*"
+      # Group testing packages
+      testing-packages:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "jest"
+          - "@jest/*"
+      # Group linting packages
+      linting-packages:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+      # Group TypeScript packages
+      typescript-packages:
+        patterns:
+          - "typescript"
+          - "@types/*"
+          - "ts-node"
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "@lucascisterna"
+    assignees:
+      - "@lucascisterna"
+    commit-message:
+      prefix: "docker"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday" 
+      time: "06:00"
+    reviewers:
+      - "@lucascisterna"
+    assignees:
+      - "@lucascisterna"
+    commit-message:
+      prefix: "ci"

@@ -53,7 +53,11 @@ This Discord music bot uses a microservices architecture with four main services
 - **TypeScript + Node.js** with ES modules
 - **pnpm workspaces** for monorepo management
 - **Discord.js v14** for Discord API integration
-- **Lavalink v4** for audio streaming
+- **Lavalink v4** for audio streaming with advanced plugins:
+  - **YouTube Plugin v1.13.5** - Multi-client YouTube support (MUSIC, ANDROID_VR, WEB, WEB_EMBEDDED)
+  - **SponsorBlock Plugin** - Automatic sponsor segment skipping for long sets
+  - **LavaSrc Plugin v4.8.1** - Multi-platform support (Spotify, YouTube Music)
+  - **LavaSearch Plugin v1.0.0** - Advanced search capabilities
 - **Prisma** for database ORM
 - **Vitest** for testing
 - **OpenTelemetry** for observability
@@ -83,6 +87,35 @@ All services implement graceful shutdown, health checks, and structured error lo
 - Search throttling prevents API abuse  
 - Batch queue updates to reduce database load
 - Memory monitoring for garbage collection
+- **Lavalink optimizations**: High-quality opus encoding (quality: 10), advanced resampling, optimized buffer settings
+- **YouTube bypass**: Multiple client configurations for maximum compatibility
+
+### Autoplay System
+The bot features an advanced autoplay system with multiple recommendation modes:
+
+- **Similar** (default) - Tracks similar to currently playing song
+- **Artist** - More tracks from the same artist
+- **Genre** - Tracks from detected genre (house, techno, trance, etc.)
+- **Mixed** - Combination of artist (40%), genre (40%), and similar (20%) tracks
+
+#### Electronic Music Support
+- **Remix Support**: Allows official remixes while filtering low-quality content
+- **Genre Detection**: Automatically detects electronic music genres from track titles/artists
+- **Quality Filtering**: Advanced blacklist system blocks aggregator channels and low-quality content
+
+### UI Controls
+The Discord interface features an organized 3-row button layout:
+
+**Row 1**: ⏯️ Play/Pause | ⏪ -10s | ⏩ +10s | ⏭️ Skip  
+**Row 2**: 🔊 Vol + | 🔉 Vol - | 🔁 Loop | ⏹️ Stop  
+**Row 3**: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 
 ### Configuration
 Environment variables are validated through `@discord-bot/config` using Zod schemas. Check existing config schemas before adding new environment variables.
+
+#### Lavalink Configuration
+The bot uses an optimized Lavalink configuration (`lavalink/application.yml`) with:
+- **High-quality audio**: 10/10 opus encoding, HIGH resampling
+- **Performance tuning**: 400ms buffer, 5s frame buffer, seek ghosting enabled
+- **Multiple YouTube clients**: Ensures maximum compatibility and bypass capabilities
+- **SponsorBlock integration**: Automatically skips sponsor segments in long DJ sets

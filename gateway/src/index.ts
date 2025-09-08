@@ -8,7 +8,7 @@ import {
   PermissionsBitField,
 } from 'discord.js';
 import { env } from '@discord-bot/config';
-import { logger } from '@discord-bot/logger';
+import { logger, initializeSentry } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
 import { getAutomixEnabled, setAutomixEnabled } from './flags.js';
@@ -105,6 +105,15 @@ async function main() {
   const appId = env.DISCORD_APPLICATION_ID;
   const guildId = env.DISCORD_GUILD_ID;
   logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS, COMMANDS_CLEANUP_ON_START: env.COMMANDS_CLEANUP_ON_START, appId, guildId }, 'Gateway startup config');
+
+  // Initialize Sentry error monitoring
+  await initializeSentry({
+    ...(env.SENTRY_DSN && { dsn: env.SENTRY_DSN }),
+    environment: env.SENTRY_ENVIRONMENT,
+    serviceName: 'gateway',
+    tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
+    profilesSampleRate: env.SENTRY_PROFILES_SAMPLE_RATE
+  });
 
   // 1) Login primero para que el bot aparezca online y pueda responder
   try {
@@ -419,12 +428,23 @@ await redisSub.subscribe('discord-bot:ui:now', async (message) => {
       }
       nowLive.set(data.guildId, { channelId: live.channelId, messageId: newMsg.id, lastEdit: now, state: stateWithUri1 });
     } else {
-      await msg.edit({ embeds: [embed], components: controls });
-      const stateWithUri2: UiState & { trackUri?: string } = { ...state };
-      if (data.uri !== undefined) {
-        stateWithUri2.trackUri = data.uri;
+      // Try to edit existing message, but create new one if it fails
+      try {
+        await msg.edit({ embeds: [embed], components: controls });
+        const stateWithUri2: UiState & { trackUri?: string } = { ...state };
+        if (data.uri !== undefined) {
+          stateWithUri2.trackUri = data.uri;
+        }
+        nowLive.set(data.guildId, { ...live, lastEdit: now, state: stateWithUri2 });
+      } catch (editError) {
+        // Message doesn't exist anymore, create a new one
+        const newMsg = await ch.send({ embeds: [embed], components: controls });
+        const stateWithUri3: UiState & { trackUri?: string } = { ...state };
+        if (data.uri !== undefined) {
+          stateWithUri3.trackUri = data.uri;
+        }
+        nowLive.set(data.guildId, { channelId: live.channelId, messageId: newMsg.id, lastEdit: now, state: stateWithUri3 });
       }
-      nowLive.set(data.guildId, { ...live, lastEdit: now, state: stateWithUri2 });
     }
   } catch (e) {
     logger.error({ e }, 'ui:now update failed');
@@ -640,10 +660,14 @@ client.on('interactionCreate', withErrorHandling(async (interaction) => {
         }
         return;
       }
+      default:
+        // Unknown button interaction
+        return;
     }
     // Most handlers use deferUpdate() and do not send an extra message.
   } catch (error) {
     await handleInteractionError(error as Error, interaction, 'button_interaction');
+    return;
   }
 }, 'button_handler'));
 

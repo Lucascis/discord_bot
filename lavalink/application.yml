@@ -4,78 +4,144 @@ server:
 lavalink:
   server:
     password: "youshallnotpass"
-    # In v4, YouTube fuente nativa está externalizada como plugin. Mantén youtube=false y usa el plugin abajo.
+    # Disable built-in YouTube source to use plugin
     sources:
       youtube: false
       soundcloud: true
       http: true
       local: false
+      bandcamp: true
+      vimeo: true
     filters:
       volume: true
       equalizer: true
       karaoke: true
       timescale: true
       tremolo: true
+      vibrato: true
       rotation: true
+      distortion: true
+      channelMix: true
       lowPass: true
-    playerUpdateInterval: 1
+    # Optimized performance settings
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 10
+    resamplingQuality: HIGH
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    playerUpdateInterval: 5
+    youtubePlaylistLoadLimit: 100
+    soundcloudSearchEnabled: true
+    gc-warnings: true
 
-  # Plugins (carga remota)
+  # Plugin loading configuration
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
       repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.0"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.sponsorblock:sponsorblock-plugin:3.0.1"
       repository: "https://maven.lavalink.dev/releases"
 
-# Configuración de LavaSrc (correcta para v4): bajo la clave plugins.lavasrc
+# Plugin-specific configuration
 plugins:
   youtube:
     enabled: true
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    # Evitar clientes que requieren inicio de sesión (TV/TVHTML5). Priorizar WEB/MWEB; MUSIC solo para búsqueda.
+    # Optimized client order for maximum compatibility and bypass capabilities
     clients:
-      - WEB
-      - MWEB
-      - ANDROID_VR
       - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+      - TV_EMBEDDED
     clientOptions:
+      # YouTube Music client - best for music content and restricted videos
       MUSIC:
-        playback: false
-        videoLoading: false
-        playlistLoading: false
+        playback: true
+        videoLoading: true
+        playlistLoading: true
         searching: true
+      # Android VR client - good for bypassing restrictions  
+      ANDROID_VR:
+        playback: true
+        videoLoading: true
+        playlistLoading: true
+        searching: true
+      # Web client - standard fallback
+      WEB:
+        playback: true
+        videoLoading: true
+        playlistLoading: true
+        searching: true
+      # Web embedded - often bypasses restrictions
+      WEBEMBEDDED:
+        playback: true
+        videoLoading: true
+        playlistLoading: true
+        searching: true
+      # TV embedded - additional bypass option
+      TV_EMBEDDED:
+        playback: true
+        videoLoading: true
+        playlistLoading: false
+        searching: false
+    # Additional performance settings
+    playlistLoadLimit: 100
+    videoLoadLimit: 100
+    maxRetryAttempts: 3
+    retryDelayMs: 1000
   lavasrc:
-    # Proveedores usados para resolver la reproducción desde metadatos (ISRC/consulta)
-    # Usamos YouTube Music primero; si no hay ISRC, se usa búsqueda textual.
+    # Enhanced providers with YouTube Music prioritization
     providers:
+      - "ytmsearch:\"%ISRC%\""
       - "ytsearch:\"%ISRC%\""
+      - "ytmsearch:%QUERY%"
       - "ytsearch:%QUERY%"
 
-    # Fuentes a habilitar en LavaSrc
+    # Enable multiple music sources for better track availability
     sources:
       spotify: true
-      deezer: ${DEEZER_ENABLED:false}
-      applemusic: ${APPLE_ENABLED:false}
+      deezer: false
+      applemusic: false
+      youtube: true
 
-    # Credenciales/ajustes por fuente
+    # Music platform configurations
     spotify:
       clientId: ${SPOTIFY_CLIENT_ID:}
       clientSecret: ${SPOTIFY_CLIENT_SECRET:}
       countryCode: "US"
       resolveArtistsInSearch: true
-    deezer:
-      arl: ${DEEZER_ARL:}
-    applemusic:
-      mediaAPIToken: ${APPLE_MUSIC_MEDIA_TOKEN:}
+      playlistLoadLimit: 100
+      albumLoadLimit: 100
+    
+    # YouTube Music specific configuration
+    youtube:
+      countryCode: "US"
+  
+  lavasearch:
+    sources:
+      youtube: true
+      spotify: true
 
-# Optional keys for Lavasrc (uncomment and set if los tenés)
-#lavasrc:
-#  sources:
-#    spotify: true
-#    deezer: true
-#    apple: true
-#  spotify:
-#    clientId: "${SPOTIFY_CLIENT_ID}"
-#    clientSecret: "${SPOTIFY_CLIENT_SECRET}"
+  sponsorblock:
+    enabled: true
+    categories:
+      - sponsor
+      - selfpromo
+      - interaction
+      - intro
+      - outro
+      - preview
+      - music_offtopic
+      - filler
+    
+logging:
+  level:
+    root: INFO
+    lavalink: DEBUG

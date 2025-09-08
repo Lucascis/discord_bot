@@ -1,8 +1,15 @@
-# Discord Music Bot
+# Discord Music Bot 🎵
 
-Bot de música para Discord construido en TypeScript con pnpm workspaces. Arquitectura por servicios: gateway (discord.js), audio (Lavalink v4), API REST y worker. Persistencia con PostgreSQL y Redis.
+Bot de música para Discord especializado en música electrónica, construido en TypeScript con pnpm workspaces. Arquitectura por microservicios: gateway (Discord.js), audio (Lavalink v4), API REST y worker. Persistencia con PostgreSQL y Redis.
 
-**🎉 FASE 1 Completada** - Gateway service modernizado con arquitectura modular, sistema unificado de comandos, decoradores TypeScript y cero issues de ESLint.
+**🎉 FASE 2 Completada** - Sistema de autoplay avanzado con múltiples modos, optimizaciones Lavalink, soporte para remixes electrónicos y UI reorganizada.
+
+**✨ Características Principales**:
+- 🎛️ **Autoplay Inteligente**: Modos por artista, género, similares y mixto
+- 🎵 **Soporte Electrónico**: Detección de géneros, soporte para remixes oficiales
+- 🔊 **Audio de Alta Calidad**: Lavalink v4 con plugins avanzados y optimizaciones
+- 🛡️ **Anti-Spam**: Sistema avanzado de filtros contra canales agregadores
+- ⚡ **Performance**: Múltiples clientes YouTube, SponsorBlock para sets largos
 
 Documentación ampliada en `docs/SETUP.md` y `docs/HOSTING.md`.
 
@@ -37,7 +44,12 @@ Agregar un comando nuevo:
 - `/volume <0-200>`, `/loop <off|track|queue>`, `/seek <segundos>`
 - `/queue`, `/shuffle`, `/remove <n>`, `/clear`, `/move <from> <to>`
 
-Además, el mensaje “Now Playing” trae controles (Play/Pause, Seek ±10s, Skip, Stop, Shuffle, Queue, Clear, Vol ±, Loop, Autoplay).
+### UI Controls (Reorganizada en Fase 2)
+El mensaje "Now Playing" incluye controles organizados en 3 filas:
+
+**Fila 1**: ⏯️ Play/Pause | ⏪ -10s | ⏩ +10s | ⏭️ Skip  
+**Fila 2**: 🔊 Vol + | 🔉 Vol - | 🔁 Loop | ⏹️ Stop  
+**Fila 3**: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 
 ## Desarrollo
 ```bash
@@ -69,11 +81,24 @@ DOCKER_BUILDKIT=1 docker build -t discord-bot:latest .
 
 La imagen incluye los 4 servicios (gateway/audio/api/worker). El entrypoint por defecto imprime ayuda; usá docker-compose para iniciar cada servicio con su comando.
 
-## Autoplay (resumen)
-- Desactivado por defecto (persistente por guild en DB). Al activarlo, se mantiene entre reinicios.
-- Si está activo y la cola queda vacía al finalizar una canción, se añade un tema relacionado y se rellena la cola si está corta.
-- Si está activo y presionás Skip con cola vacía, se arranca un tema relacionado al anterior.
-- Si Autoplay está apagado y termina la reproducción (o hacés Skip con cola vacía), la UI muestra "Nada reproduciéndose" y permite activar Autoplay con un click.
+## Sistema Autoplay Avanzado (Fase 2)
+
+### Modos de Recomendación
+- **🎵 Similar** (predeterminado) - Tracks similares al tema actual
+- **👨‍🎤 Artist** - Más temas del mismo artista  
+- **🎛️ Genre** - Tracks del mismo género detectado automáticamente
+- **🔀 Mixed** - Combinación inteligente: 40% artista + 40% género + 20% similares
+
+### Soporte para Música Electrónica
+- **Detección automática de géneros**: house, techno, trance, dubstep, drum & bass, ambient, synthwave, hardstyle
+- **Soporte para remixes**: Permite remixes oficiales, filtra covers y bootlegs de baja calidad
+- **Anti-agregadores**: Sistema de lista negra contra canales "Metadata" y contenido auto-generado
+
+### Comportamiento
+- Desactivado por defecto (persistente por guild en DB)
+- Al activar/desactivar, el estado se mantiene entre reinicios
+- Si está activo y la cola queda vacía: añade tema relacionado según el modo seleccionado
+- Si está apagado: la UI permite activarlo con un click
 
 ## Observabilidad
 - Métricas Prometheus expuestas en cada servicio (`/metrics`).

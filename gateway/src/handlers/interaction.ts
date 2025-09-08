@@ -1,27 +1,31 @@
 import { type ButtonInteraction, EmbedBuilder, type Client } from 'discord.js';
 import { type RedisClientType } from 'redis';
+import { type Counter } from 'prom-client';
 import { validateSnowflake } from '../validation.js';
 import { getAutomixEnabled, setAutomixEnabled } from '../flags.js';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
 import { randomUUID } from 'node:crypto';
 
-interface RedisPubCounter {
-  count: number;
-  lastReset: number;
+interface PlayerState {
+  loopMode?: string;
+  autoplayOn?: boolean;
+  queueLen?: number;
+  hasTrack?: boolean;
 }
 
 interface NowLiveData {
   channelId: string;
   messageId: string;
   lastUpdate: number;
+  state?: PlayerState;
 }
 
 export interface InteractionHandlerContext {
   client: Client;
   redisPub: RedisClientType;
   redisSub: RedisClientType;
-  redisPubCounter: RedisPubCounter;
+  redisPubCounter: Counter<string>;
   nowLive: Map<string, NowLiveData>;
   hasDjOrAdmin: (interaction: ButtonInteraction) => boolean;
   ensureLiveNow: (guildId: string, channelId: string, forceRelocate?: boolean) => Promise<void>;
@@ -201,6 +205,7 @@ export async function handleAutoplay(
   await setAutomixEnabled(guildId, next);
   
   if (next) {
+    // Disable loop when enabling autoplay
     await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'loopSet', guildId, mode: 'off' }));
     redisPubCounter.labels('discord-bot:commands').inc();
     
@@ -208,7 +213,9 @@ export async function handleAutoplay(
     const queueLen = live?.state?.queueLen ?? 0;
     const hasTrack = live?.state?.hasTrack ?? false;
     
-    if (hasTrack && queueLen === 0) {
+    // Enhanced seeding logic - seed if we have a playing track regardless of queue
+    if (hasTrack) {
+      logger.info({ guildId, queueLen, hasTrack }, 'autoplay enabled: seeding related tracks');
       await redisPub.publish('discord-bot:commands', JSON.stringify({ type: 'seedRelated', guildId }));
       redisPubCounter.labels('discord-bot:commands').inc();
     }

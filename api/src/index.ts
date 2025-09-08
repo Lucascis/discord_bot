@@ -1,9 +1,18 @@
 import { app } from './app.js';
-import { logger } from '@discord-bot/logger';
+import { logger, initializeSentry } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+
+// Initialize Sentry error monitoring
+await initializeSentry({
+  ...(env.SENTRY_DSN && { dsn: env.SENTRY_DSN }),
+  environment: env.SENTRY_ENVIRONMENT,
+  serviceName: 'api',
+  tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
+  profilesSampleRate: env.SENTRY_PROFILES_SAMPLE_RATE
+});
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 app.listen(port, () => logger.info(`API listening on ${port}`));

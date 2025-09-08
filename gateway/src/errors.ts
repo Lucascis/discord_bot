@@ -112,11 +112,11 @@ export async function handleInteractionError(
 /**
  * Higher-order function to wrap async functions with error handling
  */
-export function withErrorHandling<T extends (...args: unknown[]) => Promise<unknown>>(
-  fn: T,
+export function withErrorHandling<TArgs extends readonly unknown[], TReturn>(
+  fn: (...args: TArgs) => Promise<TReturn>,
   context?: string,
-): T {
-  return (async (...args: Parameters<T>) => {
+): (...args: TArgs) => Promise<TReturn> {
+  return (async (...args: TArgs) => {
     try {
       return await fn(...args);
     } catch (error) {
@@ -131,7 +131,7 @@ export function withErrorHandling<T extends (...args: unknown[]) => Promise<unkn
       }, 'Error in wrapped function');
       throw error;
     }
-  }) as T;
+  });
 }
 
 /**

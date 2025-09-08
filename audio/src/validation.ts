@@ -37,8 +37,6 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
     /;\s*(rm|del|format|shutdown|reboot)/gi,
     /\|\s*(nc|netcat|curl|wget|bash|sh|cmd)/gi,
     
-    // Null bytes (always malicious)
-    /\x00/gi,
   ];
 
   for (const pattern of suspiciousPatterns) {
@@ -47,15 +45,30 @@ export function validateSearchQuery(query: string): ValidationResult<string> {
     }
   }
 
+  // Check for null bytes separately to avoid ESLint no-control-regex warnings
+  if (trimmed.includes('\u0000')) {
+    return { success: false, error: 'Query contains potentially malicious content' };
+  }
+
   // Light sanitization that preserves most music-related content
   let sanitized = trimmed
     // Remove HTML tags
-    .replace(/<[^>]*>/g, '')
-    // Remove null bytes and other dangerous control characters
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    // Remove multiple spaces
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/<[^>]*>/g, '');
+
+  // Remove dangerous control characters (done separately to avoid ESLint issues)
+  const dangerousChars = [
+    '\u0000', '\u0001', '\u0002', '\u0003', '\u0004', '\u0005', '\u0006', '\u0007',
+    '\u0008', '\u000B', '\u000C', '\u000E', '\u000F', '\u0010', '\u0011', '\u0012',
+    '\u0013', '\u0014', '\u0015', '\u0016', '\u0017', '\u0018', '\u0019', '\u001A',
+    '\u001B', '\u001C', '\u001D', '\u001E', '\u001F', '\u007F'
+  ];
+  
+  for (const char of dangerousChars) {
+    sanitized = sanitized.replace(new RegExp(char, 'g'), '');
+  }
+  
+  // Remove multiple spaces and trim
+  sanitized = sanitized.replace(/\s+/g, ' ').trim();
 
   // Final length check after sanitization
   if (sanitized.length === 0) {

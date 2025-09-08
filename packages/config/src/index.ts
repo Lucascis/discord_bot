@@ -11,6 +11,10 @@ const envSchema = z.object({
   LAVALINK_PASSWORD: z.string().min(process.env.NODE_ENV === 'test' ? 1 : 8, 'LAVALINK_PASSWORD must be at least 8 characters'),
   // Observability
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+  SENTRY_DSN: z.string().url('Invalid SENTRY_DSN format').optional(),
+  SENTRY_ENVIRONMENT: z.enum(['development', 'staging', 'production', 'test']).default('development'),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  SENTRY_PROFILES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
   // Service HTTP ports for health/metrics
   GATEWAY_HTTP_PORT: z.coerce.number().int().min(1000).max(65535).default(3001),
   AUDIO_HTTP_PORT: z.coerce.number().int().min(1000).max(65535).default(3002),
@@ -34,6 +38,8 @@ const envSchema = z.object({
   const uniquePorts = new Set(ports);
   return uniquePorts.size === ports.length;
 }, 'HTTP ports must be unique across services');
+
+export type Environment = 'development' | 'staging' | 'production' | 'test';
 
 export type Env = z.infer<typeof envSchema> & {
   // Computed properties for auto-enabled integrations

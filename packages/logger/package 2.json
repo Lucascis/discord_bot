@@ -11,19 +11,9 @@
     "dev": "node --loader ts-node/esm src/index.ts"
   },
   "dependencies": {
-    "pino": "^8.15.0"
-  },
-  "peerDependencies": {
     "@sentry/node": "^8.0.0",
-    "@sentry/profiling-node": "^8.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@sentry/node": {
-      "optional": true
-    },
-    "@sentry/profiling-node": {
-      "optional": true
-    }
+    "@sentry/profiling-node": "^8.0.0",
+    "pino": "^8.15.0"
   },
   "devDependencies": {
     "ts-node": "^10.9.1",
