@@ -1,5 +1,5 @@
 # Multi-stage Docker build for production optimization
-FROM node:22-bookworm-slim AS base
+FROM node:24-bookworm-slim AS base
 
 # Enable corepack for pnpm and install OpenSSL for Prisma detection
 RUN corepack enable pnpm \
@@ -39,7 +39,7 @@ RUN pnpm -r build
 RUN pnpm install --prod --no-frozen-lockfile
 
 # Production stage - final optimized image
-FROM node:22-bookworm-slim AS production
+FROM node:24-bookworm-slim AS production
 
 # Create non-root user for security (Debian)
 RUN groupadd -g 1001 nodejs \
