@@ -17,7 +17,7 @@
     "db:seed": "pnpm --filter @discord-bot/database ts-node packages/database/prisma/seed.ts"
   },
   "devDependencies": {
-    "@commitlint/cli": "^17.7.1",
+    "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^17.7.0",
     "@types/express": "^4.17.17",
     "@types/node": "^20.5.9",
