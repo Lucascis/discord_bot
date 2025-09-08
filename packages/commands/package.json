@@ -10,7 +10,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
+    "discord.js": "^14.22.1",
     "@discord-bot/logger": "workspace:*",
     "@discord-bot/config": "workspace:*",
     "reflect-metadata": "^0.1.13"
