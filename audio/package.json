@@ -11,7 +11,7 @@
     "dev": "node --loader ts-node/esm src/index.ts"
   },
   "dependencies": {
-    "lavalink-client": "^2.5.9",
+    "lavalink-client": "^2.6.1",
     "@discord-bot/config": "workspace:*",
     "@discord-bot/logger": "workspace:*",
     "redis": "^4.6.13",
