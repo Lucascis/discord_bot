@@ -42,16 +42,16 @@ services:
     image: ghcr.io/lavalink-devs/lavalink:4
     env_file: .env
     environment:
-      SERVER_PORT: 2333
-      LAVALINK_SERVER_PASSWORD: youshallnotpass
+      SERVER_PORT: ${LAVALINK_PORT:-2333}
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD}
       JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
     ports:
-      - "2333:2333"
+      - "${LAVALINK_PORT:-2333}:${LAVALINK_PORT:-2333}"
     volumes:
       - lavalink_logs:/opt/Lavalink/logs
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -H 'Authorization: youshallnotpass' http://localhost:2333/version || exit 1"]
+      test: ["CMD-SHELL", "curl -sf -H 'Authorization: ${LAVALINK_PASSWORD}' http://localhost:${LAVALINK_PORT:-2333}/version || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
