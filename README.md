@@ -2,7 +2,7 @@
 
 Bot de música para Discord especializado en música electrónica, construido en TypeScript con pnpm workspaces. Arquitectura por microservicios: gateway (Discord.js), audio (Lavalink v4), API REST y worker. Persistencia con PostgreSQL y Redis.
 
-**🎉 FASE 2 Completada** - Sistema de autoplay avanzado con múltiples modos, optimizaciones Lavalink, soporte para remixes electrónicos y UI reorganizada.
+**🎉 FASE 2.1 Completada** - Sistema de autoplay avanzado, monitoreo de errores integrado, calidad de código mejorada y seguridad reforzada.
 
 **✨ Características Principales**:
 - 🎛️ **Autoplay Inteligente**: Modos por artista, género, similares y mixto
@@ -10,6 +10,8 @@ Bot de música para Discord especializado en música electrónica, construido en
 - 🔊 **Audio de Alta Calidad**: Lavalink v4 con plugins avanzados y optimizaciones
 - 🛡️ **Anti-Spam**: Sistema avanzado de filtros contra canales agregadores
 - ⚡ **Performance**: Múltiples clientes YouTube, SponsorBlock para sets largos
+- 📊 **Monitoreo**: Integración Sentry para error tracking y observabilidad
+- 🔒 **Seguridad**: Dependabot, security policies y workflows automatizados
 
 Documentación ampliada en `docs/SETUP.md` y `docs/HOSTING.md`.
 
@@ -104,13 +106,21 @@ La imagen incluye los 4 servicios (gateway/audio/api/worker). El entrypoint por 
 - Métricas Prometheus expuestas en cada servicio (`/metrics`).
 - Botones y publicaciones a Redis contadas; eventos de Lavalink instrumentados.
 
-## CI/CD
+## CI/CD y Seguridad
 
-CI (`.github/workflows/ci.yml`):
-- Node 22 + pnpm 8, `pnpm install`, `pnpm test`, `pnpm build`.
+**Workflows automatizados**:
+- **CI** (`.github/workflows/ci.yml`): Node 22 + pnpm 8, tests, linting, build y typecheck
+- **CD** (`.github/workflows/cd.yml`): Buildx y push a GHCR con tags semánticas
+- **Security** (`.github/workflows/security.yml`): Análisis de dependencias y vulnerabilidades
 
-CD (`.github/workflows/cd.yml`):
-- Buildx y push a GHCR: `docker build` y `docker push` con tag `v*` (tags semánticas).
+**Mantenimiento automático**:
+- **Dependabot** (`.github/dependabot.yml`): Updates automáticos de npm y GitHub Actions
+- **Security Policy** (`.github/SECURITY.md`): Proceso de reporte de vulnerabilidades
+
+**Monitoreo y Observabilidad**:
+- **Sentry Integration**: Error tracking y performance monitoring en todos los servicios
+- **Health Checks**: Endpoints dedicados con validación de dependencias
+- **Logging estructurado**: Pino logger con contexto enriquecido
 
 ## Licencia
 MIT

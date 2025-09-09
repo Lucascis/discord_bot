@@ -38,7 +38,8 @@ This Discord music bot uses a microservices architecture with four main services
 ### Shared Packages (`packages/`)
 - **@discord-bot/config** - Environment configuration with Zod validation
 - **@discord-bot/database** - Prisma ORM, database models, and migrations
-- **@discord-bot/logger** - Centralized Pino logging
+- **@discord-bot/logger** - Centralized Pino logging with Sentry integration
+- **@discord-bot/commands** - Unified command system with decorators and middleware
 
 ### Communication
 - **Redis pub/sub** - Primary inter-service communication via channels:
@@ -61,6 +62,7 @@ This Discord music bot uses a microservices architecture with four main services
 - **Prisma** for database ORM
 - **Vitest** for testing
 - **OpenTelemetry** for observability
+- **Sentry** for error monitoring and performance tracking
 
 ## Testing
 
@@ -80,7 +82,7 @@ alias: {
 Services communicate asynchronously via Redis pub/sub. Commands flow from Gateway to Audio, while UI updates flow back from Audio to Gateway.
 
 ### Error Handling
-All services implement graceful shutdown, health checks, and structured error logging. Use the shared logger package for consistent log formatting.
+All services implement graceful shutdown, health checks, and structured error logging. Error monitoring is integrated across all services using Sentry for production-grade observability. Use the shared logger package for consistent log formatting and automatic error tracking.
 
 ### Performance Optimizations
 - Search results cached for 5 minutes
@@ -119,3 +121,23 @@ The bot uses an optimized Lavalink configuration (`lavalink/application.yml`) wi
 - **Performance tuning**: 400ms buffer, 5s frame buffer, seek ghosting enabled
 - **Multiple YouTube clients**: Ensures maximum compatibility and bypass capabilities
 - **SponsorBlock integration**: Automatically skips sponsor segments in long DJ sets
+
+## Code Quality & Security
+
+### Automated Quality Assurance
+- **ESLint**: Strict TypeScript linting with no-any rules
+- **Type Safety**: Full TypeScript coverage with strict type checking
+- **Testing**: Comprehensive test suite with 181+ tests using Vitest
+- **Pre-commit Hooks**: Automated linting and testing before commits
+
+### Security Measures
+- **Dependabot**: Automated dependency updates
+- **Security Policies**: Vulnerability reporting guidelines in `.github/SECURITY.md`
+- **Input Validation**: Zod schemas for all environment variables and user inputs
+- **Error Monitoring**: Sentry integration for production error tracking
+- **Type-safe Error Handling**: Custom error wrapper with proper generics
+
+### CI/CD Pipeline
+- **Continuous Integration**: Automated testing, linting, and building
+- **Security Scanning**: Dependency vulnerability checks
+- **Docker Multi-stage**: Optimized container builds with proper security practices

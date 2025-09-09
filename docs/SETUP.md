@@ -133,7 +133,24 @@ NOWPLAYING_UPDATE_MS=3000
 COMMANDS_CLEANUP_ON_START=false
 ```
 
-## 8) Deploy / Producción
+## 8) Monitoreo de Errores (Sentry)
+
+El bot incluye integración opcional con Sentry para monitoreo de errores en producción.
+
+Variables de entorno opcionales:
+```
+SENTRY_DSN=https://your-dsn@sentry.io/project-id
+SENTRY_ENVIRONMENT=production
+```
+
+Características:
+- Error tracking automático en todos los servicios
+- Performance monitoring
+- Filtrado inteligente de errores (rate limits de Discord, timeouts recuperables)
+- Context enrichment con información del guild y usuario
+- Health checks integrados
+
+## 9) Deploy / Producción
 
 - Desde cero (limpia volúmenes, reconstruye, migra y arranca):
 
@@ -185,10 +202,12 @@ Credenciales para LavaSrc:
  - Métricas: `curl http://localhost:3001/metrics` (gateway), `http://localhost:3002/metrics` (audio), `http://localhost:3000/metrics` (api).
  - Lavalink info: `curl -H 'Authorization: youshallnotpass' http://localhost:2333/v4/info` → `sourceManagers` incluye `youtube`.
 
-## 7) Observabilidad (métricas + tracing)
-- Métricas Prometheus expuestas en `/metrics` en cada servicio (API, gateway, audio, worker). Llevan métricas de proceso + contadores de comandos/eventos clave.
-- Tracing OpenTelemetry opcional: define `OTEL_EXPORTER_OTLP_ENDPOINT` apuntando al collector (HTTP/OTLP) y se auto‑instrumentarán HTTP/Redis/etc.
+## 7) Observabilidad (métricas + tracing + errores)
+- **Métricas Prometheus** expuestas en `/metrics` en cada servicio (API, gateway, audio, worker). Incluyen métricas de proceso + contadores de comandos/eventos.
+- **Tracing OpenTelemetry** opcional: define `OTEL_EXPORTER_OTLP_ENDPOINT` apuntando al collector (HTTP/OTLP) y se auto‑instrumentarán HTTP/Redis/etc.
   - Ejemplo: `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces`.
+- **Error Monitoring** con Sentry: Tracking automático de excepciones, performance monitoring y health checks.
+- **Health Checks** avanzados: Endpoints `/health` con validación de dependencias (DB, Redis, Lavalink).
 
 ## 8) Despliegue
 - GitHub Actions:

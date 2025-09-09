@@ -53,7 +53,12 @@
       "WebFetch(domain:lavalink.dev)",
       "WebFetch(domain:maven.lavalink.dev)",
       "Bash(curl:*)",
-      "Bash(pnpm outdated:*)"
+      "Bash(pnpm outdated:*)",
+      "Bash(pnpm list:*)",
+      "WebSearch",
+      "Bash(docker logs:*)",
+      "Bash(docker restart:*)",
+      "Bash(gh pr list:*)"
     ],
     "deny": [],
     "ask": []
