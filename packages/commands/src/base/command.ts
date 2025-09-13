@@ -1,5 +1,4 @@
-import { type ChatInputCommandInteraction } from 'discord.js';
-import { type SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from '@discordjs/builders';
+import { type ChatInputCommandInteraction, type SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from 'discord.js';
 import { logger } from '@discord-bot/logger';
 
 export interface CommandContext {

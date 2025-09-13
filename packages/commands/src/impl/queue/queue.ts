@@ -1,5 +1,4 @@
-import { EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { SlashCommandBuilder } from '@discordjs/builders';
+import { EmbedBuilder, type ChatInputCommandInteraction, SlashCommandBuilder, type SlashCommandIntegerOption } from 'discord.js';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command';
 import type { MusicRuntime } from '../../runtime';
 import { randomUUID } from 'node:crypto';
@@ -42,7 +41,7 @@ export class ShuffleCommand extends BaseCommand {
 
 export class RemoveCommand extends BaseCommand {
   constructor(private runtime: MusicRuntime) { super({ name: 'remove', description: 'Remove a track by position (1-based)', category: 'queue', permissions: { guildOnly: true } }); }
-  buildSlashCommand(): import('discord.js').SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt)=>opt.setName('index').setDescription('Position (1-based)').setRequired(true).setMinValue(1)); }
+  buildSlashCommand(): import('discord.js').SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt: SlashCommandIntegerOption)=>opt.setName('index').setDescription('Position (1-based)').setRequired(true).setMinValue(1)); }
   async execute({ interaction, guildId }: { interaction: ChatInputCommandInteraction; guildId: string }): Promise<CommandExecutionResult> {
     const { publish, incPublishMetric, hasDjOrAdmin, validators } = this.runtime;
     if (!hasDjOrAdmin(interaction)) { await interaction.reply({ content: 'Requires DJ role.', ephemeral: true }); return { success: false, error: 'no_perm' }; }
@@ -73,7 +72,7 @@ export class ClearCommand extends BaseCommand {
 
 export class MoveCommand extends BaseCommand {
   constructor(private runtime: MusicRuntime) { super({ name: 'move', description: 'Move a track between positions', category: 'queue', permissions: { guildOnly: true } }); }
-  buildSlashCommand(): import('discord.js').SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((o)=>o.setName('from').setDescription('From (1-based)').setRequired(true).setMinValue(1)).addIntegerOption((o)=>o.setName('to').setDescription('To (1-based)').setRequired(true).setMinValue(1)); }
+  buildSlashCommand(): import('discord.js').SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((o: SlashCommandIntegerOption)=>o.setName('from').setDescription('From (1-based)').setRequired(true).setMinValue(1)).addIntegerOption((o: SlashCommandIntegerOption)=>o.setName('to').setDescription('To (1-based)').setRequired(true).setMinValue(1)); }
   async execute({ interaction, guildId }: { interaction: ChatInputCommandInteraction; guildId: string }): Promise<CommandExecutionResult> {
     const { publish, incPublishMetric, hasDjOrAdmin, validators } = this.runtime;
     if (!hasDjOrAdmin(interaction)) { await interaction.reply({ content: 'Requires DJ role.', ephemeral: true }); return { success: false, error: 'no_perm' }; }
