@@ -1,6 +1,7 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
-import type { MusicRuntime } from '../../runtime.js';
+import { type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { BaseCommand, type CommandExecutionResult } from '../../base/command';
+import type { MusicRuntime } from '../../runtime';
 import { randomUUID } from 'node:crypto';
 
 type PlayAck = { ok: true; title: string; uri?: string; artworkUrl?: string } | { ok: false; reason: string };

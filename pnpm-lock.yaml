@@ -203,6 +203,9 @@ importers:
       '@discord-bot/logger':
         specifier: workspace:*
         version: link:../logger
+      '@discordjs/builders':
+        specifier: ^1.11.3
+        version: 1.11.3
       discord.js:
         specifier: ^14.14.1
         version: 14.21.0
@@ -497,8 +500,8 @@ packages:
       '@jridgewell/trace-mapping': 0.3.9
     dev: true
 
-  /@discordjs/builders@1.11.2:
-    resolution: {integrity: sha512-F1WTABdd8/R9D1icJzajC4IuLyyS8f3rTOz66JsSI3pKvpCAtsMBweu8cyNYsIyvcrKAVn9EPK+Psoymq+XC0A==}
+  /@discordjs/builders@1.11.3:
+    resolution: {integrity: sha512-p3kf5eV49CJiRTfhtutUCeivSyQ/l2JlKodW1ZquRwwvlOWmG9+6jFShX6x8rUiYhnP6wKI96rgN/SXMy5e5aw==}
     engines: {node: '>=16.11.0'}
     dependencies:
       '@discordjs/formatters': 0.6.1
@@ -3812,7 +3815,7 @@ packages:
     resolution: {integrity: sha512-U5w41cEmcnSfwKYlLv5RJjB8Joa+QJyRwIJz5i/eg+v2Qvv6EYpCRhN9I2Rlf0900LuqSDg8edakUATrDZQncQ==}
     engines: {node: '>=18'}
     dependencies:
-      '@discordjs/builders': 1.11.2
+      '@discordjs/builders': 1.11.3
       '@discordjs/collection': 1.5.3
       '@discordjs/formatters': 0.6.1
       '@discordjs/rest': 2.6.0

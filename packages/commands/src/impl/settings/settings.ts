@@ -1,6 +1,7 @@
-import { SlashCommandBuilder, EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
-import type { MusicRuntime } from '../../runtime.js';
+import { EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { BaseCommand, type CommandExecutionResult } from '../../base/command';
+import type { MusicRuntime } from '../../runtime';
 import { randomUUID } from 'node:crypto';
 
 export class VolumeCommand extends BaseCommand {

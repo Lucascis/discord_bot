@@ -5,19 +5,20 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "@discord-bot/logger": "workspace:*",
     "@discord-bot/config": "workspace:*",
+    "@discord-bot/logger": "workspace:*",
+    "@discordjs/builders": "^1.11.3",
+    "discord.js": "^14.14.1",
     "reflect-metadata": "^0.1.13"
   },
   "devDependencies": {
+    "@types/node": "^20.11.16",
     "typescript": "^5.3.3",
-    "vitest": "^1.2.2",
-    "@types/node": "^20.11.16"
+    "vitest": "^1.2.2"
   }
 }
