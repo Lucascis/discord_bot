@@ -1,11 +1,19 @@
 # Multi-stage Docker build for production optimization
-FROM node:22-bookworm-slim AS base
+FROM node:22-alpine AS base
+
+# Security and build metadata
+LABEL maintainer="discord-bot-team" \
+      org.opencontainers.image.title="Discord Music Bot" \
+      org.opencontainers.image.description="Secure Discord music bot with Lavalink" \
+      org.opencontainers.image.vendor="Discord Bot Team" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.source="https://github.com/Lucascis/discord_bot" \
+      security.scan="trivy" \
+      security.base="node:22-alpine"
 
 # Enable corepack for pnpm and install OpenSSL for Prisma detection
 RUN corepack enable pnpm \
-  && apt-get update -y \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+  && apk add --no-cache openssl ca-certificates
 
 # Set working directory
 WORKDIR /app
@@ -39,17 +47,15 @@ RUN pnpm -r build
 RUN pnpm install --prod --frozen-lockfile
 
 # Production stage - final optimized image
-FROM node:22-bookworm-slim AS production
+FROM node:22-alpine AS production
 
-# Create non-root user for security (Debian)
-RUN groupadd -g 1001 nodejs \
-  && useradd -m -u 1001 -g nodejs nextjs
+# Create non-root user for security (Alpine)
+RUN addgroup -g 1001 nodejs \
+  && adduser -D -u 1001 -G nodejs nextjs
 
-# Enable corepack for pnpm and install runtime libssl
+# Enable corepack for pnpm and install runtime dependencies
 RUN corepack enable pnpm \
-  && apt-get update -y \
-  && apt-get install -y --no-install-recommends libssl3 ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+  && apk add --no-cache openssl ca-certificates wget
 
 # Set working directory
 WORKDIR /app
@@ -67,9 +73,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
 # Switch to non-root user
 USER nextjs
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+# Health check endpoint - more secure implementation
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
 
 # Default command (overridden by docker-compose)
 CMD ["node", "-e", "console.log('Set service command in docker-compose.yml. Available services: gateway, audio, api, worker')"]
