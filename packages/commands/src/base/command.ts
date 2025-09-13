@@ -1,4 +1,4 @@
-import { type ChatInputCommandInteraction, type SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from 'discord.js';
+import { type ChatInputCommandInteraction, type SlashCommandBuilder } from 'discord.js';
 import { logger } from '@discord-bot/logger';
 
 export interface CommandContext {
@@ -52,7 +52,7 @@ export abstract class BaseCommand {
     };
   }
 
-  abstract buildSlashCommand(): SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
+  abstract buildSlashCommand(): SlashCommandBuilder;
   
   abstract execute(context: CommandContext): Promise<CommandExecutionResult>;
 

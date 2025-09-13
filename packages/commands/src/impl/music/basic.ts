@@ -18,7 +18,7 @@ export class SimplePublishCommand extends BaseCommand {
 
   private requiresDj: boolean;
 
-  buildSlashCommand(): SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder {
+  buildSlashCommand(): SlashCommandBuilder {
     return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description);
   }
 

@@ -16,11 +16,11 @@ export class PlayCommand extends BaseCommand {
     });
   }
 
-  buildSlashCommand(): SlashCommandBuilder | import('discord.js').SlashCommandOptionsOnlyBuilder {
+  buildSlashCommand(): SlashCommandBuilder {
     return new SlashCommandBuilder()
       .setName(this.metadata.name)
       .setDescription(this.metadata.description)
-      .addStringOption((opt: SlashCommandStringOption) => opt.setName('query').setDescription('Song name or URL').setRequired(true));
+      .addStringOption((opt: SlashCommandStringOption) => opt.setName('query').setDescription('Song name or URL').setRequired(true)) as SlashCommandBuilder;
   }
 
   async execute({ interaction, guildId, userId, channelId }: { interaction: ChatInputCommandInteraction; guildId: string; userId: string; channelId: string | null; }): Promise<CommandExecutionResult> {
