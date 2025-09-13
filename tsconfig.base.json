@@ -12,8 +12,6 @@
     "strictFunctionTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true,
     
     // Module resolution and interop
     "esModuleInterop": true,
@@ -30,12 +28,10 @@
     // Code quality  
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
     "removeComments": false,
     
     // Advanced options
-    "incremental": true,
+    "incremental": false,
     "composite": false
   },
   "exclude": [

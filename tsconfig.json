@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@discord-bot/config": ["./packages/config/src/index.ts"],
+      "@discord-bot/database": ["./packages/database/src/index.ts"],
+      "@discord-bot/logger": ["./packages/logger/src/index.ts"],
+      "@discord-bot/commands": ["./packages/commands/src/index.ts"]
+    }
+  },
+  "include": [],
+  "files": []
+}
