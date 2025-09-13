@@ -20,8 +20,8 @@ COPY audio/package.json ./audio/package.json
 COPY api/package.json ./api/package.json
 COPY worker/package.json ./worker/package.json
 
-# Install dependencies (use --no-frozen-lockfile for Docker build compatibility)
-RUN pnpm install --no-frozen-lockfile
+# Install dependencies (use --frozen-lockfile for production builds)
+RUN pnpm install --frozen-lockfile
 
 # Builder stage - compile TypeScript to JavaScript
 FROM base AS builder
@@ -36,7 +36,7 @@ RUN pnpm --filter @discord-bot/database prisma:generate
 RUN pnpm -r build
 
 # Remove dev dependencies for smaller production image
-RUN pnpm install --prod --no-frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile
 
 # Production stage - final optimized image
 FROM node:22-bookworm-slim AS production
