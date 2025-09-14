@@ -29,7 +29,7 @@ COPY api/package.json ./api/package.json
 COPY worker/package.json ./worker/package.json
 
 # Install dependencies (use --frozen-lockfile for production builds)
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Builder stage - compile TypeScript to JavaScript
 FROM base AS builder
@@ -43,8 +43,8 @@ RUN pnpm --filter @discord-bot/database prisma:generate
 # Build all packages and services
 RUN pnpm -r build
 
-# Remove dev dependencies for smaller production image
-RUN pnpm install --prod --frozen-lockfile
+# Keep Prisma client for production
+# Skip removing dev dependencies since Prisma client is needed
 
 # Production stage - final optimized image
 FROM node:22-alpine AS production
@@ -60,7 +60,7 @@ RUN corepack enable pnpm \
 # Set working directory
 WORKDIR /app
 
-# Copy built application from builder stage
+# Copy built application from builder stage with all dependencies
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/packages ./packages
 COPY --from=builder --chown=nextjs:nodejs /app/gateway ./gateway

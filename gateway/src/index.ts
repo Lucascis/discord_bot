@@ -13,10 +13,10 @@ import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
 import { getAutomixEnabled, setAutomixEnabled } from './flags.js';
 import { buildControls, resolveTextChannel, type UiState } from './ui.js';
-import { 
-  validateSearchQuery, 
-  validateInteger, 
-  validateLoopMode, 
+import {
+  validateSearchQuery,
+  validateInteger,
+  validateLoopMode,
   validateSnowflake
 } from './validation.js';
 import {
@@ -99,7 +99,21 @@ const commands = [
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
-// withTimeout is now imported from errors.js
+
+// Redis clients - declared globally for use across functions
+let redisPub: ReturnType<typeof createClient>;
+let redisSub: ReturnType<typeof createClient>;
+
+// Command registry - declared globally
+let commandRegistry: Map<string, import('@discord-bot/commands').BaseCommand>;
+
+// Metrics counters
+const registry = new Registry();
+collectDefaultMetrics({ register: registry });
+const cmdCounter = new Counter({ name: 'discord_commands_total', help: 'Total slash commands', labelNames: ['command'], registers: [registry] });
+const btnCounter = new Counter({ name: 'discord_buttons_total', help: 'Total button clicks', labelNames: ['action'], registers: [registry] });
+const redisPubCounter = new Counter({ name: 'redis_published_total', help: 'Published messages', labelNames: ['channel'], registers: [registry] });
+const redisSubCounter = new Counter({ name: 'redis_consumed_total', help: 'Consumed messages', labelNames: ['channel'], registers: [registry] });
 
 async function main() {
   const appId = env.DISCORD_APPLICATION_ID;
@@ -306,13 +320,14 @@ client.on('interactionCreate', withErrorHandling(async (interaction) => {
   }
 }, 'interaction_handler'));
 
-// Redis bridge: forward Discord RAW to audio and send payloads from audio to Discord shards
-const redisUrl = env.REDIS_URL;
-const redisPub = createClient({ url: redisUrl });
-const redisSub = createClient({ url: redisUrl });
+async function initializeGateway() {
+  // Redis bridge: forward Discord RAW to audio and send payloads from audio to Discord shards
+  const redisUrl = env.REDIS_URL;
+  redisPub = createClient({ url: redisUrl });
+  redisSub = createClient({ url: redisUrl });
 
-await redisPub.connect();
-await redisSub.connect();
+  await redisPub.connect();
+  await redisSub.connect();
 
 // Unified command runtime and registry
 const runtime: MusicRuntime = {
@@ -341,7 +356,7 @@ const runtime: MusicRuntime = {
   validators: { validateSearchQuery, validateInteger, validateLoopMode },
 };
 
-const commandRegistry = new Map<string, import('@discord-bot/commands').BaseCommand>();
+commandRegistry = new Map<string, import('@discord-bot/commands').BaseCommand>();
 const commandInstances = [
   new PlayCommand(runtime),
   new SimplePublishCommand(runtime, { name: 'skip', description: 'Skipped', requiresDj: true }),
@@ -364,7 +379,7 @@ for (const c of commandInstances) commandRegistry.set(c.metadata.name, c);
 const rawMs = env.NOWPLAYING_UPDATE_MS ?? 5000;
 const uiIntervalMs = Math.max(1000, Math.min(60000, Number.isFinite(rawMs as number) ? (rawMs as number) : 5000));
 
-await redisSub.subscribe('discord-bot:ui:now', async (message) => {
+  await redisSub.subscribe('discord-bot:ui:now', async (message) => {
   try {
     const data = JSON.parse(message) as { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused?: boolean; repeatMode?: 'off'|'track'|'queue'; queueLen?: number; hasTrack?: boolean; canSeek?: boolean };
     if (!data || !data.guildId) return;
@@ -459,7 +474,7 @@ client.on('raw', async (d) => {
   }
 });
 
-await redisSub.subscribe('discord-bot:to-discord', async (message) => {
+  await redisSub.subscribe('discord-bot:to-discord', async (message) => {
   try {
     const { guildId, payload } = JSON.parse(message) as {
       guildId: string;
@@ -678,13 +693,7 @@ const healthStatus = {
   service: 'gateway'
 };
 
-// Metrics and Health server
-const registry = new Registry();
-collectDefaultMetrics({ register: registry });
-const cmdCounter = new Counter({ name: 'discord_commands_total', help: 'Total slash commands', labelNames: ['command'], registers: [registry] });
-const btnCounter = new Counter({ name: 'discord_buttons_total', help: 'Total button clicks', labelNames: ['action'], registers: [registry] });
-const redisPubCounter = new Counter({ name: 'redis_published_total', help: 'Published messages', labelNames: ['channel'], registers: [registry] });
-const redisSubCounter = new Counter({ name: 'redis_consumed_total', help: 'Consumed messages', labelNames: ['channel'], registers: [registry] });
+// Metrics and Health server (using previously declared registry and counters)
 
 client.on('interactionCreate', (i: import('discord.js').Interaction) => {
   if (i.isChatInputCommand()) cmdCounter.labels(i.commandName).inc();
@@ -737,11 +746,14 @@ healthServer.listen(env.GATEWAY_HTTP_PORT, () => logger.info(`Gateway health on 
 
 // Simple redis metrics instrumentation at call sites
 
-// Tracing
-if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-  const sdk = new NodeSDK({
-    traceExporter: new OTLPTraceExporter({ url: env.OTEL_EXPORTER_OTLP_ENDPOINT }),
-    instrumentations: [getNodeAutoInstrumentations()],
-  });
-  void sdk.start();
+  // Tracing
+  if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    const sdk = new NodeSDK({
+      traceExporter: new OTLPTraceExporter({ url: env.OTEL_EXPORTER_OTLP_ENDPOINT }),
+      instrumentations: [getNodeAutoInstrumentations()],
+    });
+    void sdk.start();
+  }
 }
+
+void initializeGateway();

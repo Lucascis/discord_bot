@@ -20,15 +20,15 @@ import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } fro
 import { guildMutex } from './guildMutex.js';
 import { shouldAutomixAfterSkip, shouldSeedOnFirstPlay } from './logic.js';
 import { validateCommandMessage } from './validation.js';
-import { 
+import {
   withErrorHandling
 } from './errors.js';
 import { automixCache } from './cache.js';
-import { 
-  batchQueueSaver, 
-  MemoryManager, 
-  PerformanceTracker, 
-  SearchThrottler 
+import {
+  batchQueueSaver,
+  MemoryManager,
+  PerformanceTracker,
+  SearchThrottler
 } from './performance.js';
 
 const redisUrl = env.REDIS_URL;

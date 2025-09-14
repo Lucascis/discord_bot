@@ -1,4 +1,4 @@
-import { SentryStub } from './sentry-stub';
+import { SentryStub } from './sentry-stub.js';
 
 // Use dynamic imports to handle test environment and missing dependencies gracefully
 let Sentry: typeof SentryStub = SentryStub;

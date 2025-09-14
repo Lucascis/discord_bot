@@ -98,7 +98,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    command: ["sh", "-lc", "npx --yes prisma migrate deploy --schema /app/packages/database/prisma/schema.prisma && node api/dist/index.js"]
+    command: ["node", "api/dist/index.js"]
     env_file: .env
     environment:
       NODE_ENV: production

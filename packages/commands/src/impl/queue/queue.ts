@@ -1,6 +1,7 @@
-import { EmbedBuilder, type ChatInputCommandInteraction, SlashCommandBuilder, type SlashCommandIntegerOption } from 'discord.js';
-import { BaseCommand, type CommandExecutionResult } from '../../base/command';
-import type { MusicRuntime } from '../../runtime';
+import { EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, type SlashCommandIntegerOption } from '@discordjs/builders';
+import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
+import type { MusicRuntime } from '../../runtime.js';
 import { randomUUID } from 'node:crypto';
 
 export class QueueCommand extends BaseCommand {

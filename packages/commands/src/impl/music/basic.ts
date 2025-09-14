@@ -1,6 +1,7 @@
-import { type ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
-import { BaseCommand, type CommandExecutionResult } from '../../base/command';
-import type { MusicRuntime } from '../../runtime';
+import { type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
+import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
+import type { MusicRuntime } from '../../runtime.js';
 
 export class SimplePublishCommand extends BaseCommand {
   constructor(

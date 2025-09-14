@@ -1,8 +1,6 @@
 import { Client, GatewayIntentBits, PermissionsBitField } from 'discord.js';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
-import { setupReadyHandlers, type ReadyHandlerContext } from '../handlers/ready.js';
-import { setupVoiceHandlers, type VoiceHandlerContext } from '../handlers/voice.js';
 
 interface NowLiveData {
   channelId: string;
@@ -42,31 +40,15 @@ export function hasDjOrAdmin(
   return isAdmin || fullMember?.roles?.cache?.has(djRole.id);
 }
 
-export function setupDiscordHandlers(
-  client: Client, 
-  nowLive: Map<string, NowLiveData>
-): void {
-  const readyContext: ReadyHandlerContext = {
-    client,
-    nowLive,
-  };
-
-  const voiceContext: VoiceHandlerContext = {
-    client,
-    nowLive,
-  };
-
-  setupReadyHandlers(client, readyContext);
-  setupVoiceHandlers(client, voiceContext);
-  
+export function setupDiscordHandlers(): void {
+  // Event handlers are now in the main index.ts file
   logger.info('Discord event handlers registered');
 }
 
 export async function connectDiscord(
-  client: Client,
-  nowLive: Map<string, NowLiveData>
+  client: Client
 ): Promise<void> {
-  setupDiscordHandlers(client, nowLive);
+  setupDiscordHandlers();
   
   try {
     await client.login(env.DISCORD_TOKEN);
