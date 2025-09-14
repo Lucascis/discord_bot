@@ -1,46 +1,65 @@
 // Simple per-guild mutex to serialize queue/player mutations.
-// Design: a Map<guildId, Promise<void>> acts as a chain. Each run() attaches
-// a new promise to the end of the chain ensuring FIFO execution.
-// Timeouts: if a task exceeds MAX_LOCK_MS, a warning log can be emitted externally.
+// Design: Each guild has a queue of tasks that execute sequentially.
 
 export type GuildMutexTask<T> = () => Promise<T> | T;
 
+interface QueuedTask<T> {
+  task: GuildMutexTask<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+
 class GuildMutex {
-  private chains = new Map<string, Promise<unknown>>();
+  private queues = new Map<string, QueuedTask<unknown>[]>();
+  private running = new Set<string>();
 
   async run<T>(guildId: string, task: GuildMutexTask<T>): Promise<T> {
-    // Get the current chain promise
-    const prev = this.chains.get(guildId) || Promise.resolve();
+    return new Promise<T>((resolve, reject) => {
+      // Add task to queue
+      if (!this.queues.has(guildId)) {
+        this.queues.set(guildId, []);
+      }
 
-    // Create a new promise for the next task to wait on
-    let resolveNext: () => void;
-    const nextPromise = new Promise<void>((resolve) => {
-      resolveNext = resolve;
+      const queue = this.queues.get(guildId)!;
+      queue.push({ task, resolve, reject } as QueuedTask<unknown>);
+
+      // Start processing if not already running
+      if (!this.running.has(guildId)) {
+        this.processQueue(guildId);
+      }
     });
+  }
 
-    // Chain the next promise to execute after current one finishes
-    const chainPromise = prev.then(() => nextPromise);
-    this.chains.set(guildId, chainPromise);
+  private async processQueue(guildId: string): Promise<void> {
+    if (this.running.has(guildId)) {
+      return;
+    }
+
+    this.running.add(guildId);
 
     try {
-      // Wait for previous task to complete
-      await prev;
-
-      // Execute our task
-      const result = await task();
-
-      // Return the result
-      return result;
-    } catch (error) {
-      throw error;
-    } finally {
-      // Signal that this task is done
-      resolveNext!();
-
-      // Clean up if no new tasks were added
-      if (this.chains.get(guildId) === chainPromise) {
-        this.chains.delete(guildId);
+      const queue = this.queues.get(guildId);
+      if (!queue) {
+        return;
       }
+
+      while (queue.length > 0) {
+        const queuedTask = queue.shift()!;
+
+        try {
+          const result = await queuedTask.task();
+          queuedTask.resolve(result);
+        } catch (error) {
+          queuedTask.reject(error);
+        }
+      }
+
+      // Clean up empty queue
+      if (queue.length === 0) {
+        this.queues.delete(guildId);
+      }
+    } finally {
+      this.running.delete(guildId);
     }
   }
 }

@@ -5,7 +5,7 @@ import { guildMutex } from '../src/guildMutex.js';
 // and assert order is preserved (no overlaps) and length matches.
 
 describe('guildMutex concurrency', () => {
-  it.skip('serializes tasks for same guild', { timeout: 30000 }, async () => {
+  it('serializes tasks for same guild', { timeout: 30000 }, async () => {
     const seq: number[] = [];
     const N = 25;
     await Promise.all(

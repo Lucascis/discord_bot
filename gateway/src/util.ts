@@ -1,32 +1,53 @@
 import { logger } from '@discord-bot/logger';
 
 export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T | undefined> {
-  let timeoutId: NodeJS.Timeout;
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  let isSettled = false;
 
-  const timeoutPromise = new Promise<T | undefined>((resolve) => {
-    timeoutId = setTimeout(() => {
-      logger.error({ label, timeoutMs: ms }, 'op timed out');
-      resolve(undefined);
+  const timeoutPromise = new Promise<undefined>((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        logger.error({ label, timeoutMs: ms }, 'op timed out');
+        resolve(undefined);
+      }
     }, ms);
   });
 
-  try {
-    const result = await Promise.race([
-      p.then(value => {
-        clearTimeout(timeoutId);
+  const wrappedPromise = p.then(
+    (value: T) => {
+      if (!isSettled) {
+        isSettled = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         return value;
-      }).catch(e => {
-        clearTimeout(timeoutId);
-        logger.error({ e, label }, 'op failed');
-        return undefined;
-      }),
-      timeoutPromise
-    ]);
+      }
+      return undefined as T;
+    },
+    (error: unknown) => {
+      if (!isSettled) {
+        isSettled = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        logger.error({ e: error, label }, 'op failed');
+      }
+      return undefined as T;
+    }
+  );
 
-    return result;
+  try {
+    const result = await Promise.race([wrappedPromise, timeoutPromise]);
+
+    if (!isSettled) {
+      isSettled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+
+    return result as T | undefined;
   } catch (e) {
-    clearTimeout(timeoutId);
-    logger.error({ e, label }, 'op threw');
+    if (!isSettled) {
+      isSettled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      logger.error({ e, label }, 'op threw');
+    }
     return undefined;
   }
 }
