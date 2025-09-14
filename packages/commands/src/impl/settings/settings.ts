@@ -1,12 +1,12 @@
 import { EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { SlashCommandBuilder, type SlashCommandIntegerOption, type SlashCommandStringOption } from '@discordjs/builders';
+import { SlashCommandBuilder } from 'discord.js';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
 import type { MusicRuntime } from '../../runtime.js';
 import { randomUUID } from 'node:crypto';
 
 export class VolumeCommand extends BaseCommand {
   constructor(private runtime: MusicRuntime) { super({ name: 'volume', description: 'Set playback volume (0-200)', category: 'settings', permissions: { guildOnly: true } }); }
-  buildSlashCommand(): SlashCommandBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt: SlashCommandIntegerOption)=>opt.setName('percent').setDescription('Volume percent (0-200)').setRequired(true).setMinValue(0).setMaxValue(200)) as SlashCommandBuilder; }
+  buildSlashCommand() { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt)=>opt.setName('percent').setDescription('Volume percent (0-200)').setRequired(true).setMinValue(0).setMaxValue(200)); }
   async execute({ interaction, guildId }: { interaction: ChatInputCommandInteraction; guildId: string }): Promise<CommandExecutionResult> {
     const { publish, incPublishMetric, hasDjOrAdmin, validators } = this.runtime;
     if (!hasDjOrAdmin(interaction)) { await interaction.reply({ content: 'Requires DJ role.', ephemeral: true }); return { success: false, error: 'no_perm' }; }
@@ -23,7 +23,7 @@ export class VolumeCommand extends BaseCommand {
 
 export class LoopCommand extends BaseCommand {
   constructor(private runtime: MusicRuntime) { super({ name: 'loop', description: 'Set loop mode', category: 'settings', permissions: { guildOnly: true } }); }
-  buildSlashCommand(): SlashCommandBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addStringOption((opt: SlashCommandStringOption)=>opt.setName('mode').setDescription('Loop mode').setRequired(true).addChoices({name:'off', value:'off'},{name:'track', value:'track'},{name:'queue', value:'queue'})) as SlashCommandBuilder; }
+  buildSlashCommand() { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addStringOption((opt)=>opt.setName('mode').setDescription('Loop mode').setRequired(true).addChoices({name:'off', value:'off'},{name:'track', value:'track'},{name:'queue', value:'queue'})); }
   async execute({ interaction, guildId }: { interaction: ChatInputCommandInteraction; guildId: string }): Promise<CommandExecutionResult> {
     const { publish, incPublishMetric, hasDjOrAdmin, validators } = this.runtime;
     if (!hasDjOrAdmin(interaction)) { await interaction.reply({ content: 'Requires DJ role.', ephemeral: true }); return { success: false, error: 'no_perm' }; }
@@ -40,7 +40,7 @@ export class LoopCommand extends BaseCommand {
 
 export class SeekCommand extends BaseCommand {
   constructor(private runtime: MusicRuntime) { super({ name: 'seek', description: 'Seek current track to position (seconds)', category: 'settings', permissions: { guildOnly: true } }); }
-  buildSlashCommand(): SlashCommandBuilder { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt: SlashCommandIntegerOption)=>opt.setName('seconds').setDescription('Position in seconds').setRequired(true).setMinValue(0)) as SlashCommandBuilder; }
+  buildSlashCommand() { return new SlashCommandBuilder().setName(this.metadata.name).setDescription(this.metadata.description).addIntegerOption((opt)=>opt.setName('seconds').setDescription('Position in seconds').setRequired(true).setMinValue(0)); }
   async execute({ interaction, guildId }: { interaction: ChatInputCommandInteraction; guildId: string }): Promise<CommandExecutionResult> {
     const { publish, incPublishMetric, hasDjOrAdmin, validators } = this.runtime;
     if (!hasDjOrAdmin(interaction)) { await interaction.reply({ content: 'Requires DJ role.', ephemeral: true }); return { success: false, error: 'no_perm' }; }

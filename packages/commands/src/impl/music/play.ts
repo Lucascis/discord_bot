@@ -1,5 +1,5 @@
 import { type ChatInputCommandInteraction } from 'discord.js';
-import { SlashCommandBuilder, type SlashCommandStringOption } from '@discordjs/builders';
+import { SlashCommandBuilder } from 'discord.js';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
 import type { MusicRuntime } from '../../runtime.js';
 import { randomUUID } from 'node:crypto';
@@ -17,11 +17,11 @@ export class PlayCommand extends BaseCommand {
     });
   }
 
-  buildSlashCommand(): SlashCommandBuilder {
+  buildSlashCommand() {
     return new SlashCommandBuilder()
       .setName(this.metadata.name)
       .setDescription(this.metadata.description)
-      .addStringOption((opt: SlashCommandStringOption) => opt.setName('query').setDescription('Song name or URL').setRequired(true)) as SlashCommandBuilder;
+      .addStringOption((opt) => opt.setName('query').setDescription('Song name or URL').setRequired(true));
   }
 
   async execute({ interaction, guildId, userId, channelId }: { interaction: ChatInputCommandInteraction; guildId: string; userId: string; channelId: string | null; }): Promise<CommandExecutionResult> {
