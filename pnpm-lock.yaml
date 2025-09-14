@@ -161,6 +161,9 @@ importers:
       '@discord-bot/logger':
         specifier: workspace:*
         version: link:../packages/logger
+      '@discordjs/builders':
+        specifier: ^1.11.3
+        version: 1.11.3
       '@discordjs/rest':
         specifier: ^1.7.1
         version: 1.7.1
