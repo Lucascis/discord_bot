@@ -1,54 +1,36 @@
 import { logger } from '@discord-bot/logger';
 
 export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T | undefined> {
-  let timeoutHandle: NodeJS.Timeout | null = null;
-  let isSettled = false;
+  return new Promise<T | undefined>((resolve) => {
+    let isResolved = false;
 
-  const timeoutPromise = new Promise<undefined>((resolve) => {
-    timeoutHandle = setTimeout(() => {
-      if (!isSettled) {
-        isSettled = true;
+    // Set up timeout
+    const timeoutId = setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
         logger.error({ label, timeoutMs: ms }, 'op timed out');
         resolve(undefined);
       }
     }, ms);
+
+    // Handle the original promise
+    p.then(
+      (value: T) => {
+        if (!isResolved) {
+          isResolved = true;
+          clearTimeout(timeoutId);
+          resolve(value);
+        }
+      },
+      (error: unknown) => {
+        if (!isResolved) {
+          isResolved = true;
+          clearTimeout(timeoutId);
+          logger.error({ e: error, label }, 'op failed');
+          resolve(undefined);
+        }
+      }
+    );
   });
-
-  const wrappedPromise = p.then(
-    (value: T) => {
-      if (!isSettled) {
-        isSettled = true;
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        return value;
-      }
-      return undefined as T;
-    },
-    (error: unknown) => {
-      if (!isSettled) {
-        isSettled = true;
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        logger.error({ e: error, label }, 'op failed');
-      }
-      return undefined as T;
-    }
-  );
-
-  try {
-    const result = await Promise.race([wrappedPromise, timeoutPromise]);
-
-    if (!isSettled) {
-      isSettled = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-    }
-
-    return result as T | undefined;
-  } catch (e) {
-    if (!isSettled) {
-      isSettled = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      logger.error({ e, label }, 'op threw');
-    }
-    return undefined;
-  }
 }
 

@@ -1,10 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { guildMutex } from '../src/guildMutex.js';
 
 // Synthetic test to ensure serialization: we simulate N concurrent tasks appending to an array
 // and assert order is preserved (no overlaps) and length matches.
 
 describe('guildMutex concurrency', () => {
+  beforeEach(() => {
+    // Clear mutex state before each test to avoid interference
+    guildMutex.clearAll();
+  });
+
+  afterEach(() => {
+    // Clean up after each test as well
+    guildMutex.clearAll();
+  });
+
   it('serializes tasks for same guild', { timeout: 30000 }, async () => {
     const seq: number[] = [];
     const N = 25;

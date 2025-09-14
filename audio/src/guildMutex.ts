@@ -1,65 +1,38 @@
 // Simple per-guild mutex to serialize queue/player mutations.
-// Design: Each guild has a queue of tasks that execute sequentially.
+// Design: a Map<guildId, Promise<void>> acts as a chain. Each run() attaches
+// a new promise to the end of the chain ensuring FIFO execution.
 
 export type GuildMutexTask<T> = () => Promise<T> | T;
 
-interface QueuedTask<T> {
-  task: GuildMutexTask<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-}
-
 class GuildMutex {
-  private queues = new Map<string, QueuedTask<unknown>[]>();
-  private running = new Set<string>();
+  private chains = new Map<string, Promise<void>>();
 
-  async run<T>(guildId: string, task: GuildMutexTask<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      // Add task to queue
-      if (!this.queues.has(guildId)) {
-        this.queues.set(guildId, []);
-      }
-
-      const queue = this.queues.get(guildId)!;
-      queue.push({ task, resolve, reject } as QueuedTask<unknown>);
-
-      // Start processing if not already running
-      if (!this.running.has(guildId)) {
-        this.processQueue(guildId);
-      }
-    });
+  // Method to clear all state - useful for testing
+  public clearAll(): void {
+    this.chains.clear();
   }
 
-  private async processQueue(guildId: string): Promise<void> {
-    if (this.running.has(guildId)) {
-      return;
-    }
+  async run<T>(guildId: string, task: GuildMutexTask<T>): Promise<T> {
+    // Get the current chain promise for this guild
+    const previousPromise = this.chains.get(guildId) || Promise.resolve();
 
-    this.running.add(guildId);
+    // Create a promise for this task that will resolve when the task completes
+    let resolveThisTask: () => void;
+    const thisTaskPromise = new Promise<void>((resolve) => {
+      resolveThisTask = resolve;
+    });
 
+    // Chain this task promise after the previous one
+    this.chains.set(guildId, previousPromise.then(() => thisTaskPromise));
+
+    // Wait for the previous task to complete, then run our task
     try {
-      const queue = this.queues.get(guildId);
-      if (!queue) {
-        return;
-      }
-
-      while (queue.length > 0) {
-        const queuedTask = queue.shift()!;
-
-        try {
-          const result = await queuedTask.task();
-          queuedTask.resolve(result);
-        } catch (error) {
-          queuedTask.reject(error);
-        }
-      }
-
-      // Clean up empty queue
-      if (queue.length === 0) {
-        this.queues.delete(guildId);
-      }
+      await previousPromise;
+      const result = await task();
+      return result;
     } finally {
-      this.running.delete(guildId);
+      // Mark this task as complete so the next one can run
+      resolveThisTask!();
     }
   }
 }
