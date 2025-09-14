@@ -20,7 +20,10 @@ export class QueueCommand extends BaseCommand {
     const data = (await Promise.race([response, new Promise((res) => setTimeout(() => res(null), 1500))])) as { items: Array<{ title: string; uri?: string }> } | null;
     if (!data || !data.items || data.items.length === 0) { await interaction.editReply('Queue is empty.'); return { success: true }; }
     const description = data.items.slice(0, 10).map((t, i) => `${i + 1}. [${t.title}](${t.uri})`).join('\n');
-    const embed = new EmbedBuilder().setTitle('Queue').setDescription(description).setColor(0xfee75c);
+    const embed = new EmbedBuilder()
+      .setTitle('Queue')
+      .setDescription(description)
+      .setColor(0xfee75c);
     await interaction.editReply({ embeds: [embed] });
     return { success: true };
   }

@@ -72,7 +72,14 @@ export class NowPlayingCommand extends BaseCommand {
     const total = data.durationMs || 0; const pos = data.positionMs || 0; const pct = total>0? Math.min(1, pos/total):0; const barLen=20; const filled = Math.min(barLen-1, Math.round(pct*barLen)); const bar = '▬'.repeat(filled)+'🔘'+'▬'.repeat(Math.max(0, barLen-filled-1));
     const fmt = (ms:number)=>{ const s = Math.floor(ms/1000); const m = Math.floor(s/60); const ss = s%60; return `${m}:${ss.toString().padStart(2,'0')}`; };
     const ytMatch = data.uri?.match(/(?:v=|youtu\.be\/)([\w-]{11})/); const thumb = data.artworkUrl ?? (ytMatch ? `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg` : undefined); const description = data.uri ? `[${data.title}](${data.uri})` : `${data.title}`;
-    const embed = new EmbedBuilder().setTitle('Now Playing').setDescription(description).addFields({ name: 'Author', value: data.author ?? 'Unknown', inline: true }, { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false }).setColor(0x57f287);
+    const embed = new EmbedBuilder()
+      .setTitle('Now Playing')
+      .setDescription(description)
+      .addFields(
+        { name: 'Author', value: data.author ?? 'Unknown', inline: true },
+        { name: 'Progress', value: data.isStream ? 'live' : `${fmt(pos)} ${bar} ${fmt(total)}`, inline: false }
+      )
+      .setColor(0x57f287);
     if (thumb) embed.setThumbnail(thumb);
     await interaction.editReply({ embeds: [embed] });
     return { success: true };
