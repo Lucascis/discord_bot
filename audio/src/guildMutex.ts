@@ -9,24 +9,37 @@ class GuildMutex {
   private chains = new Map<string, Promise<unknown>>();
 
   async run<T>(guildId: string, task: GuildMutexTask<T>): Promise<T> {
+    // Get the current chain promise
     const prev = this.chains.get(guildId) || Promise.resolve();
-    let release: () => void;
-    const p = new Promise<void>((res) => { release = res; });
-    // Chain next before executing to avoid race if task throws fast.
-    this.chains.set(guildId, prev.then(() => p));
+
+    // Create a new promise for the next task to wait on
+    let resolveNext: () => void;
+    const nextPromise = new Promise<void>((resolve) => {
+      resolveNext = resolve;
+    });
+
+    // Chain the next promise to execute after current one finishes
+    const chainPromise = prev.then(() => nextPromise);
+    this.chains.set(guildId, chainPromise);
 
     try {
-      await prev; // wait previous chain
-      return await task();
+      // Wait for previous task to complete
+      await prev;
+
+      // Execute our task
+      const result = await task();
+
+      // Return the result
+      return result;
+    } catch (error) {
+      throw error;
     } finally {
-      // release current link
-      release!();
-      // Garbage collect completed chains to avoid unbounded growth
-      const current = this.chains.get(guildId);
-      if (current === p) {
-        // If nobody chained after us yet, keep minimal resolved promise
-        // to ensure future tasks still await something resolved.
-        this.chains.set(guildId, Promise.resolve());
+      // Signal that this task is done
+      resolveNext!();
+
+      // Clean up if no new tasks were added
+      if (this.chains.get(guildId) === chainPromise) {
+        this.chains.delete(guildId);
       }
     }
   }
