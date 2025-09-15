@@ -50,7 +50,6 @@ jobs:
           pnpm --filter @discord-bot/config build
           pnpm --filter @discord-bot/database build
           pnpm --filter @discord-bot/logger build
-          pnpm --filter @discord-bot/commands install
           pnpm --filter @discord-bot/commands build
       - run: pnpm typecheck
       - run: pnpm test
