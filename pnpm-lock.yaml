@@ -217,6 +217,9 @@ importers:
       '@discord-bot/logger':
         specifier: workspace:*
         version: link:../logger
+      '@discordjs/builders':
+        specifier: ^1.11.3
+        version: 1.11.3
       discord.js:
         specifier: ^14.22.1
         version: 14.22.1
@@ -224,9 +227,6 @@ importers:
         specifier: ^0.1.13
         version: 0.1.14
     devDependencies:
-      '@discordjs/builders':
-        specifier: ^1.11.3
-        version: 1.11.3
       '@types/node':
         specifier: ^20.11.16
         version: 20.19.14
