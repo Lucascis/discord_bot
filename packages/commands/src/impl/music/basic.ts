@@ -1,4 +1,5 @@
-import { type ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder } from '@discordjs/builders';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
 import type { MusicRuntime } from '../../runtime.js';
 
