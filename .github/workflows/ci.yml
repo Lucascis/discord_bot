@@ -23,7 +23,7 @@ jobs:
           cache: 'pnpm'
       
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
       
       - name: Run npm audit (High & Critical only)
         run: pnpm audit --audit-level critical
@@ -41,9 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
-      - run: pnpm install --no-frozen-lockfile
-      - name: Ensure dependencies are available
-        run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - name: Clean TypeScript artifacts
         run: find . -name "*.tsbuildinfo" -delete && find . -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
