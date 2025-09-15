@@ -1,5 +1,4 @@
-import { EmbedBuilder, type ChatInputCommandInteraction } from 'discord.js';
-import { SlashCommandBuilder, SlashCommandIntegerOption } from '@discordjs/builders';
+import { EmbedBuilder, type ChatInputCommandInteraction, SlashCommandBuilder, SlashCommandIntegerOption } from 'discord.js';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
 import type { MusicRuntime } from '../../runtime.js';
 import { randomUUID } from 'node:crypto';
