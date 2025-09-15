@@ -42,6 +42,8 @@ jobs:
           node-version: 22
           cache: 'pnpm'
       - run: pnpm install --no-frozen-lockfile
+      - name: Ensure dependencies are available
+        run: pnpm install
       - run: pnpm lint
       - name: Clean TypeScript artifacts
         run: find . -name "*.tsbuildinfo" -delete && find . -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
