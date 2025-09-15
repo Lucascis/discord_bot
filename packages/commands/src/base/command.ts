@@ -1,4 +1,5 @@
 import { type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, SlashCommandOptionsOnlyBuilder } from '@discordjs/builders';
 import { logger } from '@discord-bot/logger';
 
 export interface CommandContext {
@@ -52,8 +53,7 @@ export abstract class BaseCommand {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  abstract buildSlashCommand(): any;
+  abstract buildSlashCommand(): SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
   
   abstract execute(context: CommandContext): Promise<CommandExecutionResult>;
 
