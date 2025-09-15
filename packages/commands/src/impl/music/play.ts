@@ -1,5 +1,5 @@
 import { type ChatInputCommandInteraction } from 'discord.js';
-import { SlashCommandBuilder, SlashCommandStringOption } from '@discordjs/builders';
+import { SlashCommandBuilder, SlashCommandStringOption } from 'discord.js';
 import { BaseCommand, type CommandExecutionResult } from '../../base/command.js';
 import type { MusicRuntime } from '../../runtime.js';
 import { randomUUID } from 'node:crypto';
