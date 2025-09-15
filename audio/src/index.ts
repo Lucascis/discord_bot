@@ -562,7 +562,7 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
           );
         }
       }
-    } catch (_ackErr) { /* ignore */ }
+    } catch { /* ignore */ }
   }
 }, 'redis_command_handler'));
 
@@ -791,7 +791,7 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   try {
     const info = (pick as { info?: { title?: string; uri?: string } }).info;
     logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri }, 'automix: picked candidate');
-  } catch (_e) { /* ignore */ }
+  } catch { /* ignore */ }
   await ensurePlayback(player as unknown as import('./autoplay.js').LLPlayer, pick as unknown as import('./autoplay.js').LLTrack);
   // Si la cola queda corta, volver a sembrar relacionados para mantener reproducción continua
   try {

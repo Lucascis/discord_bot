@@ -1,7 +1,7 @@
-import { SentryStub } from './sentry-stub.js';
+import { SentryStub, sentryStub } from './sentry-stub.js';
 
 // Use dynamic imports to handle test environment and missing dependencies gracefully
-let Sentry: typeof SentryStub = SentryStub;
+let Sentry: SentryStub = sentryStub;
 let nodeProfilingIntegration: (() => Record<string, unknown>) | undefined = undefined;
 
 async function loadSentryDependencies() {
@@ -13,19 +13,19 @@ async function loadSentryDependencies() {
   try {
     // Use eval to bypass TypeScript static analysis
     const sentryModule = await (eval('import("@sentry/node")') as Promise<Record<string, unknown>>);
-    Sentry = sentryModule as unknown as typeof SentryStub;
+    Sentry = sentryModule as unknown as SentryStub;
     
     try {
       const profilingModule = await (eval('import("@sentry/profiling-node")') as Promise<Record<string, unknown>>);
       nodeProfilingIntegration = profilingModule.nodeProfilingIntegration as (() => Record<string, unknown>);
-    } catch (profilingError) {
+    } catch {
       console.warn('Sentry profiling not available, continuing without profiling');
     }
     
     return true;
   } catch (error) {
     console.warn('Sentry modules not available, error monitoring will be disabled:', error);
-    Sentry = SentryStub;
+    Sentry = sentryStub;
     return false;
   }
 }

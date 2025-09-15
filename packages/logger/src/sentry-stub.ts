@@ -12,7 +12,7 @@ export interface SentryStub {
   close: (timeout?: number) => Promise<boolean>;
 }
 
-export const SentryStub: SentryStub = {
+export const sentryStub: SentryStub = {
   init: () => {},
   captureException: () => '',
   captureMessage: () => '',

@@ -451,7 +451,7 @@ const uiIntervalMs = Math.max(1000, Math.min(60000, Number.isFinite(rawMs as num
           stateWithUri2.trackUri = data.uri;
         }
         nowLive.set(data.guildId, { ...live, lastEdit: now, state: stateWithUri2 });
-      } catch (editError) {
+      } catch {
         // Message doesn't exist anymore, create a new one
         const newMsg = await ch.send({ embeds: [embed], components: controls });
         const stateWithUri3: UiState & { trackUri?: string } = { ...state };
