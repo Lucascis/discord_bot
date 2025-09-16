@@ -1,0 +1,627 @@
+# Production Monitoring Stack for Discord Bot
+# Comprehensive observability with Prometheus, Grafana, Jaeger, and Alerting
+
+---
+# Prometheus ServiceMonitor for Discord Bot Services
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: discord-bot-metrics
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+    scrapeTimeout: 10s
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+    - sourceLabels: [__name__]
+      regex: 'process_.*'
+      action: drop
+
+---
+# PrometheusRule for Discord Bot Alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: discord-bot-alerts
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: alerting
+spec:
+  groups:
+  - name: discord-bot.high-priority
+    interval: 30s
+    rules:
+    # Critical Alerts
+    - alert: DiscordBotServiceDown
+      expr: up{job="discord-bot-metrics"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "Discord Bot service {{ $labels.instance }} is down"
+        description: |
+          The Discord Bot service {{ $labels.instance }} has been down for more than 1 minute.
+          This indicates a complete service failure that requires immediate attention.
+        runbook_url: "https://runbooks.example.com/discord-bot/service-down"
+        dashboard_url: "https://grafana.example.com/d/discord-bot-overview"
+
+    - alert: DiscordBotHighErrorRate
+      expr: |
+        (
+          sum(rate(http_requests_total{job="discord-bot-metrics",code=~"5.."}[5m])) by (service) /
+          sum(rate(http_requests_total{job="discord-bot-metrics"}[5m])) by (service)
+        ) > 0.1
+      for: 2m
+      labels:
+        severity: critical
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "High error rate in {{ $labels.service }}"
+        description: |
+          Service {{ $labels.service }} has an error rate of {{ $value | humanizePercentage }}
+          over the last 5 minutes, which is above the 10% threshold.
+        runbook_url: "https://runbooks.example.com/discord-bot/high-error-rate"
+
+    - alert: DiscordBotHighLatency
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket{job="discord-bot-metrics"}[5m])) by (le, service)
+        ) > 1.0
+      for: 5m
+      labels:
+        severity: warning
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "High latency in {{ $labels.service }}"
+        description: |
+          Service {{ $labels.service }} has a 95th percentile latency of {{ $value }}s
+          which is above the 1s threshold.
+
+    # Discord-specific alerts
+    - alert: DiscordGatewayDisconnected
+      expr: discord_gateway_connection_status == 0
+      for: 30s
+      labels:
+        severity: critical
+        service: discord-bot
+        component: gateway
+        team: platform
+      annotations:
+        summary: "Discord Gateway connection lost"
+        description: |
+          The Discord Gateway connection has been lost for {{ $labels.instance }}.
+          The bot will not receive events until reconnected.
+        runbook_url: "https://runbooks.example.com/discord-bot/gateway-disconnected"
+
+    - alert: DiscordBotMemoryUsageHigh
+      expr: |
+        (
+          container_memory_working_set_bytes{namespace="discord-bot-prod",container!="POD",container!=""} /
+          container_spec_memory_limit_bytes{namespace="discord-bot-prod",container!="POD",container!=""} * 100
+        ) > 90
+      for: 5m
+      labels:
+        severity: warning
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "High memory usage in {{ $labels.pod }}"
+        description: |
+          Pod {{ $labels.pod }} is using {{ $value }}% of its memory limit.
+          Consider scaling up or investigating memory leaks.
+
+  - name: discord-bot.audio-specific
+    interval: 30s
+    rules:
+    - alert: AudioServiceDropouts
+      expr: |
+        rate(discord_audio_dropouts_total[5m]) > 0.01
+      for: 2m
+      labels:
+        severity: warning
+        service: discord-bot
+        component: audio
+        team: platform
+      annotations:
+        summary: "Audio dropouts detected in {{ $labels.instance }}"
+        description: |
+          Audio service {{ $labels.instance }} is experiencing dropouts at a rate of
+          {{ $value | humanize }} per second.
+
+    - alert: LavalinkConnectionLost
+      expr: discord_lavalink_connection_status == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: discord-bot
+        component: audio
+        team: platform
+      annotations:
+        summary: "Lavalink connection lost"
+        description: |
+          The connection to Lavalink has been lost for {{ $labels.instance }}.
+          Audio functionality will be impaired.
+
+  - name: discord-bot.capacity
+    interval: 1m
+    rules:
+    - alert: DiscordBotHighCPUUsage
+      expr: |
+        (
+          rate(container_cpu_usage_seconds_total{namespace="discord-bot-prod",container!="POD",container!=""}[5m]) /
+          container_spec_cpu_quota{namespace="discord-bot-prod",container!="POD",container!=""} * 100
+        ) > 80
+      for: 10m
+      labels:
+        severity: warning
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "High CPU usage in {{ $labels.pod }}"
+        description: |
+          Pod {{ $labels.pod }} is using {{ $value }}% of its CPU limit consistently.
+
+    - alert: DiscordBotScalingEvent
+      expr: increase(kube_deployment_status_replicas{namespace="discord-bot-prod"}[5m]) > 0
+      for: 0m
+      labels:
+        severity: info
+        service: discord-bot
+        team: platform
+      annotations:
+        summary: "Scaling event detected for {{ $labels.deployment }}"
+        description: |
+          Deployment {{ $labels.deployment }} has scaled from {{ $labels.replicas_old }}
+          to {{ $labels.replicas_new }} replicas.
+
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-bot-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  discord-bot-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Discord Bot - Production Overview",
+        "tags": ["discord-bot", "production"],
+        "timezone": "UTC",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Service Health",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"discord-bot-metrics\"}",
+                "legendFormat": "{{ instance }}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": 0},
+                    {"color": "green", "value": 1}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job=\"discord-bot-metrics\"}[5m])) by (service)",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "requests/sec",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job=\"discord-bot-metrics\",code=~\"5..\"}[5m])) by (service) / sum(rate(http_requests_total{job=\"discord-bot-metrics\"}[5m])) by (service)",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "error rate",
+                "min": 0,
+                "max": 1
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 18, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "Response Time (95th percentile)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"discord-bot-metrics\"}[5m])) by (le, service))",
+                "legendFormat": "{{ service }}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "seconds",
+                "min": 0
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Discord Events",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(discord_events_total[5m])",
+                "legendFormat": "{{ event_type }}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Audio Players",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "discord_audio_players_active",
+                "legendFormat": "Active Players"
+              },
+              {
+                "expr": "discord_audio_players_total",
+                "legendFormat": "Total Players"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          },
+          {
+            "id": 7,
+            "title": "Resource Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"discord-bot-prod\"}[5m])) by (pod)",
+                "legendFormat": "CPU - {{ pod }}"
+              },
+              {
+                "expr": "sum(container_memory_working_set_bytes{namespace=\"discord-bot-prod\"}) by (pod) / 1024 / 1024",
+                "legendFormat": "Memory MB - {{ pod }}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+          }
+        ]
+      }
+    }
+
+---
+# Jaeger Tracing Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-config
+  namespace: discord-bot-prod
+data:
+  jaeger.yaml: |
+    jaeger:
+      service_name: discord-bot
+      sampler:
+        type: probabilistic
+        param: 0.1  # Sample 10% of traces in production
+      reporter:
+        queueSize: 100
+        bufferFlushInterval: 1s
+        logSpans: false
+        localAgentHostPort: jaeger-agent:6831
+      headers:
+        jaegerDebugHeader: jaeger-debug-id
+        jaegerBaggageHeader: jaeger-baggage
+        traceContextHeaderName: uber-trace-id
+      baggage_restrictions:
+        denyBaggageOnInitializationFailure: false
+        hostPort: jaeger-agent:5778
+        refreshInterval: 60s
+
+---
+# Custom Metrics for Discord Bot
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-bot-metrics-config
+  namespace: discord-bot-prod
+data:
+  metrics.yaml: |
+    metrics:
+      # Core application metrics
+      http_requests_total:
+        type: counter
+        help: "Total number of HTTP requests"
+        labels: ["method", "route", "status_code", "service"]
+
+      http_request_duration_seconds:
+        type: histogram
+        help: "HTTP request duration in seconds"
+        labels: ["method", "route", "service"]
+        buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+      # Discord-specific metrics
+      discord_events_total:
+        type: counter
+        help: "Total Discord events received"
+        labels: ["event_type", "guild_id"]
+
+      discord_commands_total:
+        type: counter
+        help: "Total Discord commands executed"
+        labels: ["command_name", "guild_id", "status"]
+
+      discord_command_duration_seconds:
+        type: histogram
+        help: "Discord command execution duration"
+        labels: ["command_name"]
+        buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+
+      discord_gateway_connection_status:
+        type: gauge
+        help: "Discord Gateway connection status (1=connected, 0=disconnected)"
+
+      discord_gateway_latency_seconds:
+        type: gauge
+        help: "Discord Gateway heartbeat latency"
+
+      # Audio-specific metrics
+      discord_audio_players_active:
+        type: gauge
+        help: "Number of active audio players"
+        labels: ["guild_id"]
+
+      discord_audio_players_total:
+        type: counter
+        help: "Total audio players created"
+        labels: ["guild_id"]
+
+      discord_audio_tracks_played:
+        type: counter
+        help: "Total audio tracks played"
+        labels: ["guild_id", "source"]
+
+      discord_audio_dropouts_total:
+        type: counter
+        help: "Total audio dropouts"
+        labels: ["guild_id"]
+
+      discord_audio_queue_length:
+        type: gauge
+        help: "Current audio queue length"
+        labels: ["guild_id"]
+
+      discord_lavalink_connection_status:
+        type: gauge
+        help: "Lavalink connection status (1=connected, 0=disconnected)"
+
+      # Cache metrics
+      cache_operations_total:
+        type: counter
+        help: "Total cache operations"
+        labels: ["operation", "result"]
+
+      cache_hit_rate:
+        type: gauge
+        help: "Cache hit rate percentage"
+        labels: ["cache_name"]
+
+      # Database metrics
+      database_connections_active:
+        type: gauge
+        help: "Active database connections"
+
+      database_queries_total:
+        type: counter
+        help: "Total database queries"
+        labels: ["query_type", "result"]
+
+      database_query_duration_seconds:
+        type: histogram
+        help: "Database query duration"
+        labels: ["query_type"]
+        buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 5.0]
+
+---
+# AlertManager Configuration for Discord Bot
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-discord-webhook
+  namespace: monitoring
+type: Opaque
+stringData:
+  webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-discord-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alerts@example.com'
+
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'discord-bot-alerts'
+      routes:
+      - match:
+          service: discord-bot
+          severity: critical
+        receiver: 'discord-critical'
+      - match:
+          service: discord-bot
+          severity: warning
+        receiver: 'discord-warning'
+
+    receivers:
+    - name: 'discord-bot-alerts'
+      discord_configs:
+      - webhook_url_file: '/etc/alertmanager/secrets/webhook_url'
+        title: 'Discord Bot Alert'
+        message: |
+          **{{ .GroupLabels.alertname }}**
+
+          **Severity:** {{ .CommonLabels.severity }}
+          **Service:** {{ .CommonLabels.service }}
+
+          **Summary:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+
+          **Details:**
+          {{ range .Alerts }}
+          - **Instance:** {{ .Labels.instance }}
+          - **Description:** {{ .Annotations.description }}
+          {{ end }}
+
+          **Runbook:** {{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}
+          **Dashboard:** {{ range .Alerts }}{{ .Annotations.dashboard_url }}{{ end }}
+
+    - name: 'discord-critical'
+      discord_configs:
+      - webhook_url_file: '/etc/alertmanager/secrets/webhook_url'
+        title: '🚨 CRITICAL: Discord Bot Alert'
+        message: |
+          🔥 **CRITICAL ALERT** 🔥
+
+          **{{ .GroupLabels.alertname }}**
+
+          {{ range .Alerts }}
+          **Summary:** {{ .Annotations.summary }}
+          **Description:** {{ .Annotations.description }}
+          **Runbook:** {{ .Annotations.runbook_url }}
+          {{ end }}
+
+          @everyone - Immediate attention required!
+
+    - name: 'discord-warning'
+      discord_configs:
+      - webhook_url_file: '/etc/alertmanager/secrets/webhook_url'
+        title: '⚠️ Warning: Discord Bot Alert'
+        message: |
+          ⚠️ **WARNING**
+
+          **{{ .GroupLabels.alertname }}**
+
+          {{ range .Alerts }}
+          **Summary:** {{ .Annotations.summary }}
+          **Instance:** {{ .Labels.instance }}
+          {{ end }}
+
+---
+# SLO/SLI Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discord-bot-slo-config
+  namespace: discord-bot-prod
+data:
+  slo.yaml: |
+    objectives:
+      # Availability SLO: 99.9% uptime
+      availability:
+        target: 0.999
+        window: 30d
+        query: |
+          (
+            sum(up{job="discord-bot-metrics"} == 1) /
+            sum(up{job="discord-bot-metrics"})
+          )
+
+      # Latency SLO: 95% of requests under 500ms
+      latency:
+        target: 0.95
+        window: 30d
+        query: |
+          (
+            sum(rate(http_request_duration_seconds_bucket{job="discord-bot-metrics",le="0.5"}[5m])) /
+            sum(rate(http_request_duration_seconds_count{job="discord-bot-metrics"}[5m]))
+          )
+
+      # Error Rate SLO: Less than 1% error rate
+      error_rate:
+        target: 0.99
+        window: 30d
+        query: |
+          (
+            sum(rate(http_requests_total{job="discord-bot-metrics",code!~"5.."}[5m])) /
+            sum(rate(http_requests_total{job="discord-bot-metrics"}[5m]))
+          )
+
+      # Discord-specific SLOs
+      discord_commands_success:
+        target: 0.995
+        window: 7d
+        query: |
+          (
+            sum(rate(discord_commands_total{status="success"}[5m])) /
+            sum(rate(discord_commands_total[5m]))
+          )
+
+      audio_quality:
+        target: 0.99
+        window: 7d
+        query: |
+          (
+            1 - (
+              sum(rate(discord_audio_dropouts_total[5m])) /
+              sum(rate(discord_audio_packets_total[5m]))
+            )
+          )

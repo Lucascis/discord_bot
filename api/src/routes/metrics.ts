@@ -7,7 +7,7 @@ import {
 } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * Prometheus metrics endpoint

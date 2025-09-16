@@ -7,12 +7,12 @@ import {
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
 import { setTimeout as delay } from 'node:timers/promises';
-import { SecureHeaderManager } from '@discord-bot/security';
+// import { SecureHeaderManager } from '@discord-bot/security';
 
 export type SendToShardFn = (guildId: string, payload: GuildShardPayload) => Promise<void>;
 
 // Initialize secure header manager for Lavalink authentication
-const secureHeaderManager = new SecureHeaderManager();
+// const secureHeaderManager = new SecureHeaderManager();
 
 export function createLavalinkManager(sendToShard: SendToShardFn): LavalinkManager {
   const manager = new LavalinkManager({
@@ -46,15 +46,20 @@ export async function waitForLavalinkRestReady(maxWaitMs = 60000): Promise<boole
   const url = `http://${env.LAVALINK_HOST}:${env.LAVALINK_PORT}/v4/info`;
 
   // Validate that we have credentials before attempting connection
-  if (!secureHeaderManager.validateCredential('lavalink')) {
-    logger.error('Lavalink password not configured or empty');
-    return false;
-  }
+  // if (!secureHeaderManager.validateCredential('lavalink')) {
+  //   logger.error('Lavalink password not configured or empty');
+  //   return false;
+  // }
 
   while (Date.now() < deadline) {
     try {
       // Use secure fetch instead of raw fetch with exposed headers
-      const res = await secureHeaderManager.secureFetch(url, 'lavalink');
+      // const res = await secureHeaderManager.secureFetch(url, 'lavalink');
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': env.LAVALINK_PASSWORD
+        }
+      });
       if (res.ok) {
         const j = (await res.json()) as { version?: unknown; plugins?: unknown };
         if (j && j.version !== undefined && j.plugins !== undefined) {

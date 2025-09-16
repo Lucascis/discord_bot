@@ -39,7 +39,7 @@ export class PostgresEventStore implements IEventStore {
     }
 
     try {
-      await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx: any) => {
         // Check current version for optimistic concurrency control
         const currentVersion = await this.getCurrentVersion(tx, aggregateId, aggregateType);
 
@@ -126,9 +126,9 @@ export class PostgresEventStore implements IEventStore {
         take: options.limit
       });
 
-      const domainEvents = events.map(this.mapToDomainEvent);
+      const domainEvents = events.map((e: any) => this.mapToDomainEvent(e));
       const version = events.length > 0
-        ? Math.max(...events.map(e => e.aggregateVersion))
+        ? Math.max(...events.map((e: any) => e.aggregateVersion))
         : 0;
 
       return {

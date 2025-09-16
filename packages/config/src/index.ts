@@ -91,7 +91,7 @@ try {
 } catch (error) {
   if (process.env.NODE_ENV !== 'test') {
     console.error('Environment validation failed:', error instanceof Error ? error.message : String(error));
-    
+
     if (error instanceof z.ZodError) {
       console.error('\n=== Environment Configuration Errors ===');
       error.issues.forEach(issue => {
@@ -99,7 +99,7 @@ try {
       });
       console.error('\nPlease check your .env file and fix the above issues.\n');
     }
-    
+
     process.exit(1);
   } else {
     // In test environment, throw the error to be handled by test framework

@@ -275,6 +275,10 @@ export class MusicController {
     if (!member || !('roles' in member)) {
       return [];
     }
-    return member.roles.cache.map(role => role.name);
+    // Check if roles is a manager (has cache) or array
+    if ('cache' in member.roles) {
+      return member.roles.cache.map((role: any) => role.name);
+    }
+    return [];
   }
 }

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@discord-bot/database';
 import { GuildSettings } from '../../domain/entities/guild-settings.js';
 import { GuildSettingsRepository } from '../../domain/repositories/guild-settings-repository.js';
 import { GuildId } from '../../domain/value-objects/guild-id.js';
@@ -124,9 +124,6 @@ export class PrismaGuildSettingsRepository implements GuildSettingsRepository {
         where: {
           name: { in: ['autoplay', 'automix'] },
           enabled: true
-        },
-        include: {
-          // Note: We'd need to add a relation to GuildConfig if available
         }
       });
 

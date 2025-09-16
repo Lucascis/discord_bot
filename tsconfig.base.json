@@ -33,8 +33,7 @@
     "types": ["node"],
     
     // Advanced options
-    "incremental": false,
-    "composite": false
+    "incremental": true
   },
   "exclude": [
     "node_modules",

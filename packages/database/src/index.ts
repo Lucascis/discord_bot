@@ -141,6 +141,8 @@ export function resetDatabaseMetrics(): void {
   totalQueryTime = 0;
 }
 
+export { PrismaClient } from '@prisma/client';
+
 export {
   TransactionManager,
   TransactionError,

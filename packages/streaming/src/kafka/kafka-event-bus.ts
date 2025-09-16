@@ -170,7 +170,7 @@ export class KafkaEventBus {
       requestTimeout: config.connection.requestTimeout,
       retry: config.connection.retry,
       ssl: config.security?.ssl,
-      sasl: config.security?.sasl,
+      sasl: config.security?.sasl as any,
       logLevel: 2, // WARN level
     });
 
@@ -193,9 +193,9 @@ export class KafkaEventBus {
         transactionTimeout: 30000,
         retry: this.config.connection.retry,
         allowAutoTopicCreation: true,
-        compression: 'gzip',
-        batchSize: this.config.performance.batchSize,
-        linger: this.config.performance.lingerMs,
+        // compression: 'gzip', // Property doesn't exist in ProducerConfig
+        // batchSize: this.config.performance.batchSize, // Property doesn't exist
+        // linger: this.config.performance.lingerMs, // Property doesn't exist
       });
 
       await this.producer.connect();

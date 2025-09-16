@@ -17,10 +17,13 @@ export class InteractionResponseHandler {
   async sendSuccess(
     interaction: CommandInteraction | ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<InteractionResponse | void> {
+  ): Promise<any> {
     try {
       if (interaction.replied || interaction.deferred) {
-        return await interaction.editReply(options);
+        // Remove ephemeral flag for editReply as it's not supported
+        const editOptions: any = { ...options };
+        delete editOptions.ephemeral;
+        return await interaction.editReply(editOptions);
       } else {
         return await interaction.reply(options);
       }
@@ -35,7 +38,7 @@ export class InteractionResponseHandler {
     interaction: CommandInteraction | ButtonInteraction,
     message: string,
     title: string = 'Error'
-  ): Promise<InteractionResponse | void> {
+  ): Promise<any> {
     try {
       const embed = this.musicUIBuilder.buildErrorEmbed(
         title,
@@ -49,7 +52,10 @@ export class InteractionResponseHandler {
       };
 
       if (interaction.replied || interaction.deferred) {
-        return await interaction.editReply(options);
+        // Remove ephemeral flag for editReply as it's not supported
+        const editOptions: any = { ...options };
+        delete editOptions.ephemeral;
+        return await interaction.editReply(editOptions);
       } else {
         return await interaction.reply(options);
       }
@@ -74,7 +80,7 @@ export class InteractionResponseHandler {
   async sendEphemeral(
     interaction: CommandInteraction | ButtonInteraction,
     options: Omit<InteractionReplyOptions, 'ephemeral'>
-  ): Promise<InteractionResponse | void> {
+  ): Promise<any> {
     return this.sendSuccess(interaction, {
       ...options,
       ephemeral: true
@@ -84,9 +90,12 @@ export class InteractionResponseHandler {
   async updateComponents(
     interaction: ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<InteractionResponse | void> {
+  ): Promise<any> {
     try {
-      return await interaction.update(options);
+      // Remove ephemeral flag for update as it's not supported
+      const updateOptions: any = { ...options };
+      delete updateOptions.ephemeral;
+      return await interaction.update(updateOptions);
     } catch (error) {
       console.error('Failed to update components:', error);
       // Fall back to edit reply
@@ -97,7 +106,7 @@ export class InteractionResponseHandler {
   async sendFollowUp(
     interaction: CommandInteraction | ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<InteractionResponse> {
+  ): Promise<any> {
     try {
       return await interaction.followUp(options);
     } catch (error) {

@@ -1,0 +1,686 @@
+# Production Deployment Strategies for Discord Bot
+# Comprehensive deployment configurations for high-availability production environment
+
+---
+# Blue-Green Deployment Strategy
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: discord-bot-gateway-rollout
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: discord-bot
+    strategy: blue-green
+spec:
+  replicas: 10
+  strategy:
+    blueGreen:
+      # Active service points to the stable version
+      activeService: discord-bot-gateway-active
+      # Preview service points to the new version during rollout
+      previewService: discord-bot-gateway-preview
+      # Automatic promotion after successful validation
+      autoPromotionEnabled: false
+      # Scale down old version after promotion
+      scaleDownDelaySeconds: 30
+      # Time to analyze the new version before promotion
+      prePromotionAnalysis:
+        templates:
+        - templateName: success-rate
+        - templateName: response-time
+        args:
+        - name: service-name
+          value: discord-bot-gateway-preview
+      # Post-promotion analysis to confirm stability
+      postPromotionAnalysis:
+        templates:
+        - templateName: success-rate
+        - templateName: response-time
+        args:
+        - name: service-name
+          value: discord-bot-gateway-active
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discord-bot
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/version: "{{.Values.image.tag}}"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: gateway
+        image: "{{.Values.gateway.image.repository}}:{{.Values.image.tag}}"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 3000
+          name: metrics
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: METRICS_ENABLED
+          value: "true"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # Graceful shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 10"]
+        # Resource monitoring
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      # Anti-affinity to spread across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - gateway
+              topologyKey: kubernetes.io/hostname
+      # Graceful shutdown
+      terminationGracePeriodSeconds: 60
+
+---
+# Canary Deployment Strategy for Audio Service
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: discord-bot-audio-rollout
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: audio
+    strategy: canary
+spec:
+  replicas: 8
+  strategy:
+    canary:
+      # Canary service for new version traffic
+      canaryService: discord-bot-audio-canary
+      # Stable service for existing traffic
+      stableService: discord-bot-audio-stable
+      # Traffic routing steps
+      steps:
+      - setWeight: 10  # Route 10% traffic to canary
+      - pause:
+          duration: 2m
+      - analysis:
+          templates:
+          - templateName: audio-quality-check
+          - templateName: error-rate-check
+          args:
+          - name: service-name
+            value: discord-bot-audio-canary
+      - setWeight: 25  # Increase to 25%
+      - pause:
+          duration: 5m
+      - analysis:
+          templates:
+          - templateName: audio-quality-check
+          - templateName: latency-check
+      - setWeight: 50  # Increase to 50%
+      - pause:
+          duration: 10m
+      - analysis:
+          templates:
+          - templateName: comprehensive-check
+      - setWeight: 75  # Increase to 75%
+      - pause:
+          duration: 10m
+      - analysis:
+          templates:
+          - templateName: comprehensive-check
+      # Analysis configuration
+      analysis:
+        templates:
+        - templateName: success-rate
+        - templateName: audio-quality-check
+        args:
+        - name: service-name
+          value: discord-bot-audio-canary
+        - name: stable-service
+          value: discord-bot-audio-stable
+      # Traffic splitting with Istio
+      trafficRouting:
+        istio:
+          virtualService:
+            name: discord-bot-audio-vs
+            routes:
+            - primary
+          destinationRule:
+            name: discord-bot-audio-dr
+            canarySubsetName: canary
+            stableSubsetName: stable
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: audio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discord-bot
+        app.kubernetes.io/component: audio
+        app.kubernetes.io/version: "{{.Values.image.tag}}"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: audio
+        image: "{{.Values.audio.image.repository}}:{{.Values.image.tag}}"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 3000
+          name: metrics
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LAVALINK_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: discord-bot-config
+              key: lavalink.host
+        - name: LAVALINK_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: discord-bot-secrets
+              key: lavalink.password
+        resources:
+          requests:
+            cpu: 300m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        # Enhanced health checks for audio service
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 45
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        # Custom startup probe for audio initialization
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 10
+
+---
+# Rolling Update Strategy for API Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discord-bot-api
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: api
+    strategy: rolling-update
+spec:
+  replicas: 6
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Maximum number of pods unavailable during update
+      maxUnavailable: 1
+      # Maximum number of pods above desired replica count
+      maxSurge: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discord-bot
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "{{.Values.image.tag}}"
+      annotations:
+        # Force rolling update on config changes
+        configmap.reloader.stakater.com/reload: "discord-bot-config"
+        secret.reloader.stakater.com/reload: "discord-bot-secrets"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: api
+        image: "{{.Values.api.image.repository}}:{{.Values.image.tag}}"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: METRICS_PORT
+          value: "9090"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      # Pod disruption budget for high availability
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: api
+
+---
+# Analysis Templates for Deployment Validation
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: discord-bot-prod
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-url
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: success-rate
+    interval: 1m
+    count: 5
+    successCondition: result[0] >= 0.95
+    failureLimit: 2
+    provider:
+      prometheus:
+        address: "{{args.prometheus-url}}"
+        query: |
+          sum(rate(http_requests_total{service="{{args.service-name}}",code!~"5.."}[5m])) /
+          sum(rate(http_requests_total{service="{{args.service-name}}"}[5m]))
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: response-time
+  namespace: discord-bot-prod
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-url
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: response-time-p95
+    interval: 1m
+    count: 5
+    successCondition: result[0] <= 0.5
+    failureLimit: 2
+    provider:
+      prometheus:
+        address: "{{args.prometheus-url}}"
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}"}[5m])) by (le)
+          )
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: audio-quality-check
+  namespace: discord-bot-prod
+spec:
+  args:
+  - name: service-name
+  metrics:
+  - name: audio-dropout-rate
+    interval: 2m
+    count: 3
+    successCondition: result[0] <= 0.01
+    failureLimit: 1
+    provider:
+      prometheus:
+        address: "http://prometheus.monitoring.svc.cluster.local:9090"
+        query: |
+          sum(rate(discord_audio_dropouts_total{service="{{args.service-name}}"}[5m])) /
+          sum(rate(discord_audio_packets_total{service="{{args.service-name}}"}[5m]))
+
+---
+# Pod Disruption Budget for High Availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-bot-gateway-pdb
+  namespace: discord-bot-prod
+spec:
+  minAvailable: 80%
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: gateway
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-bot-api-pdb
+  namespace: discord-bot-prod
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: api
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-bot-audio-pdb
+  namespace: discord-bot-prod
+spec:
+  minAvailable: 75%
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+      app.kubernetes.io/component: audio
+
+---
+# Horizontal Pod Autoscaler with multiple metrics
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: discord-bot-gateway-hpa
+  namespace: discord-bot-prod
+spec:
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: discord-bot-gateway-rollout
+  minReplicas: 5
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: External
+    external:
+      metric:
+        name: discord_events_per_second
+        selector:
+          matchLabels:
+            service: discord-bot-gateway
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+      - type: Pods
+        value: 5
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+# Production Services Configuration
+apiVersion: v1
+kind: Service
+metadata:
+  name: discord-bot-gateway-active
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: gateway
+    service-type: active
+spec:
+  selector:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: gateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 3000
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discord-bot-gateway-preview
+  namespace: discord-bot-prod
+  labels:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: gateway
+    service-type: preview
+spec:
+  selector:
+    app.kubernetes.io/name: discord-bot
+    app.kubernetes.io/component: gateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 3000
+    targetPort: 3000
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Network Policies for Production Security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-bot-production-netpol
+  namespace: discord-bot-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: discord-bot
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Allow metrics scraping from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow inter-service communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: discord-bot
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow HTTPS to external APIs (Discord, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow database access
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: database
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow Redis access
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+---
+# Resource Quotas for Production Namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: discord-bot-prod-quota
+  namespace: discord-bot-prod
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "50"
+    limits.memory: 100Gi
+    persistentvolumeclaims: "10"
+    pods: "100"
+    services: "20"
+    secrets: "50"
+    configmaps: "50"
+
+---
+# Limit Ranges for Production Resources
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: discord-bot-prod-limits
+  namespace: discord-bot-prod
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+    min:
+      cpu: 50m
+      memory: 64Mi
+  - type: Pod
+    max:
+      cpu: "8"
+      memory: 16Gi

@@ -1,4 +1,5 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
+import { Resource } from '@opentelemetry/resources';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -46,32 +47,32 @@ export class TelemetryManager {
    */
   async initialize(): Promise<void> {
     try {
-      const exporters = [];
+      let traceExporter;
+      let metricReader;
 
       // Configure Jaeger exporter for distributed tracing
       if (this.config.jaeger?.enabled) {
-        exporters.push(
-          new JaegerExporter({
-            endpoint: this.config.jaeger.endpoint,
-          })
-        );
+        traceExporter = new JaegerExporter({
+          endpoint: this.config.jaeger.endpoint,
+        });
       }
 
       // Configure Prometheus exporter for metrics
       if (this.config.prometheus?.enabled) {
-        const prometheusExporter = new PrometheusExporter({
+        metricReader = new PrometheusExporter({
           port: this.config.prometheus.port,
           endpoint: this.config.prometheus.endpoint,
         });
-        exporters.push(prometheusExporter);
       }
 
       // Initialize SDK
       this.sdk = new NodeSDK({
-        serviceName: this.config.serviceName,
-        serviceVersion: this.config.serviceVersion,
-        traceExporter: exporters.length > 0 ? exporters[0] : undefined,
-        metricReader: exporters.length > 1 ? exporters[1] : undefined,
+        resource: new Resource({
+          'service.name': this.config.serviceName,
+          'service.version': this.config.serviceVersion,
+        }),
+        traceExporter,
+        metricReader,
         instrumentations: [getNodeAutoInstrumentations({
           '@opentelemetry/instrumentation-fs': {
             enabled: false, // Disable file system instrumentation to reduce noise
@@ -177,7 +178,7 @@ export class TelemetryManager {
       {
         kind: SpanKind.SERVER,
         attributes: {
-          [SemanticAttributes.USER_ID]: userId,
+          'user.id': userId,
           'discord.guild.id': guildId,
           'discord.command.name': commandName,
           'service.name': this.config.serviceName,

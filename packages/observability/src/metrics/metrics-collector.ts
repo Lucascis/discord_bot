@@ -17,13 +17,13 @@ export class MetricsCollector {
   private errorCounter: any;
 
   // Prometheus metrics
-  private promCommandCounter: Counter<string>;
-  private promCommandDuration: Histogram<string>;
-  private promActiveSessionsGauge: Gauge<string>;
-  private promQueueSizeGauge: Gauge<string>;
-  private promErrorCounter: Counter<string>;
-  private promEventStoreEvents: Counter<string>;
-  private promSagaCounter: Counter<string>;
+  private promCommandCounter!: Counter<string>;
+  private promCommandDuration!: Histogram<string>;
+  private promActiveSessionsGauge!: Gauge<string>;
+  private promQueueSizeGauge!: Gauge<string>;
+  private promErrorCounter!: Counter<string>;
+  private promEventStoreEvents!: Counter<string>;
+  private promSagaCounter!: Counter<string>;
 
   constructor(serviceName: string, serviceVersion: string) {
     // Initialize OpenTelemetry meter
@@ -269,9 +269,12 @@ export class MetricsCollector {
    * Get metrics for specific labels
    */
   getMetricsByGuild(guildId: string): Record<string, any> {
+    const activeSessionsMetric = this.promActiveSessionsGauge.labels(guildId);
+    const queueSizeMetric = this.promQueueSizeGauge.labels(guildId);
+
     return {
-      activeSessions: this.promActiveSessionsGauge.labels(guildId).get(),
-      queueSize: this.promQueueSizeGauge.labels(guildId).get(),
+      activeSessions: activeSessionsMetric,
+      queueSize: queueSizeMetric,
     };
   }
 

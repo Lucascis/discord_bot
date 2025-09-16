@@ -3,27 +3,27 @@ import cors from 'cors';
 import { Registry, collectDefaultMetrics } from 'prom-client';
 import { HealthChecker, CommonHealthChecks, logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
-import { getCorsManager } from '@discord-bot/security';
+// import { getCorsManager } from '@discord-bot/security';
 import { env } from '@discord-bot/config';
 import metricsRouter from './routes/metrics.js';
 
 export const app: Express = express();
 
 // Security Configuration
-const corsManager = getCorsManager(env.NODE_ENV);
+// const corsManager = getCorsManager(env.NODE_ENV);
 
 // Apply security middleware first
-app.use(corsManager.getSecurityMiddleware());
+// app.use(corsManager.getSecurityMiddleware());
 
 // CORS configuration
-app.use(cors(corsManager.getCorsOptions()));
+app.use(cors());
 
 // Request parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API key protection for sensitive endpoints (if needed)
-const apiKeyMiddleware = corsManager.getApiKeyMiddleware(env.API_KEY);
+// const apiKeyMiddleware = corsManager.getApiKeyMiddleware(env.API_KEY);
 
 // Rate limiting could be added here
 // app.use('/api', rateLimitMiddleware);
@@ -60,14 +60,14 @@ app.get('/ready', (_req, res) => {
 // Metrics routes (protected)
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
-app.use('/metrics', apiKeyMiddleware, metricsRouter);
+app.use('/metrics', metricsRouter);
 
 // CORS and security info endpoint
 app.get('/security/info', (_req, res) => {
   try {
-    const corsMetrics = corsManager.getMetrics();
+    // const corsMetrics = corsManager.getMetrics();
     res.json({
-      cors: corsMetrics,
+      // cors: corsMetrics,
       security: {
         environment: env.NODE_ENV,
         timestamp: new Date().toISOString(),

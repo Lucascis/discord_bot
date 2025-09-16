@@ -263,10 +263,14 @@ export class ControlMusicUseCase {
 
       await this.musicSessionRepository.save(session);
 
+      // Map timeout to queue_ended for the event
+      const eventReason = command.reason === 'timeout' ? 'queue_ended' :
+                          command.reason as 'user_requested' | 'error' | 'queue_ended';
+
       events.push(new MusicSessionStoppedEvent(
         command.guildId.value,
         command.userId.value,
-        command.reason
+        eventReason
       ));
 
       return {
