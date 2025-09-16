@@ -1,0 +1,216 @@
+# Prometheus Alert Rules for Discord Bot
+# Save this file as prometheus-alerts.yml and load into your Prometheus configuration
+
+groups:
+  - name: discord_bot_errors
+    interval: 30s
+    rules:
+      - alert: DiscordAPIHighErrorRate
+        expr: (rate(discord_api_errors_total[5m]) / rate(discord_operation_duration_seconds_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High Discord API error rate detected"
+          description: "Discord API error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: DiscordAPIErrorSpike
+        expr: increase(discord_api_errors_total[1m]) > 10
+        for: 0m
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "Discord API error spike detected"
+          description: "{{ $value }} Discord API errors in the last minute"
+
+      - alert: DiscordOperationFailureRate
+        expr: (rate(discord_operation_duration_seconds_total{success="false"}[5m]) / rate(discord_operation_duration_seconds_total[5m])) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "High Discord operation failure rate"
+          description: "{{ $value | humanizePercentage }} of Discord operations are failing"
+
+      - alert: DiscordFallbackSpike
+        expr: rate(discord_operation_duration_seconds_total{operation=~".*_fallback"}[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High Discord fallback usage"
+          description: "{{ $value }} fallback operations per second - primary operations may be failing"
+
+      - alert: DiscordSlowOperations
+        expr: histogram_quantile(0.95, rate(discord_operation_duration_seconds_total[5m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "Discord operations are slow"
+          description: "95th percentile of Discord operations is {{ $value }}s"
+
+  - name: discord_bot_service_health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"discord_bot_.*"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "Discord bot service is down"
+          description: "Service {{ $labels.job }} has been down for more than 30 seconds"
+
+      - alert: ServiceUnhealthy
+        expr: rate(discord_operation_duration_seconds_total{success="true"}[1m]) == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "No successful Discord operations"
+          description: "No successful Discord operations detected for 30+ seconds"
+
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / process_virtual_memory_max_bytes) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+
+  - name: discord_bot_cache
+    interval: 30s
+    rules:
+      - alert: CacheCircuitBreakerOpen
+        expr: circuit_breaker_state{name=~".*cache.*"} == 1
+        for: 30s
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "Cache circuit breaker is open"
+          description: "Circuit breaker {{ $labels.name }} is open - cache operations are failing"
+
+      - alert: LowCacheHitRate
+        expr: (rate(cache_operations_total{type="hit"}[5m]) / rate(cache_operations_total[5m])) < 0.3
+        for: 5m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: HighCacheEvictionRate
+        expr: rate(cache_operations_total{type="eviction"}[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High cache eviction rate"
+          description: "{{ $value }} cache evictions per second - cache may be undersized"
+
+  - name: discord_bot_business_metrics
+    interval: 60s
+    rules:
+      - alert: LowUserEngagement
+        expr: rate(user_command_executions_total[1h]) < 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "Low user engagement"
+          description: "User command rate is {{ $value }} per second over the last hour"
+
+      - alert: HighSkipRate
+        expr: (rate(track_skip_rate[15m])) > 0.7
+        for: 5m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High track skip rate"
+          description: "{{ $value | humanizePercentage }} of tracks are being skipped"
+
+      - alert: AutoplayFailureRate
+        expr: autoplay_seed_success_rate < 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "Autoplay seed failure rate is high"
+          description: "Autoplay seed success rate is {{ $value | humanizePercentage }}"
+
+  - name: discord_bot_infrastructure
+    interval: 30s
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "Redis is down"
+          description: "Redis connection has been down for more than 30 seconds"
+
+      - alert: PostgreSQLDown
+        expr: postgres_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL connection has been down for more than 30 seconds"
+
+      - alert: LavalinkDown
+        expr: lavalink_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: discord_bot
+        annotations:
+          summary: "Lavalink is down"
+          description: "Lavalink connection has been down for more than 30 seconds"
+
+      - alert: HighTransactionFailureRate
+        expr: (rate(database_transaction_failures_total[5m]) / rate(database_transaction_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: discord_bot
+        annotations:
+          summary: "High database transaction failure rate"
+          description: "{{ $value | humanizePercentage }} of database transactions are failing"
+
+# Notification routing (example for Slack/Discord webhooks)
+# Add to your alertmanager.yml:
+#
+# route:
+#   group_by: ['alertname', 'service']
+#   group_wait: 10s
+#   group_interval: 10s
+#   repeat_interval: 1h
+#   receiver: 'discord_bot_alerts'
+#
+# receivers:
+# - name: 'discord_bot_alerts'
+#   slack_configs:
+#   - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+#     channel: '#discord-bot-alerts'
+#     title: 'Discord Bot Alert: {{ .GroupLabels.alertname }}'
+#     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
