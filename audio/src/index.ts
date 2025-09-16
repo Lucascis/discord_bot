@@ -824,7 +824,7 @@ advancedHealth.registerComponent('audio-performance', async () => {
 
 advancedHealth.registerComponent('cache-performance', async () => {
   const cacheStats = {
-    automixCacheSize: (automixCache as any).size || 0,
+    automixCacheSize: (automixCache as { size?: number }).size || 0,
     autoplayCooldownSize: autoplayCooldown.size,
     lastUiPushSize: lastUiPush.size,
   };

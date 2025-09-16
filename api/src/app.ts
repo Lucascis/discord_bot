@@ -88,6 +88,7 @@ app.get('/security/info', (_req, res) => {
 });
 
 // Error handling middleware
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({
     error: err.message,
@@ -98,7 +99,7 @@ app.use((err: Error, req: express.Request, res: express.Response, _next: express
     ip: req.ip
   }, 'Unhandled error in API');
 
-  res.status((err as any).status || 500).json({
+  res.status((err as Error & { status?: number }).status || 500).json({
     error: 'Internal Server Error',
     message: env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
     timestamp: new Date().toISOString(),

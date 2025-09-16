@@ -316,7 +316,7 @@ async function ensureLiveNow(guildId: string, channelId: string, forceRelocate =
             `delete_old_message_${guildId}`,
             {
               maxRetries: 1,
-              onError: (error) => {
+              onError: () => {
                 logger.debug({ guildId, messageId: msg.id }, 'Could not delete old message (already deleted?)');
               }
             }

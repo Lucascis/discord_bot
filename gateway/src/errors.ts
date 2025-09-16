@@ -90,11 +90,12 @@ const NON_RETRYABLE_DISCORD_CODES = [
 
 /**
  * Discord API Error codes that indicate temporary issues
+ * Currently not used but kept for future reference
  */
-const RETRYABLE_DISCORD_CODES = [
-  20028, // Rate limited
-  130000, // API Overloaded
-];
+// const RETRYABLE_DISCORD_CODES = [
+//   20028, // Rate limited
+//   130000, // API Overloaded
+// ];
 
 /**
  * Safely handle Discord API operations with automatic error recovery
@@ -124,9 +125,9 @@ export async function safeDiscordOperation<T>(
       }
 
       return result;
-    } catch (error: any) {
-      const discordCode = error?.code;
-      const isDiscordAPIError = error?.name === 'DiscordAPIError';
+    } catch (error: unknown) {
+      const discordCode = (error as { code?: number })?.code;
+      const isDiscordAPIError = (error as { name?: string })?.name === 'DiscordAPIError';
       const isRetryable = !isDiscordAPIError || !NON_RETRYABLE_DISCORD_CODES.includes(discordCode);
 
       // Record error metrics
