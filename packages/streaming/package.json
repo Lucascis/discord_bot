@@ -1,0 +1,26 @@
+{
+  "name": "@discord-bot/streaming",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@discord-bot/logger": "workspace:*",
+    "@discord-bot/observability": "workspace:*",
+    "@discord-bot/event-store": "workspace:*",
+    "kafkajs": "^2.2.4",
+    "avro-js": "^1.11.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  }
+}
