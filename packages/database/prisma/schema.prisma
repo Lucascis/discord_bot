@@ -23,9 +23,10 @@ model Queue {
   voiceChannelId String?
   textChannelId  String?
   items     QueueItem[]
-  
+
   @@index([guildId])
   @@index([guildId, createdAt])
+  @@index([voiceChannelId])
 }
 
 model QueueItem {
@@ -37,9 +38,11 @@ model QueueItem {
   duration    Int
   createdAt   DateTime @default(now())
   queue       Queue    @relation(fields: [queueId], references: [id])
-  
+
   @@index([queueId])
   @@index([queueId, createdAt])
+  @@index([url])
+  @@index([requestedBy])
 }
 
 model UserProfile {
@@ -75,4 +78,6 @@ model FeatureFlag {
   name      String
   enabled   Boolean  @default(false)
   @@unique([guildId, name])
+  @@index([guildId])
+  @@index([name])
 }
