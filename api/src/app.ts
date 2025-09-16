@@ -5,6 +5,7 @@ import { HealthChecker, CommonHealthChecks, logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
 import { getCorsManager } from '@discord-bot/security';
 import { env } from '@discord-bot/config';
+import metricsRouter from './routes/metrics.js';
 
 export const app: Express = express();
 
@@ -56,18 +57,10 @@ app.get('/ready', (_req, res) => {
   res.json({ ready: true, timestamp: new Date().toISOString() });
 });
 
-// Metrics endpoint (protected)
+// Metrics routes (protected)
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
-app.get('/metrics', apiKeyMiddleware, async (_req, res) => {
-  try {
-    res.setHeader('content-type', registry.contentType);
-    res.send(await registry.metrics());
-  } catch (error) {
-    logger.error({ error }, 'Failed to generate metrics');
-    res.status(500).json({ error: 'Failed to generate metrics' });
-  }
-});
+app.use('/metrics', apiKeyMiddleware, metricsRouter);
 
 // CORS and security info endpoint
 app.get('/security/info', (_req, res) => {

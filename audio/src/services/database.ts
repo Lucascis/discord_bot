@@ -2,6 +2,10 @@ import { prisma, getTransactionManager } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import type { LavalinkManager, Track, UnresolvedTrack, Player } from 'lavalink-client';
 import { queueCache } from '../cache.js';
+import {
+  trackQueueOperation,
+  trackQueueOptimization
+} from '@discord-bot/database';
 
 export async function saveQueue(
   guildId: string,
@@ -35,8 +39,11 @@ export async function saveQueue(
         });
       }
 
-      // Clear existing queue items atomically
-      await tx.queueItem.deleteMany({ where: { queueId: queue.id } });
+      // Get current queue items to compare for incremental updates
+      const existingItems = await tx.queueItem.findMany({
+        where: { queueId: queue.id },
+        select: { id: true, url: true, title: true }
+      });
 
       // Prepare new queue items
       const items: Array<{ title: string; url: string; requestedBy: string; duration: number }> = [];
@@ -61,11 +68,41 @@ export async function saveQueue(
         });
       }
 
-      // Create new queue items atomically
-      if (items.length > 0) {
-        await tx.queueItem.createMany({
-          data: items.map((it) => ({ ...it, queueId: queue!.id }))
+      // Implement smart incremental updates instead of full rebuild
+      const existingUrls = new Set(existingItems.map(item => item.url));
+      const newUrls = new Set(items.map(item => item.url));
+
+      // Find items to remove (exist in DB but not in new queue)
+      const itemsToRemove = existingItems.filter(item => !newUrls.has(item.url));
+
+      // Find items to add (exist in new queue but not in DB)
+      const itemsToAdd = items.filter(item => !existingUrls.has(item.url));
+
+      // Only perform operations if there are actual changes
+      if (itemsToRemove.length > 0) {
+        await tx.queueItem.deleteMany({
+          where: {
+            id: { in: itemsToRemove.map(item => item.id) }
+          }
         });
+        logger.debug({ guildId, removedCount: itemsToRemove.length }, 'Removed outdated queue items');
+        trackQueueOperation('incremental_remove');
+      }
+
+      if (itemsToAdd.length > 0) {
+        await tx.queueItem.createMany({
+          data: itemsToAdd.map((it) => ({ ...it, queueId: queue!.id }))
+        });
+        logger.debug({ guildId, addedCount: itemsToAdd.length }, 'Added new queue items');
+        trackQueueOperation('incremental_add');
+        trackQueueOptimization('incremental_update', itemsToAdd.length);
+      }
+
+      // If no changes needed, skip rebuild entirely
+      if (itemsToRemove.length === 0 && itemsToAdd.length === 0) {
+        logger.debug({ guildId, itemCount: items.length }, 'Queue unchanged, skipping database update');
+        trackQueueOptimization('skipped_rebuild', 1);
+        return;
       }
 
       logger.debug({
@@ -92,9 +129,107 @@ export async function saveQueue(
   }
 }
 
+/**
+ * Optimized queue operations that avoid full rebuilds
+ */
+export async function addSingleTrackToQueue(
+  guildId: string,
+  track: { title: string; url: string; requestedBy: string; duration: number }
+): Promise<void> {
+  const transactionManager = getTransactionManager(prisma);
+
+  await transactionManager.withTransaction(async (tx) => {
+    // Find or create queue
+    let queue = await tx.queue.findFirst({
+      where: { guildId },
+      select: { id: true }
+    });
+
+    if (!queue) {
+      queue = await tx.queue.create({
+        data: { guildId },
+        select: { id: true }
+      });
+    }
+
+    // Add single track - no rebuild needed
+    await tx.queueItem.create({
+      data: {
+        ...track,
+        queueId: queue.id
+      }
+    });
+
+    logger.debug({ guildId, trackTitle: track.title }, 'Added single track to queue');
+  });
+
+  trackQueueOperation('incremental_add');
+  invalidateQueueCache(guildId);
+}
+
+export async function removeSingleTrackFromQueue(
+  guildId: string,
+  trackUrl: string
+): Promise<boolean> {
+  const transactionManager = getTransactionManager(prisma);
+
+  const result = await transactionManager.withTransaction(async (tx) => {
+    const queue = await tx.queue.findFirst({
+      where: { guildId },
+      select: { id: true }
+    });
+
+    if (!queue) {
+      return false;
+    }
+
+    const deleteResult = await tx.queueItem.deleteMany({
+      where: {
+        queueId: queue.id,
+        url: trackUrl
+      }
+    });
+
+    const removed = deleteResult.count > 0;
+    if (removed) {
+      logger.debug({ guildId, trackUrl }, 'Removed single track from queue');
+    }
+
+    return removed;
+  });
+
+  if (result) {
+    trackQueueOperation('incremental_remove');
+    invalidateQueueCache(guildId);
+  }
+
+  return result;
+}
+
+export async function clearQueue(guildId: string): Promise<void> {
+  const transactionManager = getTransactionManager(prisma);
+
+  await transactionManager.withTransaction(async (tx) => {
+    const queue = await tx.queue.findFirst({
+      where: { guildId },
+      select: { id: true }
+    });
+
+    if (queue) {
+      await tx.queueItem.deleteMany({
+        where: { queueId: queue.id }
+      });
+      logger.debug({ guildId }, 'Cleared queue completely');
+    }
+  });
+
+  trackQueueOperation('clear');
+  invalidateQueueCache(guildId);
+}
+
 export async function resumeQueues(manager: LavalinkManager, maxResume: number = 25): Promise<void> {
   try {
-    const queues = await prisma.queue.findMany({ 
+    const queues = await prisma.queue.findMany({
       where: {
         voiceChannelId: { not: null },
         items: { some: {} }
@@ -110,24 +245,46 @@ export async function resumeQueues(manager: LavalinkManager, maxResume: number =
         }
       }
     });
-    for (const q of queues) {
-      if (q.items.length === 0) continue;
-      if (!q.voiceChannelId) continue;
-      const player = manager.createPlayer({ guildId: q.guildId, voiceChannelId: q.voiceChannelId, selfDeaf: true, volume: 100, ...(q.textChannelId ? { textChannelId: q.textChannelId } : {}) });
-      await player.connect();
-      for (const it of q.items) {
-        const res = await player.search({ query: it.url || it.title }, { id: 'system' } as { id: string });
-        if (res.tracks.length > 0) {
-          if (!player.playing && !player.paused && !player.queue.current) {
-            await player.play({ clientTrack: res.tracks[0] as Track | UnresolvedTrack });
-          } else {
-            await player.queue.add(res.tracks[0] as Track | UnresolvedTrack);
+
+    const resumePromises = queues.map(async (q) => {
+      if (q.items.length === 0 || !q.voiceChannelId) return;
+
+      try {
+        const player = manager.createPlayer({
+          guildId: q.guildId,
+          voiceChannelId: q.voiceChannelId,
+          selfDeaf: true,
+          volume: 100,
+          ...(q.textChannelId ? { textChannelId: q.textChannelId } : {})
+        });
+
+        await player.connect();
+
+        for (const it of q.items) {
+          const res = await player.search(
+            { query: it.url || it.title },
+            { id: 'system' } as { id: string }
+          );
+
+          if (res.tracks.length > 0) {
+            if (!player.playing && !player.paused && !player.queue.current) {
+              await player.play({ clientTrack: res.tracks[0] as Track | UnresolvedTrack });
+            } else {
+              await player.queue.add(res.tracks[0] as Track | UnresolvedTrack);
+            }
           }
         }
+
+        logger.debug({ guildId: q.guildId, tracksResumed: q.items.length }, 'Queue resumed successfully');
+      } catch (guildError) {
+        logger.error({ guildId: q.guildId, error: guildError }, 'Failed to resume queue for guild');
       }
-    }
+    });
+
+    await Promise.allSettled(resumePromises);
+    logger.info({ queuesProcessed: queues.length }, 'Queue resume operation completed');
   } catch (e) {
-    logger.error({ e }, 'failed to resume queues');
+    logger.error({ error: e }, 'Failed to resume queues');
   }
 }
 
