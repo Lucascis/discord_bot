@@ -1,5 +1,4 @@
 import { GuildId } from '../value-objects/guild-id.js';
-import { UserId } from '../value-objects/user-id.js';
 
 export type SessionState = 'idle' | 'playing' | 'paused' | 'stopped';
 export type LoopMode = 'off' | 'track' | 'queue';
