@@ -1,0 +1,305 @@
+# Istio Service Mesh Installation Manifests
+# Production-ready Istio configuration for Discord Music Bot
+
+---
+# Istio Control Plane Configuration
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: discord-bot-control-plane
+  namespace: istio-system
+spec:
+  values:
+    global:
+      meshID: discord-bot-mesh
+      multiCluster:
+        clusterName: discord-bot-cluster
+      network: network1
+    pilot:
+      env:
+        EXTERNAL_ISTIOD: false
+        PILOT_ENABLE_CROSS_CLUSTER_WORKLOAD_ENTRY: true
+        PILOT_ENABLE_REMOTE_JWKS_CACHE: true
+        PILOT_JWKS_RESOLVER_INSECURE_SKIP_VERIFY: false
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        hpaSpec:
+          minReplicas: 2
+          maxReplicas: 5
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istiod
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 80
+    ingressGateways:
+    - name: istio-ingressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        service:
+          type: LoadBalancer
+          ports:
+          - port: 15021
+            targetPort: 15021
+            name: status-port
+            protocol: TCP
+          - port: 80
+            targetPort: 8080
+            name: http2
+            protocol: TCP
+          - port: 443
+            targetPort: 8443
+            name: https
+            protocol: TCP
+          - port: 15090
+            targetPort: 15090
+            name: http-envoy-prom
+            protocol: TCP
+    egressGateways:
+    - name: istio-egressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+---
+# Default PeerAuthentication - Enable mTLS by default
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+
+---
+# Default DestinationRule - Configure TLS settings
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  host: "*.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+        keepAlive:
+          time: 7200s
+          interval: 75s
+          probes: 9
+      http:
+        http1MaxPendingRequests: 10
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+        maxRetries: 3
+        idleTimeout: 90s
+        h2UpgradePolicy: UPGRADE
+    outlierDetection:
+      consecutive5xxErrors: 5
+      consecutiveGatewayErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+
+---
+# Telemetry Configuration - Enable metrics and tracing
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: discord-bot-telemetry
+  namespace: istio-system
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        destination_app:
+          value: "{{.destination_app | default \"unknown\"}}"
+        source_app:
+          value: "{{.source_app | default \"unknown\"}}"
+  tracing:
+  - providers:
+    - name: jaeger
+  - customTags:
+      request_id:
+        header:
+          name: x-request-id
+      user_id:
+        header:
+          name: x-user-id
+      guild_id:
+        header:
+          name: x-guild-id
+  accessLogging:
+  - providers:
+    - name: otel
+
+---
+# Authorization Policy - Default deny all
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: istio-system
+spec:
+  {}
+
+---
+# Gateway Configuration
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: discord-bot-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "discord-bot.local"
+    - "api.discord-bot.local"
+    tls:
+      httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - "discord-bot.local"
+    - "api.discord-bot.local"
+    tls:
+      mode: SIMPLE
+      credentialName: discord-bot-tls
+
+---
+# Virtual Service for main application
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: discord-bot-routes
+  namespace: istio-system
+spec:
+  hosts:
+  - "discord-bot.local"
+  - "api.discord-bot.local"
+  gateways:
+  - discord-bot-gateway
+  http:
+  # API routes
+  - match:
+    - uri:
+        prefix: /api/v1/
+    route:
+    - destination:
+        host: api-service.discord-bot.svc.cluster.local
+        port:
+          number: 3000
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    timeout: 60s
+    headers:
+      request:
+        set:
+          x-forwarded-proto: https
+  # Health check routes
+  - match:
+    - uri:
+        exact: /health
+    route:
+    - destination:
+        host: api-service.discord-bot.svc.cluster.local
+        port:
+          number: 3000
+  # Default route to gateway service
+  - route:
+    - destination:
+        host: gateway-service.discord-bot.svc.cluster.local
+        port:
+          number: 3001
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+    timeout: 60s
+
+---
+# ServiceMonitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: istio-mesh
+  namespace: istio-system
+  labels:
+    app: istio-proxy
+spec:
+  selector:
+    matchLabels:
+      app: istio-proxy
+  endpoints:
+  - port: http-envoy-prom
+    interval: 15s
+    path: /stats/prometheus
+  - port: http-monitoring
+    interval: 15s
+    path: /metrics
+
+---
+# Istio CNI Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-cni-config
+  namespace: kube-system
+data:
+  cni_network_config: |
+    {
+      "cniVersion": "0.3.1",
+      "name": "istio-cni",
+      "type": "istio-cni",
+      "log_level": "info",
+      "kubernetes": {
+        "kubeconfig": "/etc/cni/net.d/ZZZ-istio-cni-kubeconfig",
+        "cni_bin_dir": "/opt/cni/bin",
+        "exclude_namespaces": [ "istio-system", "kube-system" ]
+      }
+    }

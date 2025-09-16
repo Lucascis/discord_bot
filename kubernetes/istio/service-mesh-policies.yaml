@@ -1,0 +1,456 @@
+# Service Mesh Security and Traffic Policies
+# Advanced policies for Discord Music Bot microservices
+
+---
+# Namespace for Discord Bot services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: discord-bot
+  labels:
+    istio-injection: enabled
+    name: discord-bot
+
+---
+# Authorization Policy - Gateway Service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: gateway-authz
+  namespace: discord-bot
+spec:
+  selector:
+    matchLabels:
+      app: gateway-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+  - to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/health", "/metrics"]
+  - to:
+    - operation:
+        methods: ["POST"]
+        paths: ["/discord/*"]
+    when:
+    - key: source.ip
+      values: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+---
+# Authorization Policy - API Service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: api-authz
+  namespace: discord-bot
+spec:
+  selector:
+    matchLabels:
+      app: api-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/discord-bot/sa/gateway-service"]
+        namespaces: ["discord-bot"]
+  - to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/v1/*"]
+  - to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/health", "/metrics"]
+
+---
+# Authorization Policy - Audio Service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: audio-authz
+  namespace: discord-bot
+spec:
+  selector:
+    matchLabels:
+      app: audio-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/discord-bot/sa/gateway-service"]
+        namespaces: ["discord-bot"]
+  - to:
+    - operation:
+        methods: ["POST", "PUT"]
+        paths: ["/audio/*"]
+  - to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/health", "/metrics"]
+
+---
+# Authorization Policy - Worker Service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: worker-authz
+  namespace: discord-bot
+spec:
+  selector:
+    matchLabels:
+      app: worker-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/discord-bot/sa/api-service", "cluster.local/ns/discord-bot/sa/audio-service"]
+        namespaces: ["discord-bot"]
+  - to:
+    - operation:
+        methods: ["POST"]
+        paths: ["/jobs/*"]
+  - to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/health", "/metrics"]
+
+---
+# Destination Rule - Gateway Service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: gateway-service
+  namespace: discord-bot
+spec:
+  host: gateway-service.discord-bot.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 30s
+        keepAlive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 20
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+        idleTimeout: 90s
+    outlierDetection:
+      consecutive5xxErrors: 3
+      consecutiveGatewayErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: canary
+    labels:
+      version: canary
+
+---
+# Destination Rule - API Service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: api-service
+  namespace: discord-bot
+spec:
+  host: api-service.discord-bot.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 200
+        maxRequestsPerConnection: 5
+        maxRetries: 3
+        idleTimeout: 120s
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 30
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: canary
+    labels:
+      version: canary
+
+---
+# Destination Rule - Audio Service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: audio-service
+  namespace: discord-bot
+spec:
+  host: audio-service.discord-bot.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 200
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 30
+        http2MaxRequests: 150
+        maxRequestsPerConnection: 3
+        maxRetries: 2
+        idleTimeout: 60s
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: canary
+    labels:
+      version: canary
+
+---
+# Virtual Service - Canary Deployment Example
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: audio-service-canary
+  namespace: discord-bot
+spec:
+  hosts:
+  - audio-service.discord-bot.svc.cluster.local
+  http:
+  # Route 10% traffic to canary
+  - match:
+    - headers:
+        x-canary-user:
+          exact: "true"
+    route:
+    - destination:
+        host: audio-service.discord-bot.svc.cluster.local
+        subset: canary
+      weight: 100
+  # Route 5% of remaining traffic to canary
+  - route:
+    - destination:
+        host: audio-service.discord-bot.svc.cluster.local
+        subset: v1
+      weight: 95
+    - destination:
+        host: audio-service.discord-bot.svc.cluster.local
+        subset: canary
+      weight: 5
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    timeout: 60s
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+
+---
+# Request Authentication - JWT validation
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: api-jwt
+  namespace: discord-bot
+spec:
+  selector:
+    matchLabels:
+      app: api-service
+  jwtRules:
+  - issuer: "discord-bot-auth"
+    jwksUri: "https://discord-bot.local/.well-known/jwks.json"
+    audiences:
+    - "discord-bot-api"
+    fromHeaders:
+    - name: Authorization
+      prefix: "Bearer "
+
+---
+# Service Entry - External Lavalink servers
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: lavalink-external
+  namespace: discord-bot
+spec:
+  hosts:
+  - lavalink.external.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 2333
+    name: lavalink
+    protocol: TCP
+  location: MESH_EXTERNAL
+  resolution: DNS
+
+---
+# Destination Rule - External Lavalink
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: lavalink-external
+  namespace: discord-bot
+spec:
+  host: lavalink.external.com
+  trafficPolicy:
+    tls:
+      mode: SIMPLE
+    connectionPool:
+      tcp:
+        maxConnections: 10
+        connectTimeout: 30s
+      http:
+        maxRetries: 3
+        idleTimeout: 60s
+
+---
+# Sidecar Configuration - Optimize proxy settings
+apiVersion: networking.istio.io/v1beta1
+kind: Sidecar
+metadata:
+  name: discord-bot-sidecar
+  namespace: discord-bot
+spec:
+  workloadSelector:
+    labels:
+      app: gateway-service
+  ingress:
+  - port:
+      number: 3001
+      protocol: HTTP
+      name: http
+    defaultEndpoint: 127.0.0.1:3001
+  egress:
+  - hosts:
+    - "./*"
+    - "istio-system/*"
+    - "./lavalink.external.com"
+
+---
+# Envoy Filter - Custom rate limiting
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: rate-limit-filter
+  namespace: discord-bot
+spec:
+  workloadSelector:
+    labels:
+      app: api-service
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.local_ratelimit
+        typed_config:
+          "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+          type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+          value:
+            stat_prefix: local_rate_limiter
+            token_bucket:
+              max_tokens: 100
+              tokens_per_fill: 10
+              fill_interval: 1s
+            filter_enabled:
+              runtime_key: local_rate_limit_enabled
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            filter_enforced:
+              runtime_key: local_rate_limit_enforced
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+
+---
+# Telemetry v2 - Custom metrics
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: discord-bot-metrics
+  namespace: discord-bot
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: requests_total
+      tagOverrides:
+        guild_id:
+          value: "{{.request_headers['x-guild-id'] | default 'unknown'}}"
+        user_id:
+          value: "{{.request_headers['x-user-id'] | default 'unknown'}}"
+        command:
+          value: "{{.request_headers['x-command'] | default 'unknown'}}"
+    - match:
+        metric: request_duration_milliseconds
+      tagOverrides:
+        service_type:
+          value: "{{.destination_app | default 'unknown'}}"
+
+---
+# Workload Entry - External database
+apiVersion: networking.istio.io/v1beta1
+kind: WorkloadEntry
+metadata:
+  name: postgres-db
+  namespace: discord-bot
+spec:
+  address: postgres.external.com
+  ports:
+    postgres: 5432
+  labels:
+    app: postgres
+    type: database
+
+---
+# Service Entry - External Redis
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: redis-external
+  namespace: discord-bot
+spec:
+  hosts:
+  - redis.external.com
+  ports:
+  - number: 6379
+    name: redis
+    protocol: TCP
+  location: MESH_EXTERNAL
+  resolution: DNS
