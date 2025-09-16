@@ -81,3 +81,39 @@ model FeatureFlag {
   @@index([guildId])
   @@index([name])
 }
+
+// Event Store Tables for Event Sourcing
+model EventStoreEvent {
+  id                Int      @id @default(autoincrement())
+  eventId           String   @unique
+  eventType         String
+  aggregateId       String
+  aggregateType     String
+  aggregateVersion  Int
+  eventData         String   // JSON
+  metadata          String   // JSON
+  timestamp         DateTime
+  createdAt         DateTime @default(now())
+  globalPosition    Int      @default(autoincrement())
+
+  @@index([aggregateId, aggregateType])
+  @@index([aggregateId, aggregateType, aggregateVersion])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([globalPosition])
+  @@unique([aggregateId, aggregateType, aggregateVersion])
+}
+
+model EventStoreSnapshot {
+  id            Int      @id @default(autoincrement())
+  aggregateId   String
+  aggregateType String
+  version       Int
+  data          String   // JSON
+  timestamp     DateTime
+  createdAt     DateTime @default(now())
+
+  @@unique([aggregateId, aggregateType])
+  @@index([aggregateType])
+  @@index([timestamp])
+}

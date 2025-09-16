@@ -1,0 +1,25 @@
+{
+  "name": "@discord-bot/saga",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@discord-bot/event-store": "workspace:*",
+    "@discord-bot/cqrs": "workspace:*",
+    "@discord-bot/logger": "workspace:*",
+    "@discord-bot/database": "workspace:*",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  }
+}

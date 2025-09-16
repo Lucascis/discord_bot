@@ -1,0 +1,306 @@
+import { logger } from '@discord-bot/logger';
+import type { Interaction } from 'discord.js';
+
+export class AppError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public statusCode: number = 500,
+    public isOperational: boolean = true,
+  ) {
+    super(message);
+    this.name = 'AppError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+export class ValidationError extends AppError {
+  constructor(message: string, field?: string) {
+    super(message, 'VALIDATION_ERROR', 400);
+    this.name = 'ValidationError';
+    if (field) {
+      this.message = `${field}: ${message}`;
+    }
+  }
+}
+
+export class RateLimitError extends AppError {
+  constructor(message: string = 'Rate limit exceeded') {
+    super(message, 'RATE_LIMIT', 429);
+    this.name = 'RateLimitError';
+  }
+}
+
+export class PermissionError extends AppError {
+  constructor(message: string = 'Insufficient permissions') {
+    super(message, 'PERMISSION_DENIED', 403);
+    this.name = 'PermissionError';
+  }
+}
+
+export class AudioError extends AppError {
+  constructor(message: string, public guildId?: string) {
+    super(message, 'AUDIO_ERROR', 500);
+    this.name = 'AudioError';
+  }
+}
+
+export class DiscordError extends AppError {
+  constructor(message: string = 'Discord API error') {
+    super(message, 'DISCORD_ERROR', 502);
+    this.name = 'DiscordError';
+  }
+}
+
+/**
+ * Centralized error handler for Discord interactions
+ */
+export async function handleInteractionError(
+  error: Error,
+  interaction: Interaction,
+  context?: string,
+): Promise<void> {
+  const errorId = Math.random().toString(36).substring(2, 15);
+  
+  logger.error({
+    errorId,
+    error: {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    },
+    interaction: {
+      type: interaction.type,
+      user: interaction.user?.id || 'unknown',
+      guild: interaction.guildId,
+      channel: interaction.channelId,
+    },
+    context,
+  }, 'Interaction error occurred');
+
+  let userMessage = 'An error occurred while processing your request.';
+  const ephemeral = true;
+
+  if (error instanceof ValidationError) {
+    userMessage = `Invalid input: ${error.message}`;
+  } else if (error instanceof RateLimitError) {
+    userMessage = 'You\'re doing that too often. Please try again later.';
+  } else if (error instanceof PermissionError) {
+    userMessage = 'You don\'t have permission to use this command.';
+  } else if (error instanceof AudioError) {
+    userMessage = `Audio error: ${error.message}`;
+  } else if (!error.name.includes('AppError')) {
+    // For unexpected errors, don't expose details to users
+    userMessage = `Something went wrong. Please try again later. (Error ID: ${errorId})`;
+  }
+
+  try {
+    if (interaction.isChatInputCommand() || interaction.isButton()) {
+      if (interaction.replied) {
+        await interaction.followUp({ content: userMessage, ephemeral });
+      } else if (interaction.deferred) {
+        await interaction.editReply({ content: userMessage });
+      } else {
+        await interaction.reply({ content: userMessage, ephemeral });
+      }
+    }
+  } catch (replyError) {
+    logger.error({ errorId, replyError }, 'Failed to send error response to user');
+  }
+}
+
+/**
+ * Higher-order function to wrap async functions with error handling
+ */
+export function withErrorHandling<TArgs extends readonly unknown[], TReturn>(
+  fn: (...args: TArgs) => Promise<TReturn>,
+  context?: string,
+): (...args: TArgs) => Promise<TReturn> {
+  return (async (...args: TArgs) => {
+    try {
+      return await fn(...args);
+    } catch (error) {
+      logger.error({
+        error: {
+          name: error instanceof Error ? error.name : 'Unknown',
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+        context,
+        args: args.length > 0 ? args.slice(0, 2) : undefined, // Log first 2 args for context
+      }, 'Error in wrapped function');
+      throw error;
+    }
+  });
+}
+
+/**
+ * Async timeout wrapper with proper error handling
+ */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+): Promise<T | null> {
+  const timeoutPromise = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    if (result === null) {
+      logger.warn({ operation, timeoutMs }, 'Operation timed out');
+    }
+    return result;
+  } catch (error) {
+    logger.error({
+      error: {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+      },
+      operation,
+      timeoutMs,
+    }, 'Operation failed');
+    throw error;
+  }
+}
+
+/**
+ * Safe JSON parsing with error handling
+ */
+export function safeParse<T = unknown>(json: string, defaultValue: T): T {
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    logger.warn({ json: json.slice(0, 100), error }, 'Failed to parse JSON');
+    return defaultValue;
+  }
+}
+
+/**
+ * Retry mechanism for failed operations
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000,
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Don't retry on certain error types
+      if (lastError instanceof ValidationError || 
+          lastError instanceof PermissionError ||
+          lastError instanceof RateLimitError) {
+        throw lastError;
+      }
+      
+      if (attempt === maxRetries) {
+        logger.error({
+          error: lastError,
+          attempts: attempt,
+          maxRetries
+        }, 'All retry attempts failed');
+        throw lastError;
+      }
+      
+      logger.warn({
+        error: lastError,
+        attempt,
+        maxRetries,
+        nextRetryInMs: delay
+      }, 'Retry attempt failed, retrying...');
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError!;
+}
+
+/**
+ * Circuit breaker pattern for external services
+ */
+export class CircuitBreaker {
+  private failures = 0;
+  private successes = 0;
+  private requests = 0;
+  private lastFailureTime = 0;
+  private state: 'closed' | 'open' | 'half-open' = 'closed';
+
+  constructor(
+    private name: string,
+    private threshold: number = 5,
+    private timeout: number = 60000, // 60 seconds
+  ) {}
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    this.requests++;
+
+    if (this.state === 'open') {
+      if (Date.now() - this.lastFailureTime > this.timeout) {
+        this.state = 'half-open';
+      } else {
+        throw new AppError('Circuit breaker is open', 'CIRCUIT_BREAKER_OPEN', 503);
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private onSuccess(): void {
+    this.successes++;
+    if (this.state === 'half-open') {
+      this.state = 'closed';
+      this.failures = 0;
+    }
+  }
+
+  private onFailure(): void {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    
+    if (this.failures >= this.threshold) {
+      this.state = 'open';
+      logger.error({ failures: this.failures, threshold: this.threshold, name: this.name }, 'Circuit breaker opened');
+    }
+  }
+
+  reset(): void {
+    this.failures = 0;
+    this.successes = 0;
+    this.requests = 0;
+    this.state = 'closed';
+    this.lastFailureTime = 0;
+  }
+
+  getStats(): { 
+    name: string;
+    state: string; 
+    failures: number; 
+    successes: number;
+    requests: number;
+    threshold: number;
+  } {
+    return {
+      name: this.name,
+      state: this.state,
+      failures: this.failures,
+      successes: this.successes,
+      requests: this.requests,
+      threshold: this.threshold,
+    };
+  }
+}
