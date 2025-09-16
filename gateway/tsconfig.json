@@ -1,8 +1,47 @@
 {
-  "extends": "../tsconfig.base.json",
-  "include": ["src"],
   "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "allowImportingTsExtensions": false,
+    "lib": ["ES2020", "DOM"],
+
+    // Strict type checking
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Module resolution and interop
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+
+    // Output
     "outDir": "dist",
-    "rootDir": "src"
-  }
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": false,
+
+    // Code quality
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "removeComments": false,
+    "types": ["node"],
+
+    // Advanced options
+    "incremental": false,
+    "composite": false
+  },
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }

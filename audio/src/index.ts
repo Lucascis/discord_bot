@@ -7,9 +7,10 @@ import {
   type UnresolvedTrack,
 } from 'lavalink-client';
 import { env } from '@discord-bot/config';
-import { logger, HealthChecker, CommonHealthChecks, initializeSentry } from '@discord-bot/logger';
+import { logger, HealthChecker, CommonHealthChecks, getAdvancedHealthMonitor, initializeSentry } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
+import { RedisCircuitBreaker, type RedisCircuitBreakerConfig } from '@discord-bot/cache';
 import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
@@ -18,12 +19,15 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay.js';
 import { guildMutex } from './guildMutex.js';
+import { TTLMap } from '@discord-bot/cache';
 import { shouldAutomixAfterSkip, shouldSeedOnFirstPlay } from './logic.js';
 import { validateCommandMessage } from './validation.js';
 import {
   withErrorHandling
 } from './errors.js';
 import { automixCache } from './cache.js';
+import { audioCacheManager, featureFlagCache } from './services/cache.js';
+import { audioMetrics } from './services/metrics.js';
 import {
   batchQueueSaver,
   MemoryManager,
@@ -32,10 +36,36 @@ import {
 } from './performance.js';
 
 const redisUrl = env.REDIS_URL;
-const redisPub = createClient({ url: redisUrl });
+
+const redisCircuitConfig: RedisCircuitBreakerConfig = {
+  failureThreshold: 0.5,
+  timeout: 30000,
+  monitoringWindow: 60000,
+  volumeThreshold: 10,
+  redis: {
+    retryDelayOnFailover: 1000,
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    lazyConnect: true,
+  },
+};
+
+const redisPub = new RedisCircuitBreaker(
+  'audio-pub',
+  redisCircuitConfig,
+  {
+    host: redisUrl ? new URL(redisUrl).hostname : 'localhost',
+    port: redisUrl ? parseInt(new URL(redisUrl).port) || 6379 : 6379,
+    password: redisUrl ? new URL(redisUrl).password || undefined : undefined,
+    retryDelayOnFailover: 1000,
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    lazyConnect: true,
+  }
+);
+
 const redisSub = createClient({ url: redisUrl });
 
-await redisPub.connect();
 await redisSub.connect();
 logger.info({ NOWPLAYING_UPDATE_MS: env.NOWPLAYING_UPDATE_MS }, 'Audio startup config');
 
@@ -144,7 +174,11 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
     if (data.type === 'play') {
       await guildMutex.run(data.guildId, async () => {
       const playData = data as Extract<CommandMessage, { type: 'play' }>;
+      const startTime = Date.now();
       logger.info({ guildId: playData.guildId, query: playData.query }, 'audio: play command received');
+
+      // Track user session and command start
+      audioMetrics.trackUserSessionStart(playData.userId, playData.guildId);
       
       /**
        * STAGE 1: Player Creation and Connection
@@ -164,7 +198,7 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       
       // STAGE 2: Intelligent Search with Performance Optimizations (extracted)
       const { smartSearch } = await import('./playback/search.js');
-      const res = await smartSearch(player, playData.query, playData.userId);
+      const res = await smartSearch(player, playData.query, playData.userId, playData.guildId);
       logger.info({ tracks: res.tracks.length }, 'audio: search results');
       
       /**
@@ -237,7 +271,24 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
          */
         if (!player.playing && !player.paused && !player.queue.current) {
           await player.play({ clientTrack: first });
-          
+
+          // Track song playback metrics
+          const trackInfo = first as { info?: { title?: string; author?: string; duration?: number; uri?: string } };
+          if (trackInfo.info) {
+            audioMetrics.trackSongPlayback(
+              playData.guildId,
+              {
+                title: trackInfo.info.title || 'Unknown',
+                author: trackInfo.info.author,
+                duration: trackInfo.info.duration || 0,
+                source: 'youtube', // Default source, could be enhanced
+                uri: trackInfo.info.uri,
+              },
+              false, // Not autoplay
+              playData.userId
+            );
+          }
+
           // CRITICAL FIX: Force UI creation after immediate playback
           void (async () => {
             try {
@@ -284,8 +335,28 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         } else {
           // Priority insertion for subsequent user adds
           await player.queue.add(first, 0);
+
+          // Track queue operation
+          audioMetrics.trackQueueOperation(
+            playData.guildId,
+            'add',
+            player.queue.tracks.length,
+            playData.userId
+          );
         }
         batchQueueSaver.scheduleUpdate(playData.guildId, player, playData.voiceChannelId, playData.textChannelId);
+
+        // Track successful command execution
+        const commandLatency = Date.now() - startTime;
+        audioMetrics.trackCommandExecution(
+          'play',
+          playData.guildId,
+          commandLatency,
+          true,
+          undefined,
+          playData.userId
+        );
+
         if (playData.requestId) {
           type TrackInfoLite = { title?: string; uri?: string; artworkUrl?: string };
           const info = (chosen as { info?: TrackInfoLite }).info;
@@ -296,6 +367,18 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         }
       } else {
         logger.warn({ query: playData.query }, 'audio: no tracks found');
+
+        // Track failed command execution
+        const commandLatency = Date.now() - startTime;
+        audioMetrics.trackCommandExecution(
+          'play',
+          playData.guildId,
+          commandLatency,
+          false,
+          'no_results',
+          playData.userId
+        );
+
         if (playData.requestId) {
           await redisPub.publish(`discord-bot:response:${playData.requestId}`, JSON.stringify({ ok: false, reason: 'no_results' }));
         }
@@ -304,10 +387,24 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       return;
     }
     if (data.type === 'skip') {
+      const startTime = Date.now();
       const player = manager.getPlayer(data.guildId);
       if (player) {
-        const prev = player.queue.current as { info?: { title?: string; author?: string; uri?: string } } | undefined;
+        const prev = player.queue.current as { info?: { title?: string; author?: string; uri?: string; duration?: number } } | undefined;
         const qlen = player.queue.tracks.length;
+
+        // Track song skip if there was a current track
+        if (prev?.info) {
+          audioMetrics.trackSongSkip(
+            data.guildId,
+            {
+              title: prev.info.title || 'Unknown',
+              duration: prev.info.duration || 0,
+            },
+            player.position || 0,
+            'user_skip'
+          );
+        }
         
         try {
           // Perform skip operation with better error handling
@@ -339,16 +436,40 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
           
           if (prev && shouldAutoplay) {
             logger.info({ guildId: player.guildId }, 'skip: triggering autoplay for empty queue');
+
+            // Track autoplay trigger
+            audioMetrics.trackAutoplayTrigger(data.guildId, 'queue_empty');
+
             await enqueueAutomix(player, prev);
           } else if (!shouldAutoplay && currentState.queueLen === 0 && !currentState.playing) {
             // Ensure UI updates for idle state
             await pushIdleState(player);
           }
-          
+
           batchQueueSaver.scheduleUpdate(data.guildId, player);
-          
+
+          // Track successful skip command
+          const commandLatency = Date.now() - startTime;
+          audioMetrics.trackCommandExecution(
+            'skip',
+            data.guildId,
+            commandLatency,
+            true
+          );
+
         } catch (e) {
           logger.error({ e, guildId: player.guildId }, 'skip operation failed');
+
+          // Track failed skip command
+          const commandLatency = Date.now() - startTime;
+          audioMetrics.trackCommandExecution(
+            'skip',
+            data.guildId,
+            commandLatency,
+            false,
+            'skip_error'
+          );
+
           // Ensure UI state consistency even on errors
           if (!player.playing && !player.queue.current) {
             await pushIdleState(player);
@@ -566,14 +687,161 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
   }
 }, 'redis_command_handler'));
 
-// Health Check Setup
+// Health Check Setup with Advanced Monitoring
 const healthChecker = new HealthChecker('audio', '1.0.0');
+const advancedHealth = getAdvancedHealthMonitor({
+  timeout: 8000,
+  retryAttempts: 2,
+  warningThresholds: {
+    responseTime: 2000,
+    memoryUsage: 80,
+    cpuUsage: 75,
+  },
+  criticalThresholds: {
+    responseTime: 8000,
+    memoryUsage: 95,
+    cpuUsage: 90,
+  },
+});
 
-// Register health checks
+// Register standard health checks
 healthChecker.register('redis', () => CommonHealthChecks.redis(redisPub));
 healthChecker.register('database', () => CommonHealthChecks.database(prisma));
 healthChecker.register('lavalink', () => CommonHealthChecks.lavalink(manager));
-healthChecker.register('memory', () => CommonHealthChecks.memory(2048)); // Audio service typically uses more memory
+healthChecker.register('memory', () => CommonHealthChecks.memory(2048));
+
+// Register advanced health components
+advancedHealth.registerComponent('redis-circuit-breaker', async () => {
+  const metrics = redisPub.getMetrics();
+  return {
+    status: metrics.redisStatus === 'ready' ? 'healthy' : 'unhealthy',
+    message: `Redis circuit breaker status: ${metrics.redisStatus}`,
+    details: {
+      circuitState: metrics.state,
+      fallbackCacheSize: metrics.fallbackCacheSize,
+      failures: metrics.failures,
+      successes: metrics.successes,
+    },
+  };
+});
+
+advancedHealth.registerComponent('lavalink-nodes', async () => {
+  const nodes = Array.from(manager.nodeManager?.nodes.values() || []);
+  const connectedNodes = nodes.filter(node => node.connected);
+  const totalNodes = nodes.length;
+
+  if (totalNodes === 0) {
+    return {
+      status: 'unhealthy',
+      message: 'No Lavalink nodes configured',
+      details: { totalNodes: 0, connectedNodes: 0 },
+    };
+  }
+
+  const connectionRate = connectedNodes.length / totalNodes;
+
+  if (connectionRate === 1) {
+    return {
+      status: 'healthy',
+      message: 'All Lavalink nodes connected',
+      details: {
+        totalNodes,
+        connectedNodes: connectedNodes.length,
+        connectionRate,
+        nodeDetails: nodes.map(node => ({
+          id: node.id,
+          connected: node.connected,
+          stats: node.stats,
+        })),
+      },
+    };
+  } else if (connectionRate >= 0.5) {
+    return {
+      status: 'degraded',
+      message: `${connectedNodes.length}/${totalNodes} Lavalink nodes connected`,
+      details: {
+        totalNodes,
+        connectedNodes: connectedNodes.length,
+        connectionRate,
+        nodeDetails: nodes.map(node => ({
+          id: node.id,
+          connected: node.connected,
+          stats: node.stats,
+        })),
+      },
+    };
+  } else {
+    return {
+      status: 'unhealthy',
+      message: `Critical: Only ${connectedNodes.length}/${totalNodes} Lavalink nodes connected`,
+      details: {
+        totalNodes,
+        connectedNodes: connectedNodes.length,
+        connectionRate,
+        nodeDetails: nodes.map(node => ({
+          id: node.id,
+          connected: node.connected,
+          stats: node.stats,
+        })),
+      },
+    };
+  }
+});
+
+advancedHealth.registerComponent('audio-performance', async () => {
+  const memoryUsage = process.memoryUsage();
+  const heapUsedMB = memoryUsage.heapUsed / 1024 / 1024;
+  const heapTotalMB = memoryUsage.heapTotal / 1024 / 1024;
+  const heapUsagePercent = (heapUsedMB / heapTotalMB) * 100;
+
+  const activePlayers = manager.players.size;
+  const totalTracks = Array.from(manager.players.values()).reduce(
+    (sum, player) => sum + player.queue.tracks.length + (player.queue.current ? 1 : 0),
+    0
+  );
+
+  const performanceScore = Math.max(0, 100 - heapUsagePercent - (activePlayers * 2));
+
+  return {
+    status: performanceScore > 70 ? 'healthy' : performanceScore > 40 ? 'degraded' : 'unhealthy',
+    message: `Audio service performance score: ${performanceScore.toFixed(1)}%`,
+    details: {
+      memory: {
+        heapUsedMB: heapUsedMB.toFixed(1),
+        heapTotalMB: heapTotalMB.toFixed(1),
+        heapUsagePercent: heapUsagePercent.toFixed(1),
+        external: (memoryUsage.external / 1024 / 1024).toFixed(1),
+      },
+      audio: {
+        activePlayers,
+        totalTracks,
+        performanceScore: performanceScore.toFixed(1),
+      },
+      uptime: process.uptime(),
+    },
+  };
+});
+
+advancedHealth.registerComponent('cache-performance', async () => {
+  const cacheStats = {
+    automixCacheSize: (automixCache as any).size || 0,
+    autoplayCooldownSize: autoplayCooldown.size,
+    lastUiPushSize: lastUiPush.size,
+  };
+
+  const totalCacheEntries = Object.values(cacheStats).reduce((sum, size) => sum + size, 0);
+  const cacheEfficiency = totalCacheEntries > 0 ? Math.min(100, (1000 / totalCacheEntries) * 100) : 100;
+
+  return {
+    status: cacheEfficiency > 70 ? 'healthy' : cacheEfficiency > 40 ? 'degraded' : 'unhealthy',
+    message: `Cache efficiency: ${cacheEfficiency.toFixed(1)}%`,
+    details: {
+      ...cacheStats,
+      totalEntries: totalCacheEntries,
+      efficiency: cacheEfficiency.toFixed(1),
+    },
+  };
+});
 
 // Metrics + Health
 const registry = new Registry();
@@ -638,11 +906,75 @@ const healthServer = http.createServer(async (req, res) => {
   // Enhanced health endpoint
   if (req.url.startsWith('/health')) {
     try {
-      const health = await healthChecker.check();
-      const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
-      
-      res.writeHead(statusCode, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(health, null, 2));
+      if (req.url === '/health/advanced') {
+        // Advanced health monitoring
+        const healthChecks = new Map([
+          ['redis-circuit-breaker', () => advancedHealth.checkComponent('redis-circuit-breaker', async () => {
+            const metrics = redisPub.getMetrics();
+            return {
+              status: metrics.redisStatus === 'ready' ? 'healthy' : 'unhealthy',
+              message: `Redis circuit breaker status: ${metrics.redisStatus}`,
+              details: {
+                circuitState: metrics.state,
+                fallbackCacheSize: metrics.fallbackCacheSize,
+                failures: metrics.failures,
+                successes: metrics.successes,
+              },
+            };
+          })],
+          ['lavalink-nodes', () => advancedHealth.checkComponent('lavalink-nodes', async () => {
+            const nodes = Array.from(manager.nodeManager?.nodes.values() || []);
+            const connectedNodes = nodes.filter(node => node.connected);
+            const totalNodes = nodes.length;
+            const connectionRate = totalNodes > 0 ? connectedNodes.length / totalNodes : 0;
+
+            return {
+              status: connectionRate === 1 ? 'healthy' : connectionRate >= 0.5 ? 'degraded' : 'unhealthy',
+              message: `${connectedNodes.length}/${totalNodes} Lavalink nodes connected`,
+              details: { totalNodes, connectedNodes: connectedNodes.length, connectionRate },
+            };
+          })],
+          ['audio-performance', () => advancedHealth.checkComponent('audio-performance', async () => {
+            const memoryUsage = process.memoryUsage();
+            const heapUsagePercent = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
+            const activePlayers = manager.players.size;
+            const performanceScore = Math.max(0, 100 - heapUsagePercent - (activePlayers * 2));
+
+            return {
+              status: performanceScore > 70 ? 'healthy' : performanceScore > 40 ? 'degraded' : 'unhealthy',
+              message: `Performance score: ${performanceScore.toFixed(1)}%`,
+              details: { heapUsagePercent, activePlayers, performanceScore },
+            };
+          })],
+        ]);
+
+        const componentResults = await advancedHealth.checkAllComponents(healthChecks);
+        const healthSummary = advancedHealth.getHealthSummary();
+
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          ...healthSummary,
+          components: Array.from(componentResults.values()),
+          timestamp: new Date().toISOString(),
+        }, null, 2));
+      } else if (req.url === '/health/trends') {
+        // Health trends endpoint
+        const trends = {
+          'redis-circuit-breaker': advancedHealth.getComponentTrends('redis-circuit-breaker', 30),
+          'lavalink-nodes': advancedHealth.getComponentTrends('lavalink-nodes', 30),
+          'audio-performance': advancedHealth.getComponentTrends('audio-performance', 30),
+        };
+
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(trends, null, 2));
+      } else {
+        // Standard health check
+        const health = await healthChecker.check();
+        const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+
+        res.writeHead(statusCode, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(health, null, 2));
+      }
     } catch (error) {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
@@ -682,12 +1014,39 @@ const healthServer = http.createServer(async (req, res) => {
     const metrics = PerformanceTracker.getMetrics();
     const searchStats = SearchThrottler.getStats();
     const memoryStats = memoryManager.getMemoryStats();
-    
+    const cacheStats = audioCacheManager.getCacheStats();
+    const businessInsights = audioMetrics.getBusinessInsights();
+
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
       performance: metrics,
       search: searchStats,
       memory: memoryStats,
+      cache: cacheStats,
+      business: businessInsights,
+      timestamp: new Date().toISOString()
+    }, null, 2));
+    return;
+  }
+
+  // Business metrics endpoint
+  if (req.url.startsWith('/metrics/business')) {
+    const insights = audioMetrics.getBusinessInsights();
+
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(insights, null, 2));
+    return;
+  }
+
+  // Cache statistics endpoint
+  if (req.url.startsWith('/cache/stats')) {
+    const cacheStats = audioCacheManager.getCacheStats();
+    const cacheSizes = audioCacheManager.getCacheSizes();
+
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      stats: cacheStats,
+      sizes: cacheSizes,
       timestamp: new Date().toISOString()
     }, null, 2));
     return;
@@ -715,10 +1074,17 @@ process.on('SIGINT', async () => {
     
     // Stop memory monitoring
     memoryManager.stopMonitoring();
-    
+
+    // Cleanup TTL maps
+    autoplayCooldown.destroy();
+    lastUiPush.destroy();
+
+    // Cleanup cache system
+    await audioCacheManager.flushAllCaches().catch(() => {});
+
     // Close Redis connections
     await Promise.all([
-      redisPub.quit().catch(() => {}),
+      redisPub.disconnect().catch(() => {}),
       redisSub.quit().catch(() => {}),
     ]);
     
@@ -760,20 +1126,21 @@ async function isAutomixEnabled(guildId: string): Promise<boolean> {
   } catch { return false; }
 }
 
-// Cached version of automix check for better performance
+// Cached version of automix check for better performance using multi-layer cache
 async function isAutomixEnabledCached(guildId: string): Promise<boolean> {
-  const cacheKey = `automix:${guildId}`;
-  let enabled = automixCache.get(cacheKey);
-  
-  if (enabled === undefined) {
-    enabled = await isAutomixEnabled(guildId);
-    automixCache.set(cacheKey, enabled, 180000); // 3 minutes cache
-  }
-  
-  return enabled;
+  return await featureFlagCache.getOrSet(
+    featureFlagCache.generateFlagKey(guildId, 'autoplay'),
+    async () => {
+      const enabled = await isAutomixEnabled(guildId);
+      // Track feature flag usage for metrics
+      audioMetrics.businessMetrics.trackFeatureUsage('autoplay_check', guildId);
+      return enabled;
+    },
+    180000 // 3 minutes cache
+  );
 }
 
-async function enqueueAutomix(player: import('lavalink-client').Player, last: { info?: { title?: string; author?: string; uri?: string } }) {
+async function enqueueAutomix(player: import('lavalink-client').Player, last: { info?: { title?: string; author?: string; uri?: string; duration?: number } }) {
   const title = (last?.info?.title ?? '').trim();
   const author = (last?.info?.author ?? '').trim();
   const uri = last?.info?.uri ?? '';
@@ -787,11 +1154,48 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
     author,
     uri,
   );
-  if (!pick) { logger.warn({ guildId: player.guildId, title, author }, 'automix: no candidate found'); return; }
+
+  if (!pick) {
+    logger.warn({ guildId: player.guildId, title, author }, 'automix: no candidate found');
+
+    // Track failed autoplay recommendation
+    audioMetrics.trackAutoplayRecommendation(
+      player.guildId,
+      'similar', // Default type
+      false // Failed
+    );
+
+    return;
+  }
+
   try {
-    const info = (pick as { info?: { title?: string; uri?: string } }).info;
+    const info = (pick as { info?: { title?: string; uri?: string; duration?: number } }).info;
     logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri }, 'automix: picked candidate');
+
+    // Track successful autoplay recommendation
+    audioMetrics.trackAutoplayRecommendation(
+      player.guildId,
+      'similar', // Default recommendation type
+      true,      // Success
+      info?.title
+    );
+
+    // Track the autoplay song
+    if (info) {
+      audioMetrics.trackSongPlayback(
+        player.guildId,
+        {
+          title: info.title || 'Unknown',
+          duration: info.duration || 0,
+          source: 'youtube', // Default source
+          uri: info.uri,
+        },
+        true // Is autoplay
+      );
+    }
+
   } catch { /* ignore */ }
+
   await ensurePlayback(player as unknown as import('./autoplay.js').LLPlayer, pick as unknown as import('./autoplay.js').LLTrack);
   // Si la cola queda corta, volver a sembrar relacionados para mantener reproducción continua
   try {
@@ -814,7 +1218,11 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   await saveQueue(player.guildId, player);
 }
 
-const autoplayCooldown = new Map<string, number>();
+const autoplayCooldown = new TTLMap<string, number>({
+  maxSize: 500,           // Max 500 guilds
+  defaultTTL: 300000,     // 5 minutes TTL (cooldown duration)
+  cleanupInterval: 60000  // Cleanup every minute
+});
 
 manager.on('trackEnd', async (player, track, payload?: unknown) => {
   try {
@@ -850,7 +1258,11 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
 });
 
 // --- Real-time push updates to Gateway ---
-const lastUiPush = new Map<string, number>();
+const lastUiPush = new TTLMap<string, number>({
+  maxSize: 1000,          // Max 1000 guilds
+  defaultTTL: 1800000,    // 30 minutes TTL
+  cleanupInterval: 300000 // Cleanup every 5 minutes
+});
 const minUiInterval = Math.max(1000, env.NOWPLAYING_UPDATE_MS ?? 5000);
 
 manager.on('playerUpdate', (playerJson) => {

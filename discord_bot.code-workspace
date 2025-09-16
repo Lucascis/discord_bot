@@ -1,0 +1,67 @@
+{
+  "folders": [
+    {
+      "name": "📦 Root",
+      "path": "."
+    },
+    {
+      "name": "🎮 Gateway",
+      "path": "gateway"
+    },
+    {
+      "name": "🎵 Audio",
+      "path": "audio"
+    },
+    {
+      "name": "🌐 API",
+      "path": "api"
+    },
+    {
+      "name": "⚙️ Worker",
+      "path": "worker"
+    },
+    {
+      "name": "📚 Config",
+      "path": "packages/config"
+    },
+    {
+      "name": "💾 Database",
+      "path": "packages/database"
+    },
+    {
+      "name": "📝 Logger",
+      "path": "packages/logger"
+    },
+    {
+      "name": "🤖 Commands",
+      "path": "packages/commands"
+    },
+    {
+      "name": "🔒 Security",
+      "path": "packages/security"
+    },
+    {
+      "name": "💾 Cache",
+      "path": "packages/cache"
+    }
+  ],
+  "settings": {
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.eslint": "explicit"
+    },
+    "files.exclude": {
+      "**/node_modules": false,
+      "**/dist": true,
+      "**/.git": true,
+      "**/.DS_Store": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/pnpm-lock.yaml": true
+    }
+  }
+}

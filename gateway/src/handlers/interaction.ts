@@ -6,6 +6,7 @@ import { getAutomixEnabled, setAutomixEnabled } from '../flags.js';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
 import { randomUUID } from 'node:crypto';
+import { safeDiscordOperation } from '../errors.js';
 
 interface PlayerState {
   loopMode?: string;
@@ -417,12 +418,31 @@ export async function handleButtonInteraction(
     }
   } catch (error) {
     logger.error({ error, customId: id, guildId }, 'Button interaction error');
-    
+
     const errorMessage = 'An error occurred while processing your interaction.';
-    if (interaction.deferred) {
-      await interaction.editReply({ content: errorMessage });
-    } else if (!interaction.replied) {
-      await interaction.reply({ content: errorMessage, ephemeral: true });
-    }
+
+    // Safely handle the error response
+    await safeDiscordOperation(
+      async () => {
+        if (interaction.deferred) {
+          return await interaction.editReply({ content: errorMessage });
+        } else if (!interaction.replied) {
+          return await interaction.reply({ content: errorMessage, ephemeral: true });
+        }
+        return null;
+      },
+      `error_response_${id}`,
+      {
+        maxRetries: 2,
+        onError: (replyError) => {
+          logger.error({
+            originalError: error,
+            replyError,
+            customId: id,
+            guildId
+          }, 'Failed to send error response to user');
+        }
+      }
+    );
   }
 }

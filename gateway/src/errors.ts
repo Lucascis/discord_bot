@@ -1,5 +1,28 @@
 import { logger } from '@discord-bot/logger';
 import type { Interaction } from 'discord.js';
+import { Counter, register } from 'prom-client';
+
+// Error metrics
+const discordApiErrorCounter = new Counter({
+  name: 'discord_api_errors_total',
+  help: 'Total number of Discord API errors',
+  labelNames: ['operation', 'error_code', 'retryable'],
+  registers: [register]
+});
+
+const discordOperationRetryCounter = new Counter({
+  name: 'discord_operation_retries_total',
+  help: 'Total number of Discord operation retries',
+  labelNames: ['operation', 'attempt'],
+  registers: [register]
+});
+
+const discordOperationDuration = new Counter({
+  name: 'discord_operation_duration_seconds_total',
+  help: 'Total duration of Discord operations',
+  labelNames: ['operation', 'success'],
+  registers: [register]
+});
 
 export class AppError extends Error {
   constructor(
@@ -46,10 +69,131 @@ export class AudioError extends AppError {
 }
 
 export class DiscordError extends AppError {
-  constructor(message: string = 'Discord API error') {
+  constructor(message: string = 'Discord API error', public discordCode?: number) {
     super(message, 'DISCORD_ERROR', 502);
     this.name = 'DiscordError';
   }
+}
+
+/**
+ * Discord API Error codes that should not retry
+ */
+const NON_RETRYABLE_DISCORD_CODES = [
+  10003, // Unknown Channel
+  10008, // Unknown Message
+  10013, // Unknown User
+  10014, // Unknown Emoji
+  50001, // Missing Access
+  50013, // Missing Permissions
+  50035, // Invalid Form Body
+];
+
+/**
+ * Discord API Error codes that indicate temporary issues
+ */
+const RETRYABLE_DISCORD_CODES = [
+  20028, // Rate limited
+  130000, // API Overloaded
+];
+
+/**
+ * Safely handle Discord API operations with automatic error recovery
+ */
+export async function safeDiscordOperation<T>(
+  operation: () => Promise<T>,
+  context: string,
+  options: {
+    maxRetries?: number;
+    fallback?: () => Promise<T | null>;
+    onError?: (error: Error) => void;
+  } = {}
+): Promise<T | null> {
+  const { maxRetries = 2, fallback, onError } = options;
+  const startTime = Date.now();
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation();
+
+      // Record successful operation metrics
+      const duration = (Date.now() - startTime) / 1000;
+      discordOperationDuration.labels(context, 'true').inc(duration);
+
+      if (attempt > 0) {
+        logger.info({ context, attempts: attempt + 1 }, 'Discord operation succeeded after retry');
+      }
+
+      return result;
+    } catch (error: any) {
+      const discordCode = error?.code;
+      const isDiscordAPIError = error?.name === 'DiscordAPIError';
+      const isRetryable = !isDiscordAPIError || !NON_RETRYABLE_DISCORD_CODES.includes(discordCode);
+
+      // Record error metrics
+      discordApiErrorCounter.labels(
+        context,
+        String(discordCode || 'unknown'),
+        String(isRetryable)
+      ).inc();
+
+      if (attempt > 0) {
+        discordOperationRetryCounter.labels(context, String(attempt + 1)).inc();
+      }
+
+      // Log the error with full context
+      logger.warn({
+        context,
+        attempt: attempt + 1,
+        maxRetries: maxRetries + 1,
+        discordCode,
+        isRetryable,
+        error: {
+          name: error.name,
+          message: error.message,
+          code: error.code
+        }
+      }, 'Discord operation failed');
+
+      // Handle non-retryable errors immediately
+      if (isDiscordAPIError && NON_RETRYABLE_DISCORD_CODES.includes(discordCode)) {
+        logger.info({ context, discordCode }, 'Non-retryable Discord error, stopping attempts');
+        if (onError) onError(error);
+        break;
+      }
+
+      // If this is the last attempt, break
+      if (attempt === maxRetries) {
+        logger.error({ context, attempts: attempt + 1, error }, 'All Discord operation attempts failed');
+        if (onError) onError(error);
+        break;
+      }
+
+      // Wait before retry (exponential backoff for rate limits)
+      const delay = discordCode === 20028 ? 2000 * (attempt + 1) : 500 * (attempt + 1);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  // Record failed operation metrics
+  const duration = (Date.now() - startTime) / 1000;
+  discordOperationDuration.labels(context, 'false').inc(duration);
+
+  // Try fallback if available
+  if (fallback) {
+    try {
+      logger.info({ context }, 'Attempting fallback operation');
+      const fallbackResult = await fallback();
+      if (fallbackResult !== null) {
+        discordOperationDuration.labels(`${context}_fallback`, 'true').inc();
+      }
+      return fallbackResult;
+    } catch (fallbackError) {
+      logger.error({ context, fallbackError }, 'Fallback operation also failed');
+      discordOperationDuration.labels(`${context}_fallback`, 'false').inc();
+    }
+  }
+
+  return null;
 }
 
 /**

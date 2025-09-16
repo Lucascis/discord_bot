@@ -21,6 +21,9 @@ const envSchema = z.object({
   WORKER_HTTP_PORT: z.coerce.number().int().min(1000).max(65535).default(3003),
   // Permissions
   DJ_ROLE_NAME: z.string().min(1).max(32, 'Role name too long').default('DJ'),
+  // API Configuration
+  NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
+  API_KEY: z.string().optional(),
   // UI/UX
   NOWPLAYING_UPDATE_MS: z.coerce.number().int().min(1000, 'Update interval too frequent').max(60000, 'Update interval too slow').default(5000),
   // Commands maintenance

@@ -1,5 +1,5 @@
 import { logger } from '@discord-bot/logger';
-import { prisma } from '@discord-bot/database';
+import { prisma, getTransactionManager } from '@discord-bot/database';
 import type { Player, Track } from 'lavalink-client';
 import { queueCache } from './cache.js';
 
@@ -94,78 +94,104 @@ class BatchQueueSaver {
   }
   
   private async saveQueueInternal(
-    guildId: string, 
-    player: Player, 
-    voiceChannelId?: string, 
+    guildId: string,
+    player: Player,
+    voiceChannelId?: string,
     textChannelId?: string
   ): Promise<void> {
+    const transactionManager = getTransactionManager(prisma);
+
     try {
-      // Find or create queue for guild
-      let queue = await prisma.queue.findFirst({ 
-        where: { guildId }, 
-        select: { id: true } 
+      await transactionManager.withTransaction(async (tx) => {
+        // Atomic queue save with batch optimization
+        let queue = await tx.queue.findFirst({
+          where: { guildId },
+          select: { id: true }
+        });
+
+        if (!queue) {
+          queue = await tx.queue.create({
+            data: {
+              guildId,
+              voiceChannelId: voiceChannelId ?? null,
+              textChannelId: textChannelId ?? null
+            },
+            select: { id: true }
+          });
+        } else {
+          await tx.queue.update({
+            where: { id: queue.id },
+            data: {
+              voiceChannelId: voiceChannelId ?? null,
+              textChannelId: textChannelId ?? null
+            }
+          });
+        }
+
+        const queueWithId = queue as { id: string };
+
+        // Atomic clear and rebuild
+        await tx.queueItem.deleteMany({ where: { queueId: queueWithId.id } });
+
+        const items: Array<{
+          title: string;
+          url: string;
+          requestedBy: string;
+          duration: number;
+          queueId: string;
+        }> = [];
+
+        // Add current track
+        const current = player.queue.current as Track | null;
+        if (current?.info?.uri) {
+          items.push({
+            title: current.info.title ?? 'Unknown',
+            url: current.info.uri,
+            requestedBy: (current.requester as { id?: string })?.id ?? 'unknown',
+            duration: Math.floor((current.info.duration ?? 0) / 1000),
+            queueId: queueWithId.id
+          });
+        }
+
+        // Add queue tracks
+        for (const track of player.queue.tracks as Track[]) {
+          if (!track.info?.uri) continue;
+          items.push({
+            title: track.info.title ?? 'Unknown',
+            url: track.info.uri,
+            requestedBy: (track.requester as { id?: string })?.id ?? 'unknown',
+            duration: Math.floor((track.info.duration ?? 0) / 1000),
+            queueId: queueWithId.id
+          });
+        }
+
+        // Atomic batch insert
+        if (items.length > 0) {
+          await tx.queueItem.createMany({ data: items });
+        }
+
+        logger.debug({
+          guildId,
+          queueId: queueWithId.id,
+          itemCount: items.length,
+          batchOperation: true
+        }, 'Queue saved atomically via batch operation');
+
+      }, {
+        timeout: 20000, // Extended timeout for batch operations
+        retryAttempts: 2,
+        isolationLevel: 'ReadCommitted'
       });
-      
-      if (!queue) {
-        queue = await prisma.queue.create({ 
-          data: { guildId, voiceChannelId: voiceChannelId ?? null, textChannelId: textChannelId ?? null }, 
-          select: { id: true } 
-        });
-      } else {
-        await prisma.queue.update({ 
-          where: { id: queue.id }, 
-          data: { voiceChannelId: voiceChannelId ?? null, textChannelId: textChannelId ?? null } 
-        });
-      }
 
-      // Ensure queue has id property after creation/update
-      const queueWithId = queue as { id: string };
-
-      // Clear and rebuild queue items
-      await prisma.queueItem.deleteMany({ where: { queueId: queueWithId.id } });
-      
-      const items: Array<{
-        title: string;
-        url: string;
-        requestedBy: string;
-        duration: number;
-        queueId: string;
-      }> = [];
-      
-      // Add current track
-      const current = player.queue.current as Track | null;
-      if (current?.info?.uri) {
-        items.push({
-          title: current.info.title ?? 'Unknown',
-          url: current.info.uri,
-          requestedBy: (current.requester as { id?: string })?.id ?? 'unknown',
-          duration: Math.floor((current.info.duration ?? 0) / 1000),
-          queueId: queueWithId.id
-        });
-      }
-      
-      // Add queue tracks
-      for (const track of player.queue.tracks as Track[]) {
-        if (!track.info?.uri) continue;
-        items.push({
-          title: track.info.title ?? 'Unknown',
-          url: track.info.uri,
-          requestedBy: (track.requester as { id?: string })?.id ?? 'unknown',
-          duration: Math.floor((track.info.duration ?? 0) / 1000),
-          queueId: queueWithId.id
-        });
-      }
-      
-      // Use batch insert for better performance
-      if (items.length > 0) {
-        await prisma.queueItem.createMany({ data: items });
-      }
-      
-      // Invalidate cache after queue update
+      // Cache invalidation after successful transaction
       queueCache.delete(`queue:${guildId}`);
-      
+
     } catch (error) {
-      logger.error({ error, guildId }, 'Failed to save queue');
+      logger.error({
+        error: error instanceof Error ? error.message : String(error),
+        guildId,
+        batchOperation: true
+      }, 'Failed to save queue batch atomically');
     }
   }
   

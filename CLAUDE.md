@@ -84,6 +84,16 @@ Services communicate asynchronously via Redis pub/sub. Commands flow from Gatewa
 ### Error Handling
 All services implement graceful shutdown, health checks, and structured error logging. Error monitoring is integrated across all services using Sentry for production-grade observability. Use the shared logger package for consistent log formatting and automatic error tracking.
 
+#### Discord API Error Resilience
+- **Robust Error Classification**: Automatic detection of retryable vs non-retryable Discord API errors
+- **Smart Retry Logic**: Exponential backoff for rate limits (code 20028), immediate fallback for non-retryable errors (10008, 50001, etc.)
+- **Automatic Fallbacks**: Failed message edits automatically create new messages with cleanup of old ones
+- **Error Metrics**: Comprehensive Prometheus metrics for Discord operation monitoring:
+  - `discord_api_errors_total` - Errors by operation, code, and retryable status
+  - `discord_operation_retries_total` - Retry attempts by operation
+  - `discord_operation_duration_seconds_total` - Operation timing and success rates
+- **Transparent Recovery**: Message update failures are handled silently with fallback strategies
+
 ### Performance Optimizations
 - Search results cached for 5 minutes
 - Search throttling prevents API abuse  
@@ -136,6 +146,7 @@ The bot uses an optimized Lavalink configuration (`lavalink/application.yml`) wi
 - **Input Validation**: Zod schemas for all environment variables and user inputs
 - **Error Monitoring**: Sentry integration for production error tracking
 - **Type-safe Error Handling**: Custom error wrapper with proper generics
+- **Discord API Resilience**: Automatic retry logic and fallback strategies prevent service disruptions
 
 ### CI/CD Pipeline
 - **Continuous Integration**: Automated testing, linting, and building

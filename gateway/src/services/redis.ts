@@ -2,23 +2,44 @@ import { createClient } from 'redis';
 import { Counter } from 'prom-client';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
+import { RedisCircuitBreaker, type RedisCircuitBreakerConfig } from '@discord-bot/cache';
 
 export interface RedisServiceContext {
-  redisPub: ReturnType<typeof createClient>;
+  redisPub: RedisCircuitBreaker;
   redisSub: ReturnType<typeof createClient>;
   redisPubCounter: Counter<string>;
 }
 
+const redisCircuitConfig: RedisCircuitBreakerConfig = {
+  failureThreshold: 0.5, // 50% failure rate
+  timeout: 30000, // 30 seconds
+  monitoringWindow: 60000, // 1 minute
+  volumeThreshold: 10, // Minimum 10 requests before evaluation
+  redis: {
+    retryDelayOnFailover: 1000,
+    maxRetriesPerRequest: 3,
+    enableReadyCheck: true,
+    lazyConnect: true,
+  },
+};
+
 export function createRedisClients(): {
-  redisPub: ReturnType<typeof createClient>;
+  redisPub: RedisCircuitBreaker;
   redisSub: ReturnType<typeof createClient>;
 } {
-  const redisPub = createClient({
-    url: env.REDIS_URL || 'redis://localhost:6379',
-    socket: {
-      reconnectStrategy: (retries) => Math.min(retries * 50, 1000),
-    },
-  });
+  const redisPub = new RedisCircuitBreaker(
+    'gateway-pub',
+    redisCircuitConfig,
+    {
+      host: env.REDIS_URL ? new URL(env.REDIS_URL).hostname : 'localhost',
+      port: env.REDIS_URL ? parseInt(new URL(env.REDIS_URL).port) || 6379 : 6379,
+      password: env.REDIS_URL ? new URL(env.REDIS_URL).password || undefined : undefined,
+      retryDelayOnFailover: 1000,
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+      lazyConnect: true,
+    }
+  );
 
   const redisSub = createClient({
     url: env.REDIS_URL || 'redis://localhost:6379',
@@ -27,16 +48,8 @@ export function createRedisClients(): {
     },
   });
 
-  redisPub.on('error', (err) => {
-    logger.error({ error: err }, 'Redis publish client error');
-  });
-
   redisSub.on('error', (err) => {
     logger.error({ error: err }, 'Redis subscribe client error');
-  });
-
-  redisPub.on('connect', () => {
-    logger.info('Redis publish client connected');
   });
 
   redisSub.on('connect', () => {
@@ -59,10 +72,7 @@ export async function connectRedis(): Promise<RedisServiceContext> {
   const redisPubCounter = createRedisPubCounter();
 
   try {
-    await Promise.all([
-      redisPub.connect(),
-      redisSub.connect(),
-    ]);
+    await redisSub.connect();
 
     logger.info('Redis clients connected successfully');
 
@@ -80,7 +90,7 @@ export async function connectRedis(): Promise<RedisServiceContext> {
 export async function disconnectRedis(context: RedisServiceContext): Promise<void> {
   try {
     await Promise.all([
-      context.redisPub.quit(),
+      context.redisPub.disconnect(),
       context.redisSub.quit(),
     ]);
     logger.info('Redis clients disconnected');

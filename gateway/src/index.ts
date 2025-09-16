@@ -22,7 +22,8 @@ import {
 import {
   handleInteractionError,
   withErrorHandling,
-  withTimeout
+  withTimeout,
+  safeDiscordOperation
 } from './errors.js';
 import http from 'node:http';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
@@ -45,6 +46,8 @@ import {
   NowPlayingCommand,
   type MusicRuntime,
 } from '@discord-bot/commands';
+import { SecureRateLimiter } from '@discord-bot/security';
+import { TTLMap } from '@discord-bot/cache';
 
 // Avoid privileged GuildMembers intent to prevent DisallowedIntents login failures
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
@@ -103,6 +106,7 @@ const rest = new REST({ version: '10' }).setToken(env.DISCORD_TOKEN);
 // Redis clients - declared globally for use across functions
 let redisPub: ReturnType<typeof createClient>;
 let redisSub: ReturnType<typeof createClient>;
+let secureRateLimiter: SecureRateLimiter;
 
 // Command registry - declared globally
 let commandRegistry: Map<string, import('@discord-bot/commands').BaseCommand>;
@@ -184,8 +188,12 @@ main().catch((err) => logger.error(err));
 // Controls builder (reused across messages)
 
 // Live Now Playing message (per guild)
-type NowLive = { channelId: string; messageId: string; lastEdit?: number; state?: UiState & { trackUri?: string } };
-const nowLive = new Map<string, NowLive>();
+type NowLive = { channelId: string; messageId: string; lastEdit?: number; lastUpdate?: number; state?: UiState & { trackUri?: string } };
+const nowLive = new TTLMap<string, NowLive>({
+  maxSize: 1000,           // Max 1000 guilds
+  defaultTTL: 3600000,     // 1 hour TTL (removes inactive guilds)
+  cleanupInterval: 300000  // Cleanup every 5 minutes
+});
 
 async function fetchNowPlaying(guildId: string) {
   const requestId = crypto.randomUUID();
@@ -249,18 +257,91 @@ async function ensureLiveNow(guildId: string, channelId: string, forceRelocate =
   if (!data) { return; }
   const embed = buildNowEmbed(data);
   const existing = nowLive.get(guildId);
+
   if (existing) {
-    const msg = await channel.messages.fetch(existing.messageId).catch(() => null);
-    if (msg && !forceRelocate) await msg.edit({ embeds: [embed], components: controls });
-    else {
-      const sent = await channel.send({ embeds: [embed], components: controls });
-      if (msg) await msg.delete().catch(() => undefined);
-      nowLive.set(guildId, { channelId, messageId: sent.id });
+    // Safely fetch existing message
+    const msg = await safeDiscordOperation(
+      () => channel.messages.fetch(existing.messageId),
+      `fetch_message_${guildId}`,
+      {
+        maxRetries: 1,
+        onError: (error) => {
+          logger.debug({ guildId, messageId: existing.messageId, error: error.message }, 'Failed to fetch existing message');
+        }
+      }
+    );
+
+    if (msg && !forceRelocate) {
+      // Safely update existing message
+      await safeDiscordOperation(
+        () => msg.edit({ embeds: [embed], components: controls }),
+        `edit_message_${guildId}`,
+        {
+          maxRetries: 2,
+          fallback: async () => {
+            // Fallback: send new message and clean up old one
+            logger.info({ guildId }, 'Edit failed, sending new message as fallback');
+            const sent = await channel.send({ embeds: [embed], components: controls });
+            await safeDiscordOperation(
+              () => msg.delete(),
+              `delete_old_message_${guildId}`,
+              { maxRetries: 1 }
+            );
+            nowLive.set(guildId, { channelId, messageId: sent.id, lastUpdate: Date.now() });
+            return sent;
+          },
+          onError: (error) => {
+            logger.warn({ guildId, messageId: msg.id, error: error.message }, 'Failed to edit message');
+          }
+        }
+      );
+    } else {
+      // Send new message and clean up old one
+      const sent = await safeDiscordOperation(
+        () => channel.send({ embeds: [embed], components: controls }),
+        `send_new_message_${guildId}`,
+        {
+          maxRetries: 3,
+          onError: (error) => {
+            logger.error({ guildId, channelId, error: error.message }, 'Failed to send new message');
+          }
+        }
+      );
+
+      if (sent) {
+        // Clean up old message if it exists
+        if (msg) {
+          await safeDiscordOperation(
+            () => msg.delete(),
+            `delete_old_message_${guildId}`,
+            {
+              maxRetries: 1,
+              onError: (error) => {
+                logger.debug({ guildId, messageId: msg.id }, 'Could not delete old message (already deleted?)');
+              }
+            }
+          );
+        }
+        nowLive.set(guildId, { channelId, messageId: sent.id, lastUpdate: Date.now() });
+      }
       return;
     }
   } else {
-    const sent = await channel.send({ embeds: [embed], components: controls });
-    nowLive.set(guildId, { channelId, messageId: sent.id });
+    // Send initial message
+    const sent = await safeDiscordOperation(
+      () => channel.send({ embeds: [embed], components: controls }),
+      `send_initial_message_${guildId}`,
+      {
+        maxRetries: 3,
+        onError: (error) => {
+          logger.error({ guildId, channelId, error: error.message }, 'Failed to send initial message');
+        }
+      }
+    );
+
+    if (sent) {
+      nowLive.set(guildId, { channelId, messageId: sent.id, lastUpdate: Date.now() });
+    }
   }
   // No interval here; updates are driven by push events from audio (playerUpdate)
   // (Do not overwrite messageId here to avoid losing the reference and duplicating messages)
@@ -329,6 +410,9 @@ async function initializeGateway() {
   await redisPub.connect();
   await redisSub.connect();
 
+  // Initialize secure rate limiter
+  secureRateLimiter = new SecureRateLimiter(redisPub);
+
 // Unified command runtime and registry
 const runtime: MusicRuntime = {
   publish: (channel: string, message: string) => redisPub.publish(channel, message).then(() => {}),
@@ -343,14 +427,23 @@ const runtime: MusicRuntime = {
   incPublishMetric: (channel) => { try { redisPubCounter.labels(channel).inc(); } catch { /* ignore */ } },
   hasDjOrAdmin: (i) => hasDjOrAdmin(i),
   allow: async (interaction, cmd, limit = 10, windowSec = 60) => {
-    const gid = interaction.guildId ?? 'global';
-    const uid = interaction.user.id;
-    const key = `ratelimit:${gid}:${uid}:${cmd}`;
-    try {
-      const current = await redisPub.incr(key);
-      if (current === 1) { await redisPub.expire(key, windowSec); }
-      return current <= limit;
-    } catch { return true; }
+    const result = await secureRateLimiter.isAllowed(interaction, cmd, {
+      limit,
+      windowSec,
+      fallbackLimit: Math.floor(limit * 0.3) // More restrictive fallback
+    });
+
+    if (result.usingFallback) {
+      logger.warn({
+        guildId: interaction.guildId,
+        userId: interaction.user.id,
+        command: cmd,
+        remaining: result.remaining,
+        usingFallback: true
+      }, 'Rate limiting using fail-safe fallback');
+    }
+
+    return result.allowed;
   },
   ensureLiveNow: async (g, ch, force) => ensureLiveNow(g, ch, force),
   validators: { validateSearchQuery, validateInteger, validateLoopMode },
@@ -755,5 +848,38 @@ healthServer.listen(env.GATEWAY_HTTP_PORT, () => logger.info(`Gateway health on 
     void sdk.start();
   }
 }
+
+// Graceful shutdown handler
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully...');
+
+  try {
+    // Cleanup rate limiter
+    if (secureRateLimiter) {
+      secureRateLimiter.destroy();
+    }
+
+    // Cleanup TTL maps
+    nowLive.destroy();
+
+    // Disconnect Redis
+    if (redisPub) await redisPub.disconnect();
+    if (redisSub) await redisSub.disconnect();
+
+    // Disconnect Discord
+    if (client) client.destroy();
+
+    logger.info('Gateway shutdown complete');
+    process.exit(0);
+  } catch (error) {
+    logger.error({ error }, 'Error during shutdown');
+    process.exit(1);
+  }
+});
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT received, shutting down...');
+  process.emit('SIGTERM');
+});
 
 void initializeGateway();
