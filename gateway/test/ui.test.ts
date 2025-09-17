@@ -1,4 +1,41 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Mock Discord.js components
+vi.mock('discord.js', () => ({
+  ActionRowBuilder: class ActionRowBuilder {
+    components: any[] = [];
+    addComponents(...components: any[]) {
+      this.components = components;
+      return this;
+    }
+  },
+  ButtonBuilder: class ButtonBuilder {
+    data: any = {};
+    setCustomId(id: string) {
+      this.data.custom_id = id;
+      return this;
+    }
+    setLabel(label: string) {
+      this.data.label = label;
+      return this;
+    }
+    setStyle(style: any) {
+      this.data.style = style;
+      return this;
+    }
+    setDisabled(disabled: boolean) {
+      this.data.disabled = disabled;
+      return this;
+    }
+  },
+  ButtonStyle: {
+    Primary: 1,
+    Secondary: 2,
+    Success: 3,
+    Danger: 4
+  }
+}));
+
 import { buildControls } from '../src/ui.js';
 
 describe('UI controls', () => {

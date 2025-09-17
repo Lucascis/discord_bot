@@ -1,4 +1,4 @@
-import { PrismaClient } from '@discord-bot/database';
+import type { PrismaClient } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import { v4 as uuidv4 } from 'uuid';
 

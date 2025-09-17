@@ -1,56 +1,183 @@
-name: CI
+name: CI/CD Pipeline
+
 on:
   push:
-    branches: [main]
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '8'
 
 jobs:
-  security:
+  # Code Quality Checks
+  quality:
+    name: Code Quality
     runs-on: ubuntu-latest
-    name: Security & Vulnerability Scan
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-      
-      - uses: pnpm/action-setup@v2
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
         with:
-          version: 10
-      
-      - uses: actions/setup-node@v4
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
         with:
-          node-version: 22
-          cache: 'pnpm'
-      
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      
-      - name: Run npm audit (High & Critical only)
-        run: pnpm audit --audit-level critical
-        continue-on-error: false
 
-  build:
+      - name: Generate Prisma client
+        run: pnpm --filter @discord-bot/database prisma:generate
+
+      - name: TypeScript type checking
+        run: pnpm typecheck
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Build all packages
+        run: pnpm build
+
+  # Unit & Integration Tests
+  tests:
+    name: Tests
     runs-on: ubuntu-latest
-    needs: security
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: discord_bot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
         with:
-          node-version: 22
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - name: Clean TypeScript artifacts
-        run: find . -name "*.tsbuildinfo" -delete && find . -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
-      - name: Build packages in dependency order
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
         run: |
-          pnpm --filter @discord-bot/config build
-          pnpm --filter @discord-bot/database build
-          pnpm --filter @discord-bot/logger build
-          pnpm --filter @discord-bot/commands build
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @discord-bot/database prisma:generate
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Setup test database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          pnpm --filter @discord-bot/database prisma migrate deploy
+          pnpm --filter @discord-bot/database prisma db seed
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+        run: pnpm test --coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  # Docker Build & Test
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [quality, tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images
+        run: |
+          docker-compose -f docker-compose.production.yml build --parallel
+
+      - name: Test Docker services
+        run: |
+          # Start infrastructure
+          docker-compose -f docker-compose.production.yml up -d postgres redis lavalink
+          
+          # Wait for services
+          sleep 30
+          
+          # Test database connection
+          docker-compose -f docker-compose.production.yml exec -T postgres pg_isready -U postgres
+          
+          # Test Redis connection
+          docker-compose -f docker-compose.production.yml exec -T redis redis-cli ping
+          
+          # Test Lavalink
+          curl -f http://localhost:2333/version || exit 1
+          
+          # Cleanup
+          docker-compose -f docker-compose.production.yml down

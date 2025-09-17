@@ -79,3 +79,23 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Default command (overridden by docker-compose)
 CMD ["node", "-e", "console.log('Set service command in docker-compose.yml. Available services: gateway, audio, api, worker')"]
+
+# Gateway Service
+FROM production AS gateway
+EXPOSE 3001
+CMD ["node", "gateway/dist/index.js"]
+
+# Audio Service
+FROM production AS audio
+EXPOSE 3002
+CMD ["node", "audio/dist/index.js"]
+
+# API Service
+FROM production AS api
+EXPOSE 3000
+CMD ["node", "api/dist/index.js"]
+
+# Worker Service
+FROM production AS worker
+EXPOSE 3003
+CMD ["node", "worker/dist/index.js"]

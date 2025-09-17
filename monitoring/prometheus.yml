@@ -1,0 +1,57 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Discord Bot Services
+  - job_name: 'discord-bot-gateway'
+    static_configs:
+      - targets: ['gateway:3001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'discord-bot-audio'
+    static_configs:
+      - targets: ['audio:3002']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'discord-bot-api'
+    static_configs:
+      - targets: ['api:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'discord-bot-worker'
+    static_configs:
+      - targets: ['worker:3003']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Lavalink
+  - job_name: 'lavalink'
+    static_configs:
+      - targets: ['lavalink:2333']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Redis Exporter (if available)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+
+  # PostgreSQL Exporter (if available)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    scrape_interval: 30s

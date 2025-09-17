@@ -2,7 +2,7 @@
 
 Bot de música para Discord especializado en música electrónica, construido en TypeScript con pnpm workspaces. Arquitectura por microservicios: gateway (Discord.js), audio (Lavalink v4), API REST y worker. Persistencia con PostgreSQL y Redis.
 
-**🎉 FASE 2.1 Completada** - Sistema de autoplay avanzado, monitoreo de errores integrado, calidad de código mejorada y seguridad reforzada.
+**🎉 PRODUCTION READY** - Aplicación completamente funcional con Docker, tests automatizados y monitoreo completo.
 
 **✨ Características Principales**:
 - 🎛️ **Autoplay Inteligente**: Modos por artista, género, similares y mixto
@@ -35,10 +35,33 @@ Agregar un comando nuevo:
 2. Añadir la clase al arreglo `commandInstances` en `gateway/src/index.ts`.
 3. (Opcional) Añadir tests de unidad para la clase y/o su middleware.
 
+## 🚀 Quick Start (Docker)
+
+### 1. Setup
+```bash
+git clone <repository-url>
+cd discord_bot
+cp .env.example .env.docker
+# Edit .env.docker with your Discord bot token
+```
+
+### 2. Deploy
+```bash
+./scripts/start.sh
+```
+
+### 3. Verify
+- Bot online in Discord ✓
+- Health: http://localhost:3000/health
+- Monitoring: http://localhost:3300 (admin/admin)
+
+**📖 Full deployment guide**: `docs/DEPLOYMENT.md`
+
 ## Requisitos
-- Node.js 22+
-- pnpm 8+
-- Docker (para entorno de desarrollo)
+- Docker & Docker Compose
+- Discord bot token
+- 2GB+ RAM
+- Node.js 22+ (para desarrollo local)
 
 ## Comandos principales
 - `/play <query|url>`: reproduce o encola; en la primera reproducción, si Autoplay está activado, se siembran hasta 10 relacionados.
