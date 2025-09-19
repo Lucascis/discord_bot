@@ -4,17 +4,21 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "monthly"
-      day: "monday"
-      time: "06:00"
-    open-pull-requests-limit: 3
+      interval: "weekly"
+      day: "tuesday"
+      time: "10:00"
+    open-pull-requests-limit: 10
     reviewers:
       - "@lucascisterna"
     assignees:
       - "@lucascisterna"
     commit-message:
       prefix: "deps"
+      prefix-development: "deps-dev"
       include: "scope"
+    labels:
+      - "dependencies"
+      - "automated"
     groups:
       # Group Discord.js related packages
       discord-packages:

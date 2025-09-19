@@ -1,184 +1,185 @@
-/**
- * Base Domain Event
- * All domain events should extend this base class
- */
-export abstract class DomainEvent {
-  protected constructor(
-    public readonly eventId: string,
-    public readonly occurredAt: Date,
-    public readonly aggregateId: string,
-    public readonly eventType: string
-  ) {}
+import type { DomainEvent as EventStoreDomainEvent, EventMetadata } from '@discord-bot/event-store';
 
-  static generateId(): string {
-    return crypto.randomUUID();
-  }
+/**
+ * Helper to create compatible domain events
+ */
+export function createDomainEvent(
+  eventType: string,
+  aggregateId: string,
+  aggregateType: string,
+  eventData: Record<string, unknown>,
+  metadata: Partial<EventMetadata> = {}
+): EventStoreDomainEvent {
+  return {
+    eventId: crypto.randomUUID(),
+    eventType,
+    aggregateId,
+    aggregateType,
+    aggregateVersion: 1,
+    eventData,
+    metadata: {
+      source: 'gateway-service',
+      version: '1.0.0',
+      ...metadata,
+    },
+    timestamp: new Date(),
+  };
 }
 
 /**
  * Music Session Events
  */
-export class MusicSessionStartedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly trackTitle: string,
-    public readonly voiceChannelId: string,
-    public readonly textChannelId: string,
-    public readonly userId: string
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'MusicSessionStarted'
-    );
-  }
+export function MusicSessionStartedEvent(
+  aggregateId: string,
+  trackTitle: string,
+  voiceChannelId: string,
+  textChannelId: string,
+  userId: string
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'MusicSessionStarted',
+    aggregateId,
+    'MusicSession',
+    { trackTitle, voiceChannelId, textChannelId, userId },
+    { userId }
+  );
 }
 
-export class MusicSessionPausedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly userId: string,
-    public readonly position: number
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'MusicSessionPaused'
-    );
-  }
+export function MusicSessionPausedEvent(
+  aggregateId: string,
+  userId: string,
+  position: number
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'MusicSessionPaused',
+    aggregateId,
+    'MusicSession',
+    { userId, position },
+    { userId }
+  );
 }
 
-export class MusicSessionResumedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly userId: string,
-    public readonly position: number
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'MusicSessionResumed'
-    );
-  }
+export function MusicSessionResumedEvent(
+  aggregateId: string,
+  userId: string,
+  position: number
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'MusicSessionResumed',
+    aggregateId,
+    'MusicSession',
+    { userId, position },
+    { userId }
+  );
 }
 
-export class MusicSessionStoppedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly userId: string,
-    public readonly reason: 'user_requested' | 'error' | 'queue_ended'
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'MusicSessionStopped'
-    );
-  }
+export function MusicSessionStoppedEvent(
+  aggregateId: string,
+  userId: string,
+  reason: 'user_requested' | 'error' | 'queue_ended'
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'MusicSessionStopped',
+    aggregateId,
+    'MusicSession',
+    { userId, reason },
+    { userId }
+  );
 }
 
-export class VolumeChangedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly oldVolume: number,
-    public readonly newVolume: number,
-    public readonly userId: string
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'VolumeChanged'
-    );
-  }
+export function VolumeChangedEvent(
+  aggregateId: string,
+  oldVolume: number,
+  newVolume: number,
+  userId: string
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'VolumeChanged',
+    aggregateId,
+    'MusicSession',
+    { oldVolume, newVolume, userId },
+    { userId }
+  );
 }
 
-export class LoopModeChangedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly oldMode: string,
-    public readonly newMode: string,
-    public readonly userId: string
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'LoopModeChanged'
-    );
-  }
+export function LoopModeChangedEvent(
+  aggregateId: string,
+  oldMode: string,
+  newMode: string,
+  userId: string
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'LoopModeChanged',
+    aggregateId,
+    'MusicSession',
+    { oldMode, newMode, userId },
+    { userId }
+  );
 }
 
 /**
  * Guild Settings Events
  */
-export class AutomixEnabledEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly enabled: boolean,
-    public readonly userId: string
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'AutomixEnabled'
-    );
-  }
+export function AutomixEnabledEvent(
+  aggregateId: string,
+  enabled: boolean,
+  userId: string
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'AutomixEnabled',
+    aggregateId,
+    'GuildSettings',
+    { enabled, userId },
+    { userId, guildId: aggregateId }
+  );
 }
 
-export class DjRoleChangedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly oldRoleName: string | null,
-    public readonly newRoleName: string | null,
-    public readonly userId: string
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'DjRoleChanged'
-    );
-  }
+export function DjRoleChangedEvent(
+  aggregateId: string,
+  oldRoleName: string | null,
+  newRoleName: string | null,
+  userId: string
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'DjRoleChanged',
+    aggregateId,
+    'GuildSettings',
+    { oldRoleName, newRoleName, userId },
+    { userId, guildId: aggregateId }
+  );
 }
 
 /**
  * Search Events
  */
-export class SearchRequestedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly query: string,
-    public readonly userId: string,
-    public readonly source: 'youtube' | 'spotify' | 'other'
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'SearchRequested'
-    );
-  }
+export function SearchRequestedEvent(
+  aggregateId: string,
+  query: string,
+  userId: string,
+  source: 'youtube' | 'spotify' | 'other'
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'SearchRequested',
+    aggregateId,
+    'SearchSession',
+    { query, userId, source },
+    { userId, guildId: aggregateId }
+  );
 }
 
-export class SearchCompletedEvent extends DomainEvent {
-  constructor(
-    aggregateId: string,
-    public readonly query: string,
-    public readonly resultCount: number,
-    public readonly latency: number,
-    public readonly userId: string,
-    public readonly cached: boolean
-  ) {
-    super(
-      DomainEvent.generateId(),
-      new Date(),
-      aggregateId,
-      'SearchCompleted'
-    );
-  }
+export function SearchCompletedEvent(
+  aggregateId: string,
+  query: string,
+  resultCount: number,
+  latency: number,
+  userId: string,
+  cached: boolean
+): EventStoreDomainEvent {
+  return createDomainEvent(
+    'SearchCompleted',
+    aggregateId,
+    'SearchSession',
+    { query, resultCount, latency, userId, cached },
+    { userId, guildId: aggregateId }
+  );
 }

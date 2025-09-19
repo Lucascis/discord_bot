@@ -3,7 +3,10 @@ import {
   ButtonInteraction,
   InteractionResponse,
   InteractionReplyOptions,
-  EmbedBuilder
+  InteractionEditReplyOptions,
+  InteractionUpdateOptions,
+  EmbedBuilder,
+  Message
 } from 'discord.js';
 import { MusicUIBuilder } from './music-ui-builder.js';
 
@@ -17,12 +20,17 @@ export class InteractionResponseHandler {
   async sendSuccess(
     interaction: CommandInteraction | ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<any> {
+  ): Promise<InteractionResponse | Message | void> {
     try {
       if (interaction.replied || interaction.deferred) {
-        // Remove ephemeral flag for editReply as it's not supported
-        const editOptions: any = { ...options };
-        delete editOptions.ephemeral;
+        // Convert to editReply options (remove ephemeral and flags not supported)
+        const editOptions: InteractionEditReplyOptions = {
+          content: options.content,
+          embeds: options.embeds,
+          components: options.components,
+          files: options.files,
+          allowedMentions: options.allowedMentions
+        };
         return await interaction.editReply(editOptions);
       } else {
         return await interaction.reply(options);
@@ -38,7 +46,7 @@ export class InteractionResponseHandler {
     interaction: CommandInteraction | ButtonInteraction,
     message: string,
     title: string = 'Error'
-  ): Promise<any> {
+  ): Promise<InteractionResponse | Message | void> {
     try {
       const embed = this.musicUIBuilder.buildErrorEmbed(
         title,
@@ -52,9 +60,14 @@ export class InteractionResponseHandler {
       };
 
       if (interaction.replied || interaction.deferred) {
-        // Remove ephemeral flag for editReply as it's not supported
-        const editOptions: any = { ...options };
-        delete editOptions.ephemeral;
+        // Convert to editReply options (remove ephemeral and flags not supported)
+        const editOptions: InteractionEditReplyOptions = {
+          content: options.content,
+          embeds: options.embeds,
+          components: options.components,
+          files: options.files,
+          allowedMentions: options.allowedMentions
+        };
         return await interaction.editReply(editOptions);
       } else {
         return await interaction.reply(options);
@@ -80,7 +93,7 @@ export class InteractionResponseHandler {
   async sendEphemeral(
     interaction: CommandInteraction | ButtonInteraction,
     options: Omit<InteractionReplyOptions, 'ephemeral'>
-  ): Promise<any> {
+  ): Promise<InteractionResponse | Message | void> {
     return this.sendSuccess(interaction, {
       ...options,
       ephemeral: true
@@ -90,11 +103,16 @@ export class InteractionResponseHandler {
   async updateComponents(
     interaction: ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<any> {
+  ): Promise<InteractionResponse | Message | void> {
     try {
-      // Remove ephemeral flag for update as it's not supported
-      const updateOptions: any = { ...options };
-      delete updateOptions.ephemeral;
+      // Convert to update options (remove ephemeral and unsupported flags)
+      const updateOptions: InteractionUpdateOptions = {
+        content: options.content,
+        embeds: options.embeds,
+        components: options.components,
+        files: options.files,
+        allowedMentions: options.allowedMentions
+      };
       return await interaction.update(updateOptions);
     } catch (error) {
       console.error('Failed to update components:', error);
@@ -106,7 +124,7 @@ export class InteractionResponseHandler {
   async sendFollowUp(
     interaction: CommandInteraction | ButtonInteraction,
     options: InteractionReplyOptions
-  ): Promise<any> {
+  ): Promise<Message | void> {
     try {
       return await interaction.followUp(options);
     } catch (error) {
@@ -122,7 +140,7 @@ export class InteractionResponseHandler {
       if (interaction.channel && 'sendTyping' in interaction.channel) {
         await interaction.channel.sendTyping();
       }
-    } catch (error) {
+    } catch {
       // Ignore typing errors
     }
   }
@@ -140,7 +158,7 @@ export class InteractionResponseHandler {
             'Timeout'
           );
         }
-      } catch (error) {
+      } catch {
         // Ignore timeout handling errors
       }
     }, timeoutMs);
@@ -151,7 +169,7 @@ export class InteractionResponseHandler {
     commandName: string,
     description: string,
     usage: string[]
-  ): Promise<InteractionResponse | void> {
+  ): Promise<InteractionResponse | Message | void> {
     const embed = new EmbedBuilder()
       .setColor('#0099ff')
       .setTitle(`📖 ${commandName}`)
@@ -174,7 +192,7 @@ export class InteractionResponseHandler {
 
   async sendPermissionError(
     interaction: CommandInteraction | ButtonInteraction
-  ): Promise<InteractionResponse | void> {
+  ): Promise<InteractionResponse | Message | void> {
     return this.sendError(
       interaction,
       'You do not have permission to use this command.',
@@ -185,7 +203,7 @@ export class InteractionResponseHandler {
   async sendCooldownError(
     interaction: CommandInteraction | ButtonInteraction,
     remainingTime: number
-  ): Promise<InteractionResponse | void> {
+  ): Promise<InteractionResponse | Message | void> {
     const seconds = Math.ceil(remainingTime / 1000);
     return this.sendError(
       interaction,
@@ -196,7 +214,7 @@ export class InteractionResponseHandler {
 
   async sendMaintenanceError(
     interaction: CommandInteraction | ButtonInteraction
-  ): Promise<InteractionResponse | void> {
+  ): Promise<InteractionResponse | Message | void> {
     return this.sendError(
       interaction,
       'The bot is currently under maintenance. Please try again later.',

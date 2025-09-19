@@ -1,33 +1,84 @@
-# Discord Music Bot - API Reference
+# 🚀 Discord Music Bot - API Reference
 
-## Overview
+## 📋 Overview
 
-This document provides comprehensive API documentation for the Discord Music Bot's microservices architecture. The system exposes various endpoints for monitoring, control, and integration.
+This document provides comprehensive API documentation for the Discord Music Bot's microservices architecture. The system exposes endpoints for health monitoring, metrics collection, and external integrations.
 
-## Service Endpoints
+### 🏗️ **Architecture Status**
 
-### Gateway Service (Port 3001)
+| Service | Port | Status | Implementation | API Level |
+|---------|------|--------|---------------|----------|
+| **Gateway** | 3001 | ✅ Functional | Legacy/MVC/Clean | Basic |
+| **Audio** | 3002 | ✅ Functional | Optimized | Advanced |
+| **API** | 3000 | ✅ Functional | Express | Full REST |
+| **Worker** | 3003 | ⚠️ Minimal | Basic | Health only |
+| **Lavalink** | 2333 | ✅ External | v4 Enterprise | Native |
+
+### 🔍 **Quick API Health Check**
+```bash
+# Test all service endpoints
+curl http://localhost:3001/health  # Gateway
+curl http://localhost:3002/health  # Audio
+curl http://localhost:3000/health  # API
+curl http://localhost:3003/health  # Worker
+curl http://localhost:2333/version # Lavalink
+```
+
+## 🚪 Service Endpoints
+
+### 🆖 **Gateway Service** (Port 3001)
 
 **Base URL**: `http://localhost:3001`
+**Implementation**: Multiple (Legacy/MVC/Clean Architecture)
+**Primary Function**: Discord bot interface and command handling
 
 #### Health & Monitoring
 
-```http
-GET /health
-```
-Returns the overall health status of the gateway service including Discord connection, database, and Redis connectivity.
+##### `GET /health`
+Comprehensive health check including Discord connection, database, and Redis connectivity.
 
-**Response Example**:
+**Response Status Codes**:
+- `200` - All systems healthy
+- `503` - Service degraded or unhealthy
+
+**Response Example** (✅ Healthy):
 ```json
 {
   "service": "gateway",
   "version": "1.0.0",
   "status": "healthy",
   "uptime": 3600,
-  "timestamp": "2024-01-01T12:00:00.000Z",
+  "timestamp": "2025-12-17T12:00:00.000Z",
+  "implementation": "legacy",
+  "discord": {
+    "connected": true,
+    "guilds": 25,
+    "latency": 45
+  },
   "checks": {
     "discord": {
       "status": "healthy",
+      "message": "Connected to Discord API",
+      "responseTime": 45
+    },
+    "database": {
+      "status": "healthy",
+      "message": "PostgreSQL connection active",
+      "responseTime": 12
+    },
+    "redis": {
+      "status": "healthy",
+      "message": "Redis pub/sub operational",
+      "responseTime": 8
+    }
+  },
+  "metrics": {
+    "commandsProcessed": 1450,
+    "activeGuilds": 25,
+    "memoryUsage": "245MB"
+  }
+}
+```
       "message": "Connected to Discord API",
       "responseTime": 45
     },

@@ -10,7 +10,7 @@ export class StartPlayingMusicCommand extends BaseCommand {
     public readonly query: string,
     public readonly voiceChannelId: string,
     public readonly textChannelId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('StartPlayingMusic', {
       userId,
@@ -27,7 +27,7 @@ export class PauseMusicCommand extends BaseCommand {
   constructor(
     public readonly guildId: string,
     public readonly userId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('PauseMusic', {
       userId,
@@ -44,7 +44,7 @@ export class ResumeMusicCommand extends BaseCommand {
   constructor(
     public readonly guildId: string,
     public readonly userId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('ResumeMusic', {
       userId,
@@ -61,7 +61,7 @@ export class StopMusicCommand extends BaseCommand {
   constructor(
     public readonly guildId: string,
     public readonly userId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('StopMusic', {
       userId,
@@ -79,7 +79,7 @@ export class ChangeVolumeCommand extends BaseCommand {
     public readonly guildId: string,
     public readonly userId: string,
     public readonly volume: number,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('ChangeVolume', {
       userId,
@@ -97,7 +97,7 @@ export class AddTrackToQueueCommand extends BaseCommand {
     public readonly guildId: string,
     public readonly userId: string,
     public readonly query: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('AddTrackToQueue', {
       userId,
@@ -114,7 +114,7 @@ export class SkipTrackCommand extends BaseCommand {
   constructor(
     public readonly guildId: string,
     public readonly userId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('SkipTrack', {
       userId,
@@ -132,7 +132,7 @@ export class SetLoopModeCommand extends BaseCommand {
     public readonly guildId: string,
     public readonly userId: string,
     public readonly loopMode: 'off' | 'track' | 'queue',
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('SetLoopMode', {
       userId,

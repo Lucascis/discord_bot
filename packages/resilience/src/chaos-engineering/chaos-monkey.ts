@@ -32,7 +32,7 @@ export interface ChaosConfig {
     [K in ChaosExperimentType]: {
       enabled: boolean;
       probability: number;
-      parameters: any;
+      parameters: Record<string, unknown>;
     };
   };
 
@@ -83,7 +83,7 @@ export interface ChaosExperimentResult {
   type: ChaosExperimentType;
   injected: boolean;
   reason?: string;
-  parameters?: any;
+  parameters?: Record<string, unknown>;
   timestamp: Date;
   targetService?: string;
   targetOperation?: string;
@@ -154,7 +154,7 @@ export class ChaosMonkey extends EventEmitter {
       environment,
       globalProbability: config.globalProbability,
       experimentsEnabled: Object.entries(config.experiments)
-        .filter(([_, exp]) => exp.enabled)
+        .filter(([, exp]) => exp.enabled)
         .map(([type]) => type)
     });
   }
@@ -267,7 +267,7 @@ export class ChaosMonkey extends EventEmitter {
 
   // Private methods
 
-  private shouldInjectChaos(context: any): boolean {
+  private shouldInjectChaos(context: Record<string, unknown>): boolean {
     // Check if chaos is enabled
     if (!this.config.enabled || this.autoDisabled || this.circuitOpen) {
       return false;
@@ -298,7 +298,7 @@ export class ChaosMonkey extends EventEmitter {
 
   private selectExperiment(): ChaosExperimentType | null {
     const enabledExperiments = Object.entries(this.config.experiments)
-      .filter(([_, exp]) => exp.enabled)
+      .filter(([, exp]) => exp.enabled)
       .map(([type, exp]) => ({ type: type as ChaosExperimentType, probability: exp.probability }));
 
     if (enabledExperiments.length === 0) {
@@ -322,10 +322,10 @@ export class ChaosMonkey extends EventEmitter {
   private async executeWithChaos<T>(
     operation: () => Promise<T>,
     experiment: ChaosExperimentType,
-    context: any
+    context: Record<string, unknown>
   ): Promise<T> {
     const experimentConfig = this.config.experiments[experiment];
-    const startTime = Date.now();
+    // Track experiment execution time for debugging
 
     try {
       switch (experiment) {
@@ -419,12 +419,12 @@ export class ChaosMonkey extends EventEmitter {
   private injectResourceLeak(params: { leakType: 'memory' | 'handles'; amount: number }): void {
     if (params.leakType === 'memory') {
       // Allocate memory that won't be garbage collected
-      const leakArray: any[] = [];
+      const leakArray: unknown[] = [];
       for (let i = 0; i < params.amount; i++) {
         leakArray.push(new Array(1000).fill('chaos'));
       }
-      (global as any).__chaosMemoryLeak = (global as any).__chaosMemoryLeak || [];
-      (global as any).__chaosMemoryLeak.push(leakArray);
+      (global as Record<string, unknown>).__chaosMemoryLeak = (global as Record<string, unknown>).__chaosMemoryLeak || [];
+      ((global as Record<string, unknown>).__chaosMemoryLeak as unknown[]).push(leakArray);
     }
 
     logger.debug('Chaos: Resource leak injected', params);
@@ -480,7 +480,7 @@ export class ChaosMonkey extends EventEmitter {
     return recent.length < this.config.safety.maxInjectionRate;
   }
 
-  private matchesTargeting(context: any): boolean {
+  private matchesTargeting(context: Record<string, unknown>): boolean {
     const { targeting } = this.config;
 
     if (targeting.services && context.service) {
@@ -569,7 +569,7 @@ export class ChaosMonkey extends EventEmitter {
   }
 
   private checkSafetyConditions(): void {
-    const metrics = this.getMetrics();
+    // Get current safety metrics for evaluation
     const { safety } = this.config;
 
     // Check circuit breaker

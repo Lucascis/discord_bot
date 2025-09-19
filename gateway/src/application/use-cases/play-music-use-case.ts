@@ -9,6 +9,8 @@ import {
   SearchRequestedEvent,
   SearchCompletedEvent
 } from '../../domain/events/domain-event.js';
+import type { DomainEvent } from '@discord-bot/event-store';
+import { GuildId } from '../../domain/value-objects/guild-id.js';
 
 /**
  * Play Music Use Case Result
@@ -18,7 +20,7 @@ export interface PlayMusicResult {
   message: string;
   trackTitle?: string;
   queuePosition?: number;
-  events: any[]; // Domain events to be published
+  events: DomainEvent[]; // Domain events to be published
 }
 
 /**
@@ -72,7 +74,7 @@ export class PlayMusicUseCase {
   ) {}
 
   async execute(command: PlayMusicCommand): Promise<PlayMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       // 1. Validate user permissions
@@ -99,7 +101,7 @@ export class PlayMusicUseCase {
       }
 
       // 3. Search for the track
-      events.push(new SearchRequestedEvent(
+      events.push(SearchRequestedEvent(
         command.guildId.value,
         command.query.value,
         command.userId.value,
@@ -112,7 +114,7 @@ export class PlayMusicUseCase {
         command.guildId.value
       );
 
-      events.push(new SearchCompletedEvent(
+      events.push(SearchCompletedEvent(
         command.guildId.value,
         command.query.value,
         searchResult.tracks.length,
@@ -159,7 +161,7 @@ export class PlayMusicUseCase {
           command.textChannelId
         );
 
-        events.push(new MusicSessionStartedEvent(
+        events.push(MusicSessionStartedEvent(
           command.guildId.value,
           selectedTrack.title,
           command.voiceChannelId,
@@ -192,7 +194,7 @@ export class PlayMusicUseCase {
     }
   }
 
-  private async getOrCreateGuildSettings(guildId: any): Promise<GuildSettings> {
+  private async getOrCreateGuildSettings(guildId: GuildId): Promise<GuildSettings> {
     let settings = await this.guildSettingsRepository.findByGuildId(guildId);
     if (!settings) {
       settings = GuildSettings.create(guildId);
@@ -201,7 +203,7 @@ export class PlayMusicUseCase {
     return settings;
   }
 
-  private async getOrCreateMusicSession(guildId: any): Promise<MusicSession> {
+  private async getOrCreateMusicSession(guildId: GuildId): Promise<MusicSession> {
     let session = await this.musicSessionRepository.findByGuildId(guildId);
     if (!session) {
       session = MusicSession.create(guildId);

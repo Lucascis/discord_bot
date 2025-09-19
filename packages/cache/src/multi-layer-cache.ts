@@ -517,6 +517,40 @@ export class SearchCache extends MultiLayerCache<unknown> {
     const normalized = query.toLowerCase().trim().replace(/\s+/g, '-');
     return source ? `${source}:${normalized}` : normalized;
   }
+
+  generateSearchKey(query: string, source: string, userId?: string): string {
+    const normalized = query.toLowerCase().trim().replace(/\s+/g, '-');
+    const parts = [`src:${source}`, normalized];
+    if (userId) {
+      parts.push(`user:${userId}`);
+    }
+    return parts.join(':');
+  }
+
+  async cacheSearchResult(
+    query: string,
+    results: unknown,
+    source: string,
+    userId?: string,
+    ttl?: number
+  ): Promise<void> {
+    const key = this.generateSearchKey(query, source, userId);
+    await this.set(key, results, ttl);
+  }
+
+  async getCachedSearchResult(
+    query: string,
+    source: string,
+    userId?: string
+  ): Promise<unknown> {
+    const key = this.generateSearchKey(query, source, userId);
+    return this.get(key);
+  }
+
+  async invalidateSearch(query: string, source: string, userId?: string): Promise<void> {
+    const key = this.generateSearchKey(query, source, userId);
+    await this.delete(key);
+  }
 }
 
 export class UserCache extends MultiLayerCache<unknown> {
@@ -537,6 +571,36 @@ export class UserCache extends MultiLayerCache<unknown> {
   generateKey(userId: string, guildId: string): string {
     return `${guildId}:${userId}`;
   }
+
+  async cacheUserPreferences(
+    userId: string,
+    guildId: string,
+    preferences: unknown,
+    ttl?: number
+  ): Promise<void> {
+    const key = this.generateKey(userId, guildId);
+    await this.set(key, preferences, ttl);
+  }
+
+  async getCachedUserPreferences(userId: string, guildId: string): Promise<unknown> {
+    const key = this.generateKey(userId, guildId);
+    return this.get(key);
+  }
+
+  async invalidateUserPreferences(userId: string, guildId: string): Promise<void> {
+    const key = this.generateKey(userId, guildId);
+    await this.delete(key);
+  }
+
+  async cacheUserBehavior(
+    userId: string,
+    guildId: string,
+    behavior: unknown,
+    ttl?: number
+  ): Promise<void> {
+    const key = `${this.generateKey(userId, guildId)}:behavior`;
+    await this.set(key, behavior, ttl);
+  }
 }
 
 export class QueueCache extends MultiLayerCache<unknown> {
@@ -556,5 +620,25 @@ export class QueueCache extends MultiLayerCache<unknown> {
 
   generateKey(guildId: string): string {
     return `guild:${guildId}`;
+  }
+
+  async cacheQueueState(guildId: string, queueState: unknown, ttl?: number): Promise<void> {
+    const key = this.generateKey(guildId);
+    await this.set(key, queueState, ttl);
+  }
+
+  async getCachedQueueState(guildId: string): Promise<unknown> {
+    const key = this.generateKey(guildId);
+    return this.get(key);
+  }
+
+  async invalidateQueue(guildId: string): Promise<void> {
+    const key = this.generateKey(guildId);
+    await this.delete(key);
+  }
+
+  async invalidateQueueCache(guildId: string): Promise<void> {
+    // Alias for invalidateQueue for test compatibility
+    await this.invalidateQueue(guildId);
   }
 }

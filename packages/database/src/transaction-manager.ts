@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { logger } from '@discord-bot/logger';
+import { getLogger } from './logger-interface.js';
 
 export class TransactionError extends Error {
   constructor(
@@ -72,7 +72,7 @@ export class TransactionManager {
         metrics.retryCount = attempt;
         await this.delay(retryDelay * attempt); // Exponential backoff
 
-        logger.warn({
+        getLogger().warn({
           transactionId,
           attempt,
           maxAttempts: retryAttempts,
@@ -81,7 +81,7 @@ export class TransactionManager {
       }
 
       try {
-        logger.debug({
+        getLogger().info({
           transactionId,
           attempt,
           isolationLevel,
@@ -130,7 +130,7 @@ export class TransactionManager {
         metrics.endTime = Date.now();
         metrics.duration = metrics.endTime - metrics.startTime;
 
-        logger.info({
+        getLogger().info({
           transactionId,
           duration: metrics.duration,
           retryCount: metrics.retryCount,
@@ -144,7 +144,7 @@ export class TransactionManager {
         lastError = error as Error;
         const isRetryable = this.isRetryableError(error as Error);
 
-        logger.error({
+        getLogger().error({
           transactionId,
           attempt,
           error: lastError.message,
@@ -196,7 +196,7 @@ export class TransactionManager {
     const failures = results.filter(r => r.error);
 
     if (failures.length > 0) {
-      logger.error({
+      getLogger().error({
         totalTransactions: results.length,
         failures: failures.length,
         failedKeys: failures.map(f => f.key),
@@ -236,7 +236,7 @@ export class TransactionManager {
         const result = await this.withTransaction(step.execute, options);
         completedSteps.push({ step, result });
 
-        logger.debug({
+        getLogger().info({
           stepName: step.name,
           completedSteps: completedSteps.length,
           totalSteps: steps.length
@@ -246,7 +246,7 @@ export class TransactionManager {
       return completedSteps[completedSteps.length - 1]?.result;
 
     } catch (error) {
-      logger.error({
+      getLogger().error({
         error: (error as Error).message,
         completedSteps: completedSteps.length,
         totalSteps: steps.length
@@ -261,13 +261,13 @@ export class TransactionManager {
             { ...options, retryAttempts: 1 }
           );
 
-          logger.debug({
+          getLogger().info({
             stepName: step.name,
             compensationStep: i + 1
           }, 'Saga compensation step completed');
 
         } catch (compensationError) {
-          logger.error({
+          getLogger().error({
             stepName: step.name,
             error: (compensationError as Error).message
           }, 'Saga compensation failed - manual intervention required');
@@ -295,7 +295,7 @@ export class TransactionManager {
    * Force abort all active transactions (emergency use only)
    */
   async emergencyAbortAll(): Promise<void> {
-    logger.warn({
+    getLogger().warn({
       activeTransactions: this.activeTransactions.size
     }, 'Emergency abort of all active transactions initiated');
 
@@ -314,7 +314,7 @@ export class TransactionManager {
   private createOperationTracker(metrics: TransactionMetrics) {
     return (operation: string) => {
       metrics.operations.push(operation);
-      logger.debug({
+      getLogger().info({
         transactionId: metrics.transactionId,
         operation,
         totalOperations: metrics.operations.length

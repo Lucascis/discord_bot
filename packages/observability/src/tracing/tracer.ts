@@ -3,7 +3,7 @@ import { Resource } from '@opentelemetry/resources';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { trace, metrics, SpanStatusCode, SpanKind } from '@opentelemetry/api';
+import { trace, metrics, SpanStatusCode, SpanKind, Tracer, Meter, Span } from '@opentelemetry/api';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import { logger } from '@discord-bot/logger';
 
@@ -34,8 +34,8 @@ export interface TelemetryConfig {
  */
 export class TelemetryManager {
   private sdk?: NodeSDK;
-  private tracer: any;
-  private meter: any;
+  private tracer!: Tracer;
+  private meter!: Meter;
   private config: TelemetryConfig;
 
   constructor(config: TelemetryConfig) {
@@ -115,14 +115,14 @@ export class TelemetryManager {
   /**
    * Get tracer instance
    */
-  getTracer(): any {
+  getTracer(): Tracer {
     return this.tracer;
   }
 
   /**
    * Get meter instance
    */
-  getMeter(): any {
+  getMeter(): Meter {
     return this.meter;
   }
 
@@ -131,17 +131,16 @@ export class TelemetryManager {
    */
   async withSpan<T>(
     name: string,
-    operation: (span: any) => Promise<T>,
+    operation: (span: Span) => Promise<T>,
     options: {
       kind?: SpanKind;
       attributes?: Record<string, string | number | boolean>;
-      parent?: any;
+      parent?: Span;
     } = {}
   ): Promise<T> {
     const span = this.tracer.startSpan(name, {
       kind: options.kind || SpanKind.INTERNAL,
       attributes: options.attributes,
-      parent: options.parent,
     });
 
     try {
@@ -170,7 +169,7 @@ export class TelemetryManager {
     commandName: string,
     guildId: string,
     userId: string,
-    operation: (span: any) => Promise<T>
+    operation: (span: Span) => Promise<T>
   ): Promise<T> {
     return this.withSpan(
       `discord.command.${commandName}`,
@@ -193,7 +192,7 @@ export class TelemetryManager {
   async withDatabaseSpan<T>(
     operation: string,
     table: string,
-    dbOperation: (span: any) => Promise<T>
+    dbOperation: (span: Span) => Promise<T>
   ): Promise<T> {
     return this.withSpan(
       `db.${operation}`,
@@ -215,7 +214,7 @@ export class TelemetryManager {
   async withExternalServiceSpan<T>(
     serviceName: string,
     operation: string,
-    serviceOperation: (span: any) => Promise<T>
+    serviceOperation: (span: Span) => Promise<T>
   ): Promise<T> {
     return this.withSpan(
       `external.${serviceName}.${operation}`,
@@ -233,7 +232,7 @@ export class TelemetryManager {
   /**
    * Add event to current span
    */
-  addEvent(name: string, attributes?: Record<string, any>): void {
+  addEvent(name: string, attributes?: Record<string, string | number | boolean>): void {
     const span = trace.getActiveSpan();
     if (span) {
       span.addEvent(name, attributes);

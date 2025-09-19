@@ -1,11 +1,15 @@
 import { app } from './app.js';
 import { logger, initializeSentry } from '@discord-bot/logger';
+import { injectLogger } from '@discord-bot/database';
 import { env } from '@discord-bot/config';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
 async function startServer() {
+  // Inject logger dependency for database package
+  injectLogger(logger);
+
   // Initialize Sentry error monitoring
   await initializeSentry({
     ...(env.SENTRY_DSN && { dsn: env.SENTRY_DSN }),

@@ -1,0 +1,130 @@
+import { createClient, type RedisClientType } from 'redis';
+import { logger } from '@discord-bot/logger';
+import type { ChatInputCommandInteraction, ButtonInteraction } from 'discord.js';
+
+export interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+  usingFallback?: boolean;
+}
+
+export interface RateLimitOptions {
+  limit: number;
+  windowSec: number;
+  fallbackLimit?: number;
+}
+
+/**
+ * Secure rate limiter with Redis-based tracking and fallback
+ */
+export class SecureRateLimiter {
+  private fallbackTracking = new Map<string, { count: number; resetAt: number }>();
+  private readonly cleanupInterval: NodeJS.Timeout;
+
+  constructor(private readonly redis: RedisClientType) {
+    // Clean up fallback tracking every minute
+    this.cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, data] of this.fallbackTracking.entries()) {
+        if (now > data.resetAt) {
+          this.fallbackTracking.delete(key);
+        }
+      }
+    }, 60000);
+  }
+
+  async isAllowed(
+    interaction: ChatInputCommandInteraction | ButtonInteraction,
+    command: string,
+    options: RateLimitOptions
+  ): Promise<RateLimitResult> {
+    const userId = interaction.user.id;
+    const guildId = interaction.guildId || 'dm';
+    const key = `rate_limit:${command}:${guildId}:${userId}`;
+
+    try {
+      const current = await this.redis.get(key);
+      const now = Date.now();
+      const windowMs = options.windowSec * 1000;
+
+      if (!current) {
+        // First request in this window
+        await this.redis.setex(key, options.windowSec, '1');
+        return {
+          allowed: true,
+          remaining: options.limit - 1,
+          resetAt: now + windowMs
+        };
+      }
+
+      const count = parseInt(current, 10);
+
+      if (count >= options.limit) {
+        const ttl = await this.redis.ttl(key);
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: now + (ttl * 1000)
+        };
+      }
+
+      // Increment counter
+      await this.redis.incr(key);
+
+      return {
+        allowed: true,
+        remaining: options.limit - count - 1,
+        resetAt: now + windowMs
+      };
+
+    } catch (error) {
+      logger.warn({ error, key }, 'Rate limiter Redis error, using fallback');
+
+      // Fallback to in-memory tracking
+      return this.fallbackRateLimit(key, options);
+    }
+  }
+
+  private fallbackRateLimit(key: string, options: RateLimitOptions): RateLimitResult {
+    const now = Date.now();
+    const windowMs = options.windowSec * 1000;
+    const limit = options.fallbackLimit || Math.floor(options.limit * 0.5); // More restrictive fallback
+
+    const existing = this.fallbackTracking.get(key);
+
+    if (!existing || now > existing.resetAt) {
+      // New window
+      this.fallbackTracking.set(key, { count: 1, resetAt: now + windowMs });
+      return {
+        allowed: true,
+        remaining: limit - 1,
+        resetAt: now + windowMs,
+        usingFallback: true
+      };
+    }
+
+    if (existing.count >= limit) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: existing.resetAt,
+        usingFallback: true
+      };
+    }
+
+    existing.count++;
+
+    return {
+      allowed: true,
+      remaining: limit - existing.count,
+      resetAt: existing.resetAt,
+      usingFallback: true
+    };
+  }
+
+  destroy(): void {
+    clearInterval(this.cleanupInterval);
+    this.fallbackTracking.clear();
+  }
+}

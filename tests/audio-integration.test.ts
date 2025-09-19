@@ -1,6 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { logger } from '@discord-bot/logger';
-// Mock the audio services for testing
+// Mock the audio services for testing with actual storage
+const mockStorages = {
+  searchCache: new Map<string, unknown>(),
+  queueCache: new Map<string, unknown>(),
+  userCache: new Map<string, unknown>(),
+  featureFlags: new Map<string, unknown>()
+};
+
 const mockAudioCacheManager = {
   getCacheStats: () => ({
     search: { overall: { hitRate: 85 } },
@@ -17,26 +24,48 @@ const mockAudioCacheManager = {
     featureFlags: { l1Size: 234, l1MaxSize: 1000, l1UsagePercent: 23.4, estimatedMemoryMB: 0.8 }
   }),
   search: {
-    getCachedSearchResult: async () => null,
-    cacheSearchResult: async () => {},
+    getCachedSearchResult: async (query: string, source: string, userId?: string) => {
+      const key = mockAudioCacheManager.search.generateSearchKey(query, source, userId);
+      return mockStorages.searchCache.get(key) || null;
+    },
+    cacheSearchResult: async (query: string, results: unknown, source: string, userId?: string) => {
+      const key = mockAudioCacheManager.search.generateSearchKey(query, source, userId);
+      mockStorages.searchCache.set(key, results);
+    },
     generateSearchKey: (query: string, source?: string, userId?: string) => {
       const normalized = query.toLowerCase().replace(/\s+/g, '-');
       return `${normalized}${source ? `:src:${source}` : ''}${userId ? `:user:${userId}` : ''}`;
     }
   },
   queue: {
-    cacheQueueState: async () => {},
-    getCachedQueueState: async () => null,
-    invalidateQueueCache: async () => {}
+    cacheQueueState: async (guildId: string, queueState: unknown) => {
+      mockStorages.queueCache.set(`guild:${guildId}`, queueState);
+    },
+    getCachedQueueState: async (guildId: string) => {
+      return mockStorages.queueCache.get(`guild:${guildId}`) || null;
+    },
+    invalidateQueueCache: async (guildId: string) => {
+      mockStorages.queueCache.delete(`guild:${guildId}`);
+    }
   },
   user: {
-    cacheUserPreferences: async () => {},
-    getCachedUserPreferences: async () => null,
-    cacheUserBehavior: async () => {}
+    cacheUserPreferences: async (userId: string, guildId: string, preferences: unknown) => {
+      mockStorages.userCache.set(`${guildId}:${userId}`, preferences);
+    },
+    getCachedUserPreferences: async (userId: string, guildId: string) => {
+      return mockStorages.userCache.get(`${guildId}:${userId}`) || null;
+    },
+    cacheUserBehavior: async (userId: string, guildId: string, behavior: unknown) => {
+      mockStorages.userCache.set(`${guildId}:${userId}:behavior`, behavior);
+    }
   },
   featureFlags: {
-    setFlagValue: async () => {},
-    getFlagValue: async () => false
+    setFlagValue: async (guildId: string, flagName: string, value: boolean) => {
+      mockStorages.featureFlags.set(`${guildId}:${flagName}`, value);
+    },
+    getFlagValue: async (guildId: string, flagName: string) => {
+      return mockStorages.featureFlags.get(`${guildId}:${flagName}`) || false;
+    }
   }
 };
 
@@ -76,13 +105,18 @@ const audioCacheManager = mockAudioCacheManager;
 const audioMetrics = mockAudioMetrics;
 
 // Mock Redis for testing
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const mockRedis = {
   connected: true,
   status: 'ready',
-  get: async (key: string) => null,
-  set: async (key: string, value: string, ...args: any[]) => 'OK',
-  del: async (key: string) => 1,
-  publish: async (channel: string, message: string) => 1,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  get: async (_key: string) => null,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  set: async (_key: string, _value: string, ..._args: unknown[]) => 'OK',
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  del: async (_key: string) => 1,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  publish: async (_channel: string, _message: string) => 1,
   disconnect: async () => {},
   quit: async () => {}
 };
@@ -90,6 +124,14 @@ const mockRedis = {
 describe('Audio Service Integration Tests', () => {
   beforeAll(async () => {
     logger.info('Audio service integration tests started');
+  });
+
+  beforeEach(() => {
+    // Clear all mock storages before each test
+    mockStorages.searchCache.clear();
+    mockStorages.queueCache.clear();
+    mockStorages.userCache.clear();
+    mockStorages.featureFlags.clear();
   });
 
   afterAll(async () => {
@@ -427,7 +469,6 @@ describe('Audio Service Integration Tests', () => {
   describe('Performance and Reliability', () => {
     it('should handle concurrent cache operations', async () => {
       const promises = [];
-      const guildId = 'concurrent-test-guild';
 
       // Create multiple concurrent operations
       for (let i = 0; i < 50; i++) {
@@ -447,7 +488,6 @@ describe('Audio Service Integration Tests', () => {
     });
 
     it('should maintain cache statistics consistency', async () => {
-      const initialStats = audioCacheManager.getCacheStats();
 
       // Perform some operations
       await audioCacheManager.search.cacheSearchResult(

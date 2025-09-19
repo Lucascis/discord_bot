@@ -1,5 +1,9 @@
 server:
   port: 2333
+  # Performance optimization
+  compression:
+    enabled: true
+    level: 6
 
 lavalink:
   server:
@@ -23,7 +27,7 @@ lavalink:
       distortion: true
       channelMix: true
       lowPass: true
-    # Optimized performance settings
+    # Enhanced performance settings for production
     bufferDurationMs: 400
     frameBufferDurationMs: 5000
     opusEncodingQuality: 10
@@ -31,9 +35,16 @@ lavalink:
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
     playerUpdateInterval: 5
-    youtubePlaylistLoadLimit: 100
+    youtubePlaylistLoadLimit: 50  # Reduced to save memory
     soundcloudSearchEnabled: true
     gc-warnings: true
+
+    # Memory and CPU optimizations
+    playerEventListenerBufferTimeout: 5000
+    httpTimeout: 10000
+    # Connection pool settings
+    httpPoolSize: 16
+    httpMaxPendingRequests: 64
 
   # Plugin loading configuration
   plugins:

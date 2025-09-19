@@ -15,8 +15,8 @@
  * Usage: node start-music-bot.js
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 console.log('🎵 Discord Music Bot - Starting...');
 
@@ -42,4 +42,4 @@ console.log('✅ Environment check passed');
 console.log('🚀 Loading optimized music bot...');
 
 // Load and start the optimized bot
-require('./music-bot-optimized.js');
+import('./music-bot-optimized.js');

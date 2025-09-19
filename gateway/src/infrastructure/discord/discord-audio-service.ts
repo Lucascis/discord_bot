@@ -6,8 +6,8 @@ import { AudioService } from '../../application/use-cases/play-music-use-case.js
  */
 export class DiscordAudioService implements AudioService {
   constructor(
-    private readonly redisPublisher: any, // Redis client for publishing
-    private readonly searchCache: any // Search cache implementation
+    private readonly redisPublisher: { publish: (channel: string, message: string) => Promise<void> }, // Redis client for publishing
+    private readonly searchCache: { get: (key: string) => Promise<unknown>; set: (key: string, value: unknown, ttl?: number) => Promise<void> } // Search cache implementation
   ) {}
 
   async searchTrack(query: string, guildId: string): Promise<{
@@ -23,10 +23,10 @@ export class DiscordAudioService implements AudioService {
       const cacheKey = `search:${Buffer.from(query).toString('base64')}`;
       const cached = await this.searchCache.get(cacheKey);
 
-      if (cached) {
+      if (cached && typeof cached === 'object' && 'tracks' in cached && 'source' in cached) {
         return {
-          tracks: cached.tracks,
-          source: cached.source,
+          tracks: (cached as any).tracks,
+          source: (cached as any).source as 'youtube' | 'spotify' | 'other',
           latency: Date.now() - startTime,
           cached: true
         };
@@ -62,7 +62,7 @@ export class DiscordAudioService implements AudioService {
 
       return {
         tracks: response.tracks,
-        source: response.source || 'other',
+        source: (response.source as 'youtube' | 'spotify' | 'other') || 'other',
         latency: Date.now() - startTime,
         cached: false
       };
@@ -120,7 +120,7 @@ export class DiscordAudioService implements AudioService {
 
       return response?.connected ?? false;
 
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -153,7 +153,8 @@ export class DiscordAudioService implements AudioService {
   }
 
   // Simplified response waiting - in real implementation would use proper event handling
-  private async waitForSearchResponse(requestId: string, timeoutMs: number = 10000): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async waitForSearchResponse(_requestId: string, timeoutMs: number = 10000): Promise<{ tracks: Array<{ title: string; uri: string; duration: number }>; source: string }> {
     // This would be implemented with proper Redis subscription handling
     // For now, return a mock response structure
     return new Promise((resolve) => {
@@ -166,7 +167,8 @@ export class DiscordAudioService implements AudioService {
     });
   }
 
-  private async waitForPlayResponse(requestId: string, timeoutMs: number = 5000): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async waitForPlayResponse(_requestId: string, timeoutMs: number = 5000): Promise<{ success: boolean; message: string; queuePosition?: number }> {
     // Mock implementation
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -178,7 +180,8 @@ export class DiscordAudioService implements AudioService {
     });
   }
 
-  private async waitForStatusResponse(requestId: string, timeoutMs: number = 3000): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async waitForStatusResponse(_requestId: string, timeoutMs: number = 3000): Promise<{ connected: boolean }> {
     // Mock implementation
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -189,7 +192,8 @@ export class DiscordAudioService implements AudioService {
     });
   }
 
-  private async waitForConnectResponse(requestId: string, timeoutMs: number = 5000): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async waitForConnectResponse(_requestId: string, timeoutMs: number = 5000): Promise<{ success: boolean; message?: string }> {
     // Mock implementation
     return new Promise((resolve) => {
       setTimeout(() => {

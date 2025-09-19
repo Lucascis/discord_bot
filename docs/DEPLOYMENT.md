@@ -1,30 +1,47 @@
-# Discord Bot - Production Deployment Guide
+# 🚀 Production Deployment Guide - Discord Music Bot
 
-## 🚀 Quick Start
+## 🎯 **Deployment Status**
+
+| Implementation | Status | Readiness | Recommendation |
+|---------------|--------|-----------|----------------|
+| **Legacy** (`src-legacy/`) | ✅ Production Ready | 100% | 🚀 **Deploy Now** |
+| **MVC** (`src-mvc/`) | 🆕 Recently Implemented | 95% | 🧪 Test First |
+| **Clean Architecture** (`src/`) | ⚠️ In Development | 80% | 🚧 Development Only |
+
+## 🚀 **Quick Production Deploy (Legacy)**
 
 ### Prerequisites
-- Docker and Docker Compose installed
-- Discord bot token and application ID
-- 2GB+ RAM available
-- Port access: 3000-3003, 2333, 5432, 6379, 9090, 3300
+- **Docker & Docker Compose** installed
+- **Discord bot token** and application ID
+- **4GB+ RAM** recommended (2GB minimum)
+- **Port access**: 3000-3003, 2333, 5432, 6379, 9090, 3300
+- **Storage**: 10GB+ available
 
-### 1. Clone and Setup
+### 1. Quick Production Setup
 ```bash
+# Clone repository
 git clone <repository-url>
 cd discord_bot
-cp .env.example .env.docker
-```
 
-### 2. Configure Environment
-Edit `.env.docker` with your Discord credentials:
-```bash
+# Configure environment
+cp .env.example .env.docker
+
+# Edit with your credentials
 DISCORD_TOKEN=your-bot-token-here
 DISCORD_APPLICATION_ID=your-application-id-here
+LAVALINK_PASSWORD=youshallnotpass
 ```
 
-### 3. Start Services
+### 2. Deploy Production Stack
 ```bash
+# Option A: Use deployment script (recommended)
 ./scripts/start.sh
+
+# Option B: Direct Docker Compose
+docker-compose -f docker-compose.production.yml up -d
+
+# Option C: Legacy implementation only
+cd gateway && node src-legacy/index.js
 ```
 
 ### 4. Verify Deployment

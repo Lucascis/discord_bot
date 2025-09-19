@@ -1,5 +1,5 @@
 import { Counter, Histogram, register } from 'prom-client';
-import { logger } from '@discord-bot/logger';
+import { getLogger } from './logger-interface.js';
 import type { PrismaClient } from '@prisma/client';
 
 // Database performance metrics
@@ -84,7 +84,7 @@ export function instrumentQuery<T>(
       // Track slow queries
       if (duration > 100) {
         dbSlowQueryCounter.labels(operation, model, '100ms').inc();
-        logger.warn({
+        getLogger().warn({
           operation,
           model,
           duration,
@@ -94,7 +94,7 @@ export function instrumentQuery<T>(
 
       if (duration > 500) {
         dbSlowQueryCounter.labels(operation, model, '500ms').inc();
-        logger.error({
+        getLogger().error({
           operation,
           model,
           duration,
@@ -108,7 +108,7 @@ export function instrumentQuery<T>(
       timer();
       dbQueryCounter.labels(operation, model, 'false').inc();
 
-      logger.error({
+      getLogger().error({
         operation,
         model,
         error: error instanceof Error ? error.message : String(error),
@@ -151,7 +151,7 @@ export function createQueryInstrumentationMiddleware(prisma: PrismaClient) {
           '100ms'
         ).inc();
 
-        logger.warn({
+        getLogger().warn({
           operation: params.action,
           model: params.model,
           duration,
@@ -166,7 +166,7 @@ export function createQueryInstrumentationMiddleware(prisma: PrismaClient) {
           '500ms'
         ).inc();
 
-        logger.error({
+        getLogger().error({
           operation: params.action,
           model: params.model,
           duration,
@@ -183,7 +183,7 @@ export function createQueryInstrumentationMiddleware(prisma: PrismaClient) {
         'false'
       ).inc();
 
-      logger.error({
+      getLogger().error({
         operation: params.action,
         model: params.model,
         error: error instanceof Error ? error.message : String(error),
@@ -211,7 +211,7 @@ export function instrumentTransaction<T>(
       dbTransactionCounter.labels('committed').inc();
 
       if (duration > 1) {
-        logger.warn({ duration }, 'Long-running transaction detected');
+        getLogger().warn({ duration }, 'Long-running transaction detected');
       }
 
       return result;
@@ -220,7 +220,7 @@ export function instrumentTransaction<T>(
       timer({ status: 'failed' });
       dbTransactionCounter.labels('failed').inc();
 
-      logger.error({
+      getLogger().error({
         error: error instanceof Error ? error.message : String(error),
         duration: (Date.now() - startTime) / 1000
       }, 'Transaction failed');
@@ -235,7 +235,7 @@ export function instrumentTransaction<T>(
 export function trackQueueOperation(operation: 'rebuild' | 'incremental_add' | 'incremental_remove' | 'clear'): void {
   queueOperationsCounter.labels(operation).inc();
 
-  logger.debug({
+  getLogger().info({
     operation,
     timestamp: new Date().toISOString()
   }, 'Queue operation tracked');
@@ -244,7 +244,7 @@ export function trackQueueOperation(operation: 'rebuild' | 'incremental_add' | '
 export function trackQueueOptimization(type: 'skipped_rebuild' | 'incremental_update', savedOperations: number = 1): void {
   queueOptimizationGauge.labels(type).inc(savedOperations);
 
-  logger.debug({
+  getLogger().info({
     optimizationType: type,
     savedOperations
   }, 'Queue operation optimized');
@@ -257,7 +257,7 @@ export function trackConnectionPoolEvent(eventType: 'acquired' | 'released' | 't
   dbConnectionPoolGauge.labels(eventType).inc();
 
   if (eventType === 'timeout' || eventType === 'error') {
-    logger.warn({ eventType }, 'Database connection pool issue');
+    getLogger().warn({ eventType }, 'Database connection pool issue');
   }
 }
 

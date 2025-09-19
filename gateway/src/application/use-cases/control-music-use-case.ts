@@ -8,6 +8,7 @@ import {
 import { MusicSessionRepository } from '../../domain/repositories/music-session-repository.js';
 import { GuildSettingsRepository } from '../../domain/repositories/guild-settings-repository.js';
 import { MusicSessionDomainService } from '../../domain/services/music-session-domain-service.js';
+import type { DomainEvent } from '@discord-bot/event-store';
 import {
   MusicSessionPausedEvent,
   MusicSessionResumedEvent,
@@ -22,7 +23,7 @@ import {
 export interface ControlMusicResult {
   success: boolean;
   message: string;
-  events: any[]; // Domain events to be published
+  events: DomainEvent[]; // Domain events to be published
 }
 
 /**
@@ -50,7 +51,7 @@ export class ControlMusicUseCase {
   ) {}
 
   async pauseMusic(command: PauseMusicCommand): Promise<ControlMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       const [guildSettings, session] = await Promise.all([
@@ -107,7 +108,7 @@ export class ControlMusicUseCase {
       session.pause();
       await this.musicSessionRepository.save(session);
 
-      events.push(new MusicSessionPausedEvent(
+      events.push(MusicSessionPausedEvent(
         command.guildId.value,
         command.userId.value,
         session.position
@@ -129,7 +130,7 @@ export class ControlMusicUseCase {
   }
 
   async resumeMusic(command: ResumeMusicCommand): Promise<ControlMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       const [guildSettings, session] = await Promise.all([
@@ -186,7 +187,7 @@ export class ControlMusicUseCase {
       session.resume();
       await this.musicSessionRepository.save(session);
 
-      events.push(new MusicSessionResumedEvent(
+      events.push(MusicSessionResumedEvent(
         command.guildId.value,
         command.userId.value,
         session.position
@@ -208,7 +209,7 @@ export class ControlMusicUseCase {
   }
 
   async stopMusic(command: StopMusicCommand): Promise<ControlMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       const [guildSettings, session] = await Promise.all([
@@ -267,7 +268,7 @@ export class ControlMusicUseCase {
       const eventReason = command.reason === 'timeout' ? 'queue_ended' :
                           command.reason as 'user_requested' | 'error' | 'queue_ended';
 
-      events.push(new MusicSessionStoppedEvent(
+      events.push(MusicSessionStoppedEvent(
         command.guildId.value,
         command.userId.value,
         eventReason
@@ -289,7 +290,7 @@ export class ControlMusicUseCase {
   }
 
   async setVolume(command: SetVolumeCommand): Promise<ControlMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       const [guildSettings, session] = await Promise.all([
@@ -340,7 +341,7 @@ export class ControlMusicUseCase {
       session.setVolume(command.volume);
       await this.musicSessionRepository.save(session);
 
-      events.push(new VolumeChangedEvent(
+      events.push(VolumeChangedEvent(
         command.guildId.value,
         oldVolume,
         command.volume,
@@ -363,7 +364,7 @@ export class ControlMusicUseCase {
   }
 
   async setLoopMode(command: SetLoopModeCommand): Promise<ControlMusicResult> {
-    const events: any[] = [];
+    const events: DomainEvent[] = [];
 
     try {
       const [guildSettings, session] = await Promise.all([
@@ -414,7 +415,7 @@ export class ControlMusicUseCase {
       session.setLoopMode(command.loopMode);
       await this.musicSessionRepository.save(session);
 
-      events.push(new LoopModeChangedEvent(
+      events.push(LoopModeChangedEvent(
         command.guildId.value,
         oldMode,
         command.loopMode,

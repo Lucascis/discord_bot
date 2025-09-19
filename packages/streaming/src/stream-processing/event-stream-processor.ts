@@ -54,7 +54,7 @@ export interface StreamPipeline<T, R> {
   name: string;
   source: string;
   filters?: StreamFilter<T>[];
-  transformers?: StreamTransformer<T, any>[];
+  transformers?: StreamTransformer<T, unknown>[];
   aggregator?: StreamAggregator<T, R>;
   window?: WindowConfig;
   sink: StreamSink<R>;
@@ -112,7 +112,7 @@ interface WindowState<T, R> {
  * Event Stream Processor
  * Real-time stream processing with windowing and aggregations
  */
-export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter {
+export class EventStreamProcessor<T = DomainEvent, R = unknown> extends EventEmitter {
   private readonly pipeline: StreamPipeline<T, R>;
   private readonly metrics?: MetricsCollector;
 
@@ -233,7 +233,7 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
       }
 
       // Apply transformations
-      let transformedEvent: any = event;
+      let transformedEvent: unknown = event;
       if (this.pipeline.transformers) {
         for (const transformer of this.pipeline.transformers) {
           transformedEvent = await transformer(transformedEvent);
@@ -260,7 +260,7 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
       logger.error('Error processing event in stream', {
         pipelineName: this.pipeline.name,
         error: error instanceof Error ? error.message : String(error),
-        eventType: (event as any).eventType || 'unknown'
+        eventType: (event as Record<string, unknown>).eventType || 'unknown'
       });
 
       this.emit('error', {
@@ -420,7 +420,7 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
       if (this.pipeline.aggregator && window.accumulator !== undefined) {
         result = window.accumulator;
       } else {
-        result = window.events as any; // Fallback to raw events
+        result = window.events as R; // Fallback to raw events
       }
 
       // Create metadata
@@ -474,14 +474,15 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
     const timestamp = eventTime.getTime();
 
     switch (config.type) {
-      case 'tumbling':
+      case 'tumbling': {
         const windowStart = Math.floor(timestamp / config.sizeMs) * config.sizeMs;
         return `tumbling-${windowStart}`;
-
-      case 'sliding':
+      }
+      case 'sliding': {
         const slideMs = config.slideMs || config.sizeMs;
         const slideStart = Math.floor(timestamp / slideMs) * slideMs;
         return `sliding-${slideStart}`;
+      }
 
       case 'session':
         // For session windows, use a different approach
@@ -496,20 +497,21 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
     const timestamp = eventTime.getTime();
 
     switch (config.type) {
-      case 'tumbling':
+      case 'tumbling': {
         const tumblingStart = Math.floor(timestamp / config.sizeMs) * config.sizeMs;
         return {
           windowStart: new Date(tumblingStart),
           windowEnd: new Date(tumblingStart + config.sizeMs)
         };
-
-      case 'sliding':
+      }
+      case 'sliding': {
         const slideMs = config.slideMs || config.sizeMs;
         const slidingStart = Math.floor(timestamp / slideMs) * slideMs;
         return {
           windowStart: new Date(slidingStart),
           windowEnd: new Date(slidingStart + config.sizeMs)
         };
+      }
 
       case 'session':
         return {
@@ -544,16 +546,17 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
 
   private extractEventTime(event: T): Date {
     // Try to extract timestamp from event
-    if ((event as any).timestamp instanceof Date) {
-      return (event as any).timestamp;
+    const eventWithTimestamp = event as Record<string, unknown>;
+    if (eventWithTimestamp.timestamp instanceof Date) {
+      return eventWithTimestamp.timestamp;
     }
 
-    if (typeof (event as any).timestamp === 'string') {
-      return new Date((event as any).timestamp);
+    if (typeof eventWithTimestamp.timestamp === 'string') {
+      return new Date(eventWithTimestamp.timestamp);
     }
 
-    if (typeof (event as any).timestamp === 'number') {
-      return new Date((event as any).timestamp);
+    if (typeof eventWithTimestamp.timestamp === 'number') {
+      return new Date(eventWithTimestamp.timestamp);
     }
 
     // Fallback to current time
@@ -589,7 +592,6 @@ export class EventStreamProcessor<T = DomainEvent, R = any> extends EventEmitter
       }
 
       const windowsToComplete: Array<[string, WindowState<T, R>]> = [];
-      const now = Date.now();
 
       for (const [key, window] of this.windows.entries()) {
         if (this.shouldCompleteWindow(window, this.pipeline.window)) {

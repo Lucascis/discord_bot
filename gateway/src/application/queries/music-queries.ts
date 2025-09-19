@@ -6,7 +6,7 @@ import { BaseQuery } from '@discord-bot/cqrs';
 export class GetMusicSessionQuery extends BaseQuery {
   constructor(
     public readonly guildId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetMusicSession', {
       guildId,
@@ -23,7 +23,7 @@ export class GetQueueQuery extends BaseQuery {
     public readonly guildId: string,
     public readonly limit?: number,
     public readonly offset?: number,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetQueue', {
       guildId,
@@ -38,7 +38,7 @@ export class GetQueueQuery extends BaseQuery {
 export class GetGuildSettingsQuery extends BaseQuery {
   constructor(
     public readonly guildId: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetGuildSettings', {
       guildId,
@@ -55,7 +55,7 @@ export class SearchTracksQuery extends BaseQuery {
     public readonly query: string,
     public readonly guildId: string,
     public readonly limit?: number,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('SearchTracks', {
       guildId,
@@ -73,7 +73,7 @@ export class GetMusicSessionHistoryQuery extends BaseQuery {
     public readonly fromDate?: Date,
     public readonly toDate?: Date,
     public readonly limit?: number,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetMusicSessionHistory', {
       guildId,
@@ -90,7 +90,7 @@ export class GetUserMusicStatsQuery extends BaseQuery {
     public readonly userId: string,
     public readonly guildId?: string,
     public readonly period?: 'day' | 'week' | 'month' | 'year',
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetUserMusicStats', {
       userId,
@@ -107,7 +107,7 @@ export class GetGuildMusicAnalyticsQuery extends BaseQuery {
   constructor(
     public readonly guildId: string,
     public readonly period?: 'day' | 'week' | 'month' | 'year',
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetGuildMusicAnalytics', {
       guildId,
@@ -124,7 +124,7 @@ export class GetMostPopularTracksQuery extends BaseQuery {
     public readonly guildId?: string,
     public readonly period?: 'day' | 'week' | 'month' | 'year',
     public readonly limit?: number,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ) {
     super('GetMostPopularTracks', {
       guildId,

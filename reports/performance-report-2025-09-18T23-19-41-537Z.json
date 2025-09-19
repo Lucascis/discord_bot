@@ -1,0 +1,124 @@
+{
+  "timestamp": "2025-09-18T23:19:41.531Z",
+  "system": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "v22.18.0",
+    "totalMemory": "8GB",
+    "cpus": 8,
+    "loadAverage": [
+      2.4697265625,
+      2.56884765625,
+      2.74609375
+    ]
+  },
+  "processes": [
+    {
+      "name": "Current Process",
+      "pid": 69411,
+      "memory": {
+        "heapUsed": "7MB",
+        "heapTotal": "11MB",
+        "external": "2MB",
+        "rss": "60MB",
+        "utilization": "64%"
+      },
+      "cpu": {
+        "user": "83ms",
+        "system": "22ms"
+      },
+      "uptime": "0s"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "category": "Memory",
+      "issue": "No max-old-space-size limit set",
+      "recommendation": "Set --max-old-space-size=2048 to prevent excessive memory usage",
+      "impact": "Prevents OOM crashes and improves garbage collection"
+    },
+    {
+      "priority": "MEDIUM",
+      "category": "Monitoring",
+      "issue": "GC monitoring disabled",
+      "recommendation": "Add --expose-gc flag for better memory monitoring",
+      "impact": "Enables garbage collection metrics and manual GC triggering"
+    },
+    {
+      "priority": "LOW",
+      "category": "Memory",
+      "issue": "Not optimized for memory",
+      "recommendation": "Add --optimize-for-size for better memory efficiency",
+      "impact": "Reduces memory footprint at slight performance cost"
+    }
+  ],
+  "nodeOptions": {
+    "maxOldSpaceSize": null,
+    "maxSemiSpaceSize": null,
+    "gcInterval": null,
+    "optimizeForSize": false,
+    "exposeGc": false
+  },
+  "dependencies": {
+    "scripts": {
+      "build": "pnpm -r build",
+      "build:clean": "pnpm -r clean && pnpm build",
+      "dev": "node --max-old-space-size=1024 --optimize-for-size node_modules/.bin/pnpm --filter gateway dev",
+      "dev:all": "node --max-old-space-size=1024 --optimize-for-size node_modules/.bin/pnpm -r --parallel dev",
+      "dev:gateway": "node --max-old-space-size=1024 --optimize-for-size node_modules/.bin/pnpm --filter gateway dev",
+      "dev:audio": "node --max-old-space-size=1024 --optimize-for-size node_modules/.bin/pnpm --filter audio dev",
+      "dev:api": "node --max-old-space-size=1024 --optimize-for-size node_modules/.bin/pnpm --filter api dev",
+      "lint": "eslint .",
+      "lint:fix": "eslint . --fix",
+      "typecheck": "pnpm -r typecheck",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "test:coverage": "vitest run --coverage",
+      "start": "node --max-old-space-size=2048 --optimize-for-size node_modules/.bin/pnpm -r start",
+      "start:prod": "NODE_ENV=production node --max-old-space-size=2048 --optimize-for-size --no-warnings node_modules/.bin/pnpm -r start",
+      "start:perf": "NODE_ENV=production node --expose-gc --max-old-space-size=2048 --optimize-for-size node_modules/.bin/pnpm -r start",
+      "clean": "pnpm -r clean",
+      "check": "pnpm typecheck && pnpm lint && pnpm test",
+      "check:ci": "pnpm install --frozen-lockfile && pnpm check",
+      "deps:update": "pnpm update -r --latest",
+      "deps:check": "pnpm outdated -r",
+      "postinstall": "pnpm --filter @discord-bot/database prisma:generate",
+      "prepare": "husky install",
+      "db:migrate": "pnpm --filter @discord-bot/database prisma:migrate",
+      "db:seed": "pnpm --filter @discord-bot/database ts-node packages/database/prisma/seed.ts",
+      "db:reset": "pnpm --filter @discord-bot/database prisma:migrate reset",
+      "db:studio": "pnpm --filter @discord-bot/database prisma:studio",
+      "perf:monitor": "node --expose-gc scripts/performance-monitor.js",
+      "perf:report": "node scripts/generate-perf-report.js"
+    },
+    "dependencies": 0,
+    "devDependencies": 14,
+    "pnpmConfig": {
+      "overrides": {
+        "esbuild": ">=0.25.0"
+      },
+      "ignoredBuiltDependencies": [
+        "esbuild"
+      ]
+    }
+  },
+  "lavalink": {
+    "hasCompression": true,
+    "bufferSettings": {
+      "bufferDuration": 400,
+      "frameBuffer": 5000
+    },
+    "playlistLimits": {
+      "youtube": 50,
+      "general": 100
+    }
+  },
+  "summary": {
+    "totalProcesses": 1,
+    "totalMemoryUsage": "60MB",
+    "highPriorityIssues": 1,
+    "mediumPriorityIssues": 1,
+    "overallHealth": "FAIR"
+  }
+}

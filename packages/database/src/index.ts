@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { logger } from '@discord-bot/logger';
+import { getLogger, injectLogger, type DatabaseLogger } from './logger-interface.js';
 import { createQueryInstrumentationMiddleware } from './metrics.js';
 
 // Enhanced Prisma Client with optimized connection pooling
@@ -29,7 +29,7 @@ prisma.$on('query', (e) => {
   // Log slow queries (>100ms)
   if (e.duration > 100) {
     slowQueryCount++;
-    logger.warn({
+    getLogger().warn({
       query: e.query,
       params: e.params,
       duration: e.duration,
@@ -39,7 +39,7 @@ prisma.$on('query', (e) => {
 
   // Log very slow queries with full context (>500ms)
   if (e.duration > 500) {
-    logger.error({
+    getLogger().error({
       query: e.query,
       params: e.params,
       duration: e.duration,
@@ -50,15 +50,15 @@ prisma.$on('query', (e) => {
 });
 
 prisma.$on('info', (e) => {
-  logger.info({ message: e.message, target: e.target }, 'Database info');
+  getLogger().info({ message: e.message, target: e.target }, 'Database info');
 });
 
 prisma.$on('warn', (e) => {
-  logger.warn({ message: e.message, target: e.target }, 'Database warning');
+  getLogger().warn({ message: e.message, target: e.target }, 'Database warning');
 });
 
 prisma.$on('error', (e) => {
-  logger.error({ message: e.message, target: e.target }, 'Database error');
+  getLogger().error({ message: e.message, target: e.target }, 'Database error');
 });
 
 // Enable automatic query instrumentation only if $use method exists
@@ -109,7 +109,7 @@ export async function checkDatabaseHealth(): Promise<{
       responseTime
     };
   } catch (error) {
-    logger.error({ error }, 'Database health check failed');
+    getLogger().error({ error }, 'Database health check failed');
     return {
       status: 'unhealthy',
       connectionPool: 'unknown',
@@ -128,9 +128,9 @@ export async function checkDatabaseHealth(): Promise<{
 export async function closeDatabaseConnection(): Promise<void> {
   try {
     await prisma.$disconnect();
-    logger.info('Database connection closed gracefully');
+    getLogger().info('Database connection closed gracefully');
   } catch (error) {
-    logger.error({ error }, 'Error closing database connection');
+    getLogger().error({ error }, 'Error closing database connection');
   }
 }
 
@@ -143,6 +143,9 @@ export function resetDatabaseMetrics(): void {
 
 export { PrismaClient } from '@prisma/client';
 export type { Prisma } from '@prisma/client';
+
+// Logger dependency injection
+export { injectLogger, type DatabaseLogger } from './logger-interface.js';
 
 export {
   TransactionManager,

@@ -1,5 +1,4 @@
-import { Kafka, Consumer, Producer, KafkaMessage, EachMessagePayload } from 'kafkajs';
-import { v4 as uuidv4 } from 'uuid';
+import { Kafka, Consumer, Producer, EachMessagePayload } from 'kafkajs';
 import { logger } from '@discord-bot/logger';
 import { MetricsCollector } from '@discord-bot/observability';
 import type { DomainEvent } from '@discord-bot/event-store';
@@ -170,7 +169,7 @@ export class KafkaEventBus {
       requestTimeout: config.connection.requestTimeout,
       retry: config.connection.retry,
       ssl: config.security?.ssl,
-      sasl: config.security?.sasl as any,
+      sasl: config.security?.sasl as Record<string, unknown>,
       logLevel: 2, // WARN level
     });
 
@@ -581,7 +580,7 @@ export class KafkaEventBus {
     return `${this.config.topics.eventTopicPrefix}.${eventType.toLowerCase().replace(/([A-Z])/g, '-$1').substring(1)}`;
   }
 
-  private parseHeaders(headers: any): Record<string, string> {
+  private parseHeaders(headers: Record<string, unknown>): Record<string, string> {
     const result: Record<string, string> = {};
 
     if (headers) {

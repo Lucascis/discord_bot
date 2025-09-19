@@ -32,7 +32,12 @@ export default defineConfig({
       '@discord-bot/database': path.resolve(__dirname, 'packages/database/src'),
       '@discord-bot/logger': path.resolve(__dirname, 'packages/logger/src'),
       '@discord-bot/config': path.resolve(__dirname, 'packages/config/src'),
-      '@discord-bot/commands': path.resolve(__dirname, 'packages/commands/src')
+      '@discord-bot/commands': path.resolve(__dirname, 'packages/commands/src'),
+      // Gateway src aliases
+      '../src/errors.js': path.resolve(__dirname, 'gateway/src/errors.ts'),
+      '../src/ui.js': path.resolve(__dirname, 'gateway/src/ui.ts'),
+      '../src/flags.js': path.resolve(__dirname, 'gateway/src/flags.ts'),
+      '../src/util.js': path.resolve(__dirname, 'gateway/src/util.ts')
     }
   }
 });

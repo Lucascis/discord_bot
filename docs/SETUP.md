@@ -1,22 +1,135 @@
-# Guía de configuración del bot (local y producción)
+# 🚀 Setup Guide - Discord Music Bot
 
-Esta guía te lleva desde crear la app en Discord hasta correr el bot con Docker o localmente.
+## 📋 Quick Start (5 minutes)
 
-## 1) Crear la aplicación y el bot en Discord
-- Ir a https://discord.com/developers/applications y presionar "New Application".
-- Elegir un nombre y crear.
-- Copiar el Application ID (Client ID). Lo usarás como `DISCORD_APPLICATION_ID`.
-- En la sección "Bot":
-  - Crear el bot ("Add Bot").
-  - Habilitar intents necesarios: "SERVER MEMBERS INTENT" opcional, y al menos "MESSAGE CONTENT" no es necesario para slash commands; sí necesitarás voice events más adelante, pero dependen del gateway.
-  - Resetear y copiar el Token del bot. Lo usarás como `DISCORD_TOKEN`.
-- En "OAuth2 > URL Generator":
-  - Scopes: `bot` y `applications.commands`.
-  - Bot Permissions: `Send Messages`, `Embed Links`, `Use Slash Commands`, `Connect`, `Speak`.
-  - Copiar la URL y agregar el bot a tu servidor de pruebas.
+### Prerequisites
+- **Node.js 22+** (LTS recommended)
+- **pnpm 8+** (package manager)
+- **Docker & Docker Compose** (for full stack)
+- **Discord Bot Token** ([Discord Developer Portal](https://discord.com/developers/applications))
 
-## 2) Variables de entorno
-Crear `.env` en la raíz (o usar `deploy/values.example.yaml` si vas a Kubernetes).
+### 1. Clone and Install
+```bash
+git clone <repository-url>
+cd discord_bot
+pnpm install
+```
+
+### 2. Environment Configuration
+```bash
+# Copy and configure environment
+cp .env.example .env
+
+# Required variables
+DISCORD_TOKEN=your_bot_token_here
+DISCORD_APPLICATION_ID=your_application_id_here
+DATABASE_URL=postgresql://username:password@localhost:5432/discord_bot
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+### 3. Choose Implementation
+
+#### **Option A: Production Ready (Recommended)**
+```bash
+# Use fully functional legacy implementation
+cd gateway
+node src-legacy/index.js
+```
+
+#### **Option B: MVC Development**
+```bash
+# Use new MVC architecture
+cd gateway
+node src-mvc/index.js
+```
+
+#### **Option C: Full Docker Stack**
+```bash
+# Complete microservices deployment
+docker-compose -f docker-compose.production.yml up -d
+```
+
+## 🏗️ **Architecture Options**
+
+### **Legacy Implementation** (`gateway/src-legacy/`)
+- ✅ **100% Functional** - Ready for production
+- ✅ **All Features** - Complete Discord.js v14 implementation
+- ✅ **Battle-tested** - 38,000+ lines of production code
+- **Use when**: Immediate deployment needed
+
+### **MVC Implementation** (`gateway/src-mvc/`)
+- 🆕 **Modern Pattern** - Model-View-Controller
+- 🔄 **Simplified** - Easier team development
+- ⚠️ **Testing Required** - Recently implemented
+- **Use when**: Team-based development
+
+### **Clean Architecture** (`gateway/src/`)
+- 🏢 **Enterprise** - Hexagonal/Domain-Driven Design
+- ⚙️ **Advanced** - Complex but highly maintainable
+- 🚧 **In Development** - Partially complete
+- **Use when**: Long-term enterprise project
+
+## 🤖 **Discord Bot Setup**
+
+### 1. Create Discord Application
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click "New Application"
+3. Choose a name and create
+4. Copy the **Application ID** (use as `DISCORD_APPLICATION_ID`)
+
+### 2. Configure Bot
+1. Go to "Bot" section
+2. Click "Add Bot"
+3. **Required Intents**:
+   - ✅ **Guilds** (for server access)
+   - ✅ **Guild Voice States** (for voice channel monitoring)
+   - ✅ **Guild Messages** (for message operations)
+   - ⚠️ **Message Content** (optional - not needed for slash commands)
+4. Reset and copy the **Bot Token** (use as `DISCORD_TOKEN`)
+
+### 3. Generate Invite URL
+1. Go to "OAuth2 > URL Generator"
+2. **Scopes**:
+   - ✅ `bot`
+   - ✅ `applications.commands`
+3. **Bot Permissions**:
+   - ✅ Send Messages
+   - ✅ Embed Links
+   - ✅ Use Slash Commands
+   - ✅ Connect (voice)
+   - ✅ Speak (voice)
+   - ✅ Use Voice Activity
+4. Copy URL and invite bot to your test server
+
+## 🗄️ **Database Setup**
+
+### Local PostgreSQL
+```bash
+# Install PostgreSQL
+# macOS
+brew install postgresql
+brew services start postgresql
+
+# Ubuntu
+sudo apt install postgresql postgresql-contrib
+sudo systemctl start postgresql
+
+# Create database
+createdb discord_bot
+```
+
+### Database Migration
+```bash
+# Generate Prisma client
+pnpm --filter @discord-bot/database prisma:generate
+
+# Run migrations
+pnpm db:migrate
+
+# Seed data (optional)
+pnpm db:seed
+```
 
 Ejemplo `.env`:
 

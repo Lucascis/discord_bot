@@ -128,7 +128,7 @@ export async function safeDiscordOperation<T>(
     } catch (error: unknown) {
       const discordCode = (error as { code?: number })?.code;
       const isDiscordAPIError = (error as { name?: string })?.name === 'DiscordAPIError';
-      const isRetryable = !isDiscordAPIError || !discordCode || !NON_RETRYABLE_DISCORD_CODES.includes(discordCode);
+      const isRetryable = !isDiscordAPIError || !NON_RETRYABLE_DISCORD_CODES.includes(discordCode ?? 0);
 
       // Record error metrics
       discordApiErrorCounter.labels(
@@ -151,12 +151,12 @@ export async function safeDiscordOperation<T>(
         error: {
           name: (error as Error).name || 'Unknown',
           message: (error as Error).message || 'Unknown error',
-          code: (error as { code?: number })?.code || 'unknown'
+          code: (error as { code?: number }).code || 0
         }
       }, 'Discord operation failed');
 
       // Handle non-retryable errors immediately
-      if (isDiscordAPIError && discordCode && NON_RETRYABLE_DISCORD_CODES.includes(discordCode)) {
+      if (isDiscordAPIError && NON_RETRYABLE_DISCORD_CODES.includes(discordCode ?? 0)) {
         logger.info({ context, discordCode }, 'Non-retryable Discord error, stopping attempts');
         if (onError) onError(error as Error);
         break;

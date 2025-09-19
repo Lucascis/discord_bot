@@ -1,7 +1,6 @@
-import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@discord-bot/logger';
 import type { DomainEvent } from '@discord-bot/event-store';
-import type { ICommandBus, ICommand } from '@discord-bot/cqrs';
+import type { ICommandBus } from '@discord-bot/cqrs';
 
 import {
   SagaInstance,

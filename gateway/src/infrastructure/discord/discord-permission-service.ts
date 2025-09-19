@@ -1,4 +1,4 @@
-import { Client, Guild, GuildMember, VoiceChannel } from 'discord.js';
+import { Client } from 'discord.js';
 import { PermissionService } from '../../application/use-cases/play-music-use-case.js';
 
 /**
@@ -46,7 +46,7 @@ export class DiscordPermissionService implements PermissionService {
       // Default: anyone can control music if no DJ role is set
       return true;
 
-    } catch (error) {
+    } catch {
       // On error, default to false for security
       return false;
     }
@@ -66,7 +66,7 @@ export class DiscordPermissionService implements PermissionService {
 
       return member.voice.channel !== null;
 
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -90,7 +90,7 @@ export class DiscordPermissionService implements PermissionService {
 
       return humanMembers.size === 1;
 
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -109,7 +109,7 @@ export class DiscordPermissionService implements PermissionService {
 
       return member.voice.channel.id;
 
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -129,7 +129,7 @@ export class DiscordPermissionService implements PermissionService {
       // Count human members only
       return channel.members.filter(m => !m.user.bot).size;
 
-    } catch (error) {
+    } catch {
       return 0;
     }
   }
@@ -197,7 +197,7 @@ export class DiscordPermissionService implements PermissionService {
 
       return member.roles.cache.map(role => role.name);
 
-    } catch (error) {
+    } catch {
       return [];
     }
   }

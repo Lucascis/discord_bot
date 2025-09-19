@@ -378,8 +378,39 @@ export class BusinessMetricsCollector {
     this.metrics.featureUsage.labels(feature, guildId).inc();
   }
 
+  // Alias methods for backward compatibility and tests
+  trackSearchQuery(
+    guildId: string,
+    query: string,
+    source: string,
+    resultCount: number,
+    latency: number,
+    cached: boolean = false,
+    userId?: string
+  ): void {
+    this.trackSearch(guildId, query, source, resultCount, latency, cached);
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
+  }
+
+  trackCommandExecution(
+    command: string,
+    guildId: string,
+    latency: number,
+    success: boolean,
+    errorType?: string,
+    userId?: string
+  ): void {
+    this.trackCommand(command, guildId, latency, success, errorType);
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
+  }
+
   // Get business insights
   getBusinessInsights(): {
+    timestamp: string;
     engagement: {
       dau: number;
       mau: number;
@@ -428,6 +459,7 @@ export class BusinessMetricsCollector {
       .filter(stats => Date.now() - stats.lastActive < 86400000).length;
 
     return {
+      timestamp: new Date().toISOString(),
       engagement: {
         dau: this.aggregations.dailyActiveUsers.get(today)?.size || 0,
         mau: this.aggregations.monthlyActiveUsers.get(month)?.size || 0,

@@ -1,0 +1,129 @@
+/**
+ * Simple TTL (Time To Live) Map implementation
+ */
+export interface TTLMapOptions {
+  maxSize?: number;
+  defaultTTL?: number;
+  cleanupInterval?: number;
+}
+
+export class TTLMap<K, V> extends Map<K, V> {
+  private readonly ttlData = new Map<K, number>();
+  private readonly maxSize: number;
+  private readonly defaultTTL: number;
+  private readonly cleanupTimer?: NodeJS.Timeout;
+
+  constructor(options: TTLMapOptions = {}) {
+    super();
+    this.maxSize = options.maxSize || 1000;
+    this.defaultTTL = options.defaultTTL || 300000; // 5 minutes
+
+    if (options.cleanupInterval) {
+      this.cleanupTimer = setInterval(() => this.cleanup(), options.cleanupInterval);
+    }
+  }
+
+  set(key: K, value: V, ttl?: number): this {
+    const expireAt = Date.now() + (ttl ?? this.defaultTTL);
+
+    // Remove oldest entries if we exceed max size
+    if (this.size >= this.maxSize && !this.has(key)) {
+      const oldestKey = this.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.delete(oldestKey);
+      }
+    }
+
+    super.set(key, value);
+    this.ttlData.set(key, expireAt);
+
+    return this;
+  }
+
+  get(key: K): V | undefined {
+    const expireAt = this.ttlData.get(key);
+
+    if (expireAt && Date.now() > expireAt) {
+      this.delete(key);
+      return undefined;
+    }
+
+    return super.get(key);
+  }
+
+  has(key: K): boolean {
+    const expireAt = this.ttlData.get(key);
+
+    if (expireAt && Date.now() > expireAt) {
+      this.delete(key);
+      return false;
+    }
+
+    return super.has(key);
+  }
+
+  delete(key: K): boolean {
+    this.ttlData.delete(key);
+    return super.delete(key);
+  }
+
+  clear(): void {
+    this.ttlData.clear();
+    super.clear();
+  }
+
+  cleanup(): void {
+    const now = Date.now();
+
+    for (const [key, expireAt] of this.ttlData) {
+      if (now > expireAt) {
+        this.delete(key);
+      }
+    }
+  }
+
+  destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
+    this.clear();
+  }
+
+  // Iterator that respects TTL
+  *[Symbol.iterator](): IterableIterator<[K, V]> {
+    for (const [key, value] of super[Symbol.iterator]()) {
+      if (this.has(key)) { // This will check TTL and clean up if needed
+        yield [key, value];
+      }
+    }
+  }
+
+  *entries(): IterableIterator<[K, V]> {
+    for (const [key, value] of super.entries()) {
+      if (this.has(key)) {
+        yield [key, value];
+      }
+    }
+  }
+
+  *keys(): IterableIterator<K> {
+    for (const key of super.keys()) {
+      if (this.has(key)) {
+        yield key;
+      }
+    }
+  }
+
+  *values(): IterableIterator<V> {
+    for (const [key, value] of super.entries()) {
+      if (this.has(key)) {
+        yield value;
+      }
+    }
+  }
+
+  get size(): number {
+    this.cleanup(); // Clean up expired entries before returning size
+    return super.size;
+  }
+}

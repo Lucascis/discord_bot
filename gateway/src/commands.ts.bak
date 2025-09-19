@@ -1,0 +1,248 @@
+import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { logger } from '@discord-bot/logger';
+
+export interface MusicRuntime {
+  publish: (channel: string, message: string) => Promise<void>;
+  subscribeOnce: (channel: string) => Promise<string | null>;
+  incPublishMetric?: (channel: string) => void;
+  hasDjOrAdmin: (interaction: ChatInputCommandInteraction) => boolean;
+  allow: (interaction: ChatInputCommandInteraction, command: string, limit?: number, windowSec?: number) => Promise<boolean>;
+  ensureLiveNow?: (guildId: string, channelId: string, force?: boolean) => Promise<void>;
+  validators: {
+    validateSearchQuery: (query: string) => { success: boolean; data?: string; error?: string };
+    validateInteger: (value: number) => { success: boolean; data?: number; error?: string };
+    validateLoopMode: (mode: string) => { success: boolean; data?: 'off' | 'track' | 'queue'; error?: string };
+  };
+}
+
+export abstract class BaseCommand {
+  abstract readonly metadata: { name: string; description: string };
+
+  constructor(protected runtime: MusicRuntime) {}
+
+  abstract buildSlashCommand(): SlashCommandBuilder;
+  abstract run(interaction: ChatInputCommandInteraction): Promise<void>;
+}
+
+export class PlayCommand extends BaseCommand {
+  readonly metadata = { name: 'play', description: 'Play a song or add it to the queue' };
+
+  buildSlashCommand(): SlashCommandBuilder {
+    return new SlashCommandBuilder()
+      .setName(this.metadata.name)
+      .setDescription(this.metadata.description)
+      .addStringOption(option =>
+        option.setName('query')
+          .setDescription('Song name, artist, or URL')
+          .setRequired(true)
+      );
+  }
+
+  async run(interaction: ChatInputCommandInteraction): Promise<void> {
+    const query = interaction.options.getString('query', true);
+    const guildId = interaction.guildId;
+
+    if (!guildId) {
+      await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    // Rate limiting
+    const allowed = await this.runtime.allow(interaction, 'play', 10, 60);
+    if (!allowed) {
+      await interaction.reply({ content: 'Rate limit exceeded. Please try again later.', ephemeral: true });
+      return;
+    }
+
+    // Validate query
+    const validation = this.runtime.validators.validateSearchQuery(query);
+    if (!validation.success) {
+      await interaction.reply({ content: `Invalid query: ${validation.error}`, ephemeral: true });
+      return;
+    }
+
+    try {
+      await interaction.deferReply();
+
+      const message = JSON.stringify({
+        type: 'play',
+        guildId,
+        query: validation.data,
+        userId: interaction.user.id,
+        channelId: interaction.channelId
+      });
+
+      await this.runtime.publish('discord-bot:commands', message);
+      this.runtime.incPublishMetric?.('discord-bot:commands');
+
+      // Ensure live now playing message
+      if (interaction.channelId) {
+        await this.runtime.ensureLiveNow?.(guildId, interaction.channelId);
+      }
+
+      await interaction.editReply('🎵 Playing your song...');
+    } catch (error) {
+      logger.error({ error, guildId, query }, 'Play command failed');
+      await interaction.editReply('❌ Failed to play song. Please try again.');
+    }
+  }
+}
+
+export class SimplePublishCommand extends BaseCommand {
+  constructor(
+    runtime: MusicRuntime,
+    private options: { name: string; description: string; requiresDj?: boolean }
+  ) {
+    super(runtime);
+  }
+
+  readonly metadata = { name: this.options.name, description: this.options.description };
+
+  buildSlashCommand(): SlashCommandBuilder {
+    return new SlashCommandBuilder()
+      .setName(this.metadata.name)
+      .setDescription(this.metadata.description);
+  }
+
+  async run(interaction: ChatInputCommandInteraction): Promise<void> {
+    const guildId = interaction.guildId;
+
+    if (!guildId) {
+      await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    if (this.options.requiresDj && !this.runtime.hasDjOrAdmin(interaction)) {
+      await interaction.reply({ content: 'You need DJ permissions to use this command.', ephemeral: true });
+      return;
+    }
+
+    // Rate limiting
+    const allowed = await this.runtime.allow(interaction, this.options.name, 20, 60);
+    if (!allowed) {
+      await interaction.reply({ content: 'Rate limit exceeded. Please try again later.', ephemeral: true });
+      return;
+    }
+
+    try {
+      await interaction.reply({ content: `✅ ${this.options.description}`, ephemeral: true });
+
+      const message = JSON.stringify({
+        type: this.options.name,
+        guildId,
+        userId: interaction.user.id
+      });
+
+      await this.runtime.publish('discord-bot:commands', message);
+      this.runtime.incPublishMetric?.('discord-bot:commands');
+    } catch (error) {
+      logger.error({ error, guildId, command: this.options.name }, 'Simple command failed');
+      await interaction.editReply('❌ Command failed. Please try again.');
+    }
+  }
+}
+
+// Additional basic commands
+export class VolumeCommand extends BaseCommand {
+  readonly metadata = { name: 'volume', description: 'Set the playback volume' };
+
+  buildSlashCommand(): SlashCommandBuilder {
+    return new SlashCommandBuilder()
+      .setName(this.metadata.name)
+      .setDescription(this.metadata.description)
+      .addIntegerOption(option =>
+        option.setName('level')
+          .setDescription('Volume level (0-200)')
+          .setRequired(true)
+          .setMinValue(0)
+          .setMaxValue(200)
+      );
+  }
+
+  async run(interaction: ChatInputCommandInteraction): Promise<void> {
+    const volume = interaction.options.getInteger('level', true);
+    const guildId = interaction.guildId;
+
+    if (!guildId) {
+      await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    if (!this.runtime.hasDjOrAdmin(interaction)) {
+      await interaction.reply({ content: 'You need DJ permissions to change volume.', ephemeral: true });
+      return;
+    }
+
+    const validation = this.runtime.validators.validateInteger(volume);
+    if (!validation.success) {
+      await interaction.reply({ content: `Invalid volume: ${validation.error}`, ephemeral: true });
+      return;
+    }
+
+    try {
+      await interaction.reply({ content: `🔊 Volume set to ${volume}%`, ephemeral: true });
+
+      const message = JSON.stringify({
+        type: 'volume',
+        guildId,
+        volume: validation.data,
+        userId: interaction.user.id
+      });
+
+      await this.runtime.publish('discord-bot:commands', message);
+      this.runtime.incPublishMetric?.('discord-bot:commands');
+    } catch (error) {
+      logger.error({ error, guildId, volume }, 'Volume command failed');
+      await interaction.editReply('❌ Failed to set volume. Please try again.');
+    }
+  }
+}
+
+// Export stubs for other commands that can be implemented later
+export class QueueCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'queue', description: 'Show the current queue' });
+  }
+}
+
+export class ShuffleCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'shuffle', description: 'Shuffle the queue', requiresDj: true });
+  }
+}
+
+export class RemoveCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'remove', description: 'Remove a track from queue', requiresDj: true });
+  }
+}
+
+export class ClearCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'clear', description: 'Clear the queue', requiresDj: true });
+  }
+}
+
+export class MoveCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'move', description: 'Move a track in queue', requiresDj: true });
+  }
+}
+
+export class LoopCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'loop', description: 'Toggle loop mode', requiresDj: true });
+  }
+}
+
+export class SeekCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'seek', description: 'Seek to position', requiresDj: true });
+  }
+}
+
+export class NowPlayingCommand extends SimplePublishCommand {
+  constructor(runtime: MusicRuntime) {
+    super(runtime, { name: 'nowplaying', description: 'Show current track' });
+  }
+}

@@ -354,9 +354,9 @@ export class AudioMetricsCollector {
             overallHealthScore: cacheStats.overall.healthScore,
           },
           redis: {
-            status: (cacheStats.redis as any)?.redisStatus || 'unknown',
-            circuitState: (cacheStats.redis as any)?.state || 'unknown',
-            fallbackCacheSize: (cacheStats.redis as any)?.fallbackCacheSize || 0,
+            status: (cacheStats.redis as Record<string, unknown>)?.redisStatus || 'unknown',
+            circuitState: (cacheStats.redis as Record<string, unknown>)?.state || 'unknown',
+            fallbackCacheSize: (cacheStats.redis as Record<string, unknown>)?.fallbackCacheSize || 0,
           },
         },
         timestamp: new Date().toISOString(),
