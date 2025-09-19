@@ -54,7 +54,7 @@ jobs:
             type=sha
 
       - name: Build and push Gateway
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./gateway/Dockerfile
@@ -80,7 +80,7 @@ jobs:
             type=sha
 
       - name: Build and push Audio
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./audio/Dockerfile
@@ -106,7 +106,7 @@ jobs:
             type=sha
 
       - name: Build and push API
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./api/Dockerfile
