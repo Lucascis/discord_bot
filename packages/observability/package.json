@@ -22,7 +22,7 @@
     "@opentelemetry/exporter-jaeger": "^1.17.0",
     "@opentelemetry/exporter-prometheus": "^0.45.1",
     "@opentelemetry/semantic-conventions": "^1.17.0",
-    "@opentelemetry/resources": "^1.18.0",
+    "@opentelemetry/resources": "^2.1.0",
     "@opentelemetry/auto-instrumentations-node": "^0.64.1",
     "prom-client": "^15.1.0"
   },
