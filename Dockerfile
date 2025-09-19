@@ -1,5 +1,5 @@
 # Multi-stage Docker build for production optimization
-FROM node:22-alpine AS base
+FROM node:24-alpine AS base
 
 # Security and build metadata
 LABEL maintainer="discord-bot-team" \
@@ -47,7 +47,7 @@ RUN pnpm -r build
 # Skip removing dev dependencies since Prisma client is needed
 
 # Production stage - final optimized image
-FROM node:22-alpine AS production
+FROM node:24-alpine AS production
 
 # Create non-root user for security (Alpine)
 RUN addgroup -g 1001 nodejs \
