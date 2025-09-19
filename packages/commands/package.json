@@ -14,7 +14,7 @@
     "@discord-bot/logger": "workspace:*",
     "@discordjs/builders": "^1.9.0",
     "discord.js": "^14.16.3",
-    "reflect-metadata": "^0.1.13"
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.16",

@@ -264,8 +264,8 @@ importers:
         specifier: ^14.16.3
         version: 14.22.1
       reflect-metadata:
-        specifier: ^0.1.13
-        version: 0.1.14
+        specifier: ^0.2.2
+        version: 0.2.2
     devDependencies:
       '@types/node':
         specifier: ^20.11.16
@@ -2101,6 +2101,7 @@ packages:
   '@opentelemetry/otlp-proto-exporter-base@0.45.1':
     resolution: {integrity: sha512-jtDkly6EW8TZHpbPpwJV9YT5PgbtL5B2UU8zcyGDiLT1wkIAYjFJZ1AqWmROIpydu8ohMq0dRwe4u0izNMdHpA==}
     engines: {node: '>=14'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     peerDependencies:
       '@opentelemetry/api': ^1.0.0
 
@@ -4500,8 +4501,8 @@ packages:
     resolution: {integrity: sha512-31vunZj07++Y1vcFGcnNWEf5jPoTkGARgfWI4+Tk55vdwHxhAvug8VEtW7Cx+/h47NuJTEg/JL77zAwC6E0OeA==}
     engines: {node: '>= 18'}
 
-  reflect-metadata@0.1.14:
-    resolution: {integrity: sha512-ZhYeb6nRaXCfhnndflDK8qI6ZQ/YcWZCISRAWICW9XYqMUwjZM9Z0DveWX/ABN01oxSHwVxKQmxeYZSsm0jh5A==}
+  reflect-metadata@0.2.2:
+    resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -9720,7 +9721,7 @@ snapshots:
       '@redis/search': 5.8.2(@redis/client@5.8.2)
       '@redis/time-series': 5.8.2(@redis/client@5.8.2)
 
-  reflect-metadata@0.1.14: {}
+  reflect-metadata@0.2.2: {}
 
   require-directory@2.1.1: {}
 
