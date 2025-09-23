@@ -1,3 +1,6 @@
+// Load environment variables FIRST, before any other imports
+import './env-loader.js';
+
 import {
   type VoicePacket,
   type VoiceServer,
@@ -6,6 +9,7 @@ import {
   type Track,
   type UnresolvedTrack,
 } from 'lavalink-client';
+// Import config AFTER dotenv has loaded environment variables
 import { env } from '@discord-bot/config';
 import { logger, HealthChecker, CommonHealthChecks, getAdvancedHealthMonitor, initializeSentry } from '@discord-bot/logger';
 import { createClient } from 'redis';
@@ -17,7 +21,7 @@ import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay.js';
+import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay/index.js';
 import { guildMutex } from './guildMutex.js';
 import { TTLMap } from '@discord-bot/cache';
 import { shouldAutomixAfterSkip, shouldSeedOnFirstPlay } from './logic.js';
@@ -28,12 +32,25 @@ import {
 import { automixCache } from './cache.js';
 import { audioCacheManager, featureFlagCache } from './services/cache.js';
 import { audioMetrics } from './services/metrics.js';
+import { predictiveCacheManager } from './services/predictive-cache.js';
+import { adaptiveCacheManager } from './services/adaptive-cache.js';
 import {
   batchQueueSaver,
   MemoryManager,
   PerformanceTracker,
   SearchThrottler
 } from './performance.js';
+import {
+  initializeWorkerIntegration,
+  closeWorkerIntegration,
+  checkWorkerIntegrationHealth,
+  trackPlaybackAnalytics,
+  trackSearchAnalytics,
+  trackAutoplayAnalytics,
+  trackQueueAnalytics,
+  trackUserInteractionAnalytics,
+  requestPerformanceAnalysis
+} from './services/worker-integration.js';
 
 const redisUrl = env.REDIS_URL;
 
@@ -82,6 +99,26 @@ await initializeSentry({
 const memoryManager = MemoryManager.getInstance();
 memoryManager.startMonitoring();
 
+// Initialize adaptive cache monitoring
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const heapUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+
+  adaptiveCacheManager.recordMetrics({
+    memoryUsage: heapUsagePercent,
+    activePlayers: manager.players.size,
+    timestamp: Date.now()
+  });
+}, 60000); // Every minute
+
+// Initialize Worker Service integration for background analytics
+try {
+  await initializeWorkerIntegration();
+  logger.info('Worker Service integration initialized successfully');
+} catch (error) {
+  logger.error({ error }, 'Failed to initialize Worker Service integration - analytics disabled');
+}
+
 import { createLavalinkManager, initManager } from './services/lavalink.js';
 
 const manager = createLavalinkManager(async (guildId, payload) => {
@@ -109,11 +146,14 @@ await new Promise<void>((resolve) => {
 
 type CommandMessage =
   | { type: 'play'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string; requestId?: string }
+  | { type: 'playnow'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string; requestId?: string }
+  | { type: 'playnext'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string; requestId?: string }
   | { type: 'skip'; guildId: string }
   | { type: 'pause'; guildId: string }
   | { type: 'resume'; guildId: string }
   | { type: 'toggle'; guildId: string }
   | { type: 'stop'; guildId: string }
+  | { type: 'disconnect'; guildId: string; reason?: string }
   | { type: 'volume'; guildId: string; percent: number }
   | { type: 'loop'; guildId: string }
   | { type: 'loopSet'; guildId: string; mode: 'off' | 'track' | 'queue' }
@@ -130,12 +170,16 @@ type CommandMessage =
 // Handle raw events from Discord via Redis
 await redisSub.subscribe('discord-bot:to-audio', async (message) => {
   try {
-    const payload = JSON.parse(message) as
-      | VoicePacket
-      | VoiceServer
-      | VoiceState
-      | ChannelDeletePacket;
-    await manager.sendRawData(payload);
+    const payload = JSON.parse(message);
+
+    // Handle VOICE_CREDENTIALS message from Gateway
+    if (payload.type === 'VOICE_CREDENTIALS') {
+      await handleVoiceCredentials(payload.guildId, payload.voiceCredentials);
+    } else {
+      // Handle other Discord events as before
+      const discordEvent = payload as VoicePacket | VoiceServer | VoiceState | ChannelDeletePacket;
+      await manager.sendRawData(discordEvent);
+    }
   } catch (e) {
     logger.error({ e }, 'failed to process raw event');
   }
@@ -155,6 +199,87 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
  * 4. Execute command with error recovery and performance tracking
  * 5. Update persistent state and cache as needed
  */
+
+/**
+ * CRITICAL FIX: Unified voice credentials handler
+ * Processes voice credentials from Discord and connects pending players
+ */
+async function handleVoiceCredentials(guildId: string, voiceCredentials: any): Promise<void> {
+  try {
+    logger.info({
+      guildId,
+      hasSessionId: !!voiceCredentials?.sessionId,
+      hasToken: !!voiceCredentials?.token,
+      hasEndpoint: !!voiceCredentials?.endpoint
+    }, 'VOICE_CONNECT: Received Discord credentials from Gateway');
+
+    // Send voice credentials to Lavalink
+    if (voiceCredentials) {
+      const voiceStateUpdate = {
+        op: 'voiceUpdate',
+        guildId,
+        sessionId: voiceCredentials.sessionId,
+        event: {
+          token: voiceCredentials.token,
+          guild_id: guildId,
+          endpoint: voiceCredentials.endpoint
+        }
+      };
+
+      await manager.sendRawData(voiceStateUpdate as any);
+      logger.info({ guildId }, 'VOICE_CONNECT: Voice credentials sent to Lavalink');
+
+      // CRITICAL FIX: Connect pending player now that we have credentials
+      const pendingEntry = pendingPlayerConnections.get(guildId);
+      if (pendingEntry) {
+        try {
+          logger.info({ guildId }, 'VOICE_CONNECT: Connecting pending player...');
+          await pendingEntry.player.connect();
+          logger.info({ guildId }, 'VOICE_CONNECT: Player connected successfully');
+
+          // Resolve the promise and clean up
+          pendingEntry.resolve();
+          pendingPlayerConnections.delete(guildId);
+        } catch (connectError) {
+          logger.error({
+            guildId,
+            error: connectError instanceof Error ? connectError.message : String(connectError)
+          }, 'VOICE_CONNECT: Failed to connect player');
+
+          // Reject the promise and clean up
+          pendingEntry.reject(connectError instanceof Error ? connectError : new Error(String(connectError)));
+          pendingPlayerConnections.delete(guildId);
+        }
+      } else {
+        logger.debug({ guildId }, 'VOICE_CONNECT: No pending player found for this guild');
+      }
+    }
+  } catch (error) {
+    logger.error({
+      guildId,
+      error: error instanceof Error ? error.message : String(error)
+    }, 'VOICE_CONNECT: Failed to handle voice credentials');
+
+    // Also reject any pending connection for this guild
+    const pendingEntry = pendingPlayerConnections.get(guildId);
+    if (pendingEntry) {
+      pendingEntry.reject(error instanceof Error ? error : new Error(String(error)));
+      pendingPlayerConnections.delete(guildId);
+    }
+  }
+}
+
+// CRITICAL: Listen for voice credentials from Gateway service (legacy channel support)
+await redisSub.subscribe('discord-bot:voice-credentials', withErrorHandling(async (...args: unknown[]) => {
+  const message = args[0] as string;
+  try {
+    const voiceCredentials = JSON.parse(message);
+    await handleVoiceCredentials(voiceCredentials.guildId, voiceCredentials);
+  } catch (error) {
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to process voice credentials message');
+  }
+}));
+
 await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (message) => {
   let data: CommandMessage | undefined;
   try {
@@ -171,11 +296,13 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
     data = validation.data as CommandMessage;
 
     // PLAY COMMAND HANDLER - Most complex command with multiple stages
-    if (data.type === 'play') {
+    // Handle all play-related commands ('play', 'playnow', 'playnext') with the same logic
+    if (data && (data.type === 'play' || data.type === 'playnow' || data.type === 'playnext')) {
+      const commandType = data.type; // Store type before async block to avoid closure issues
       await guildMutex.run(data.guildId, async () => {
       const playData = data as Extract<CommandMessage, { type: 'play' }>;
       const startTime = Date.now();
-      logger.info({ guildId: playData.guildId, query: playData.query }, 'audio: play command received');
+      logger.info({ guildId: playData.guildId, query: playData.query, commandType }, `audio: ${commandType} command received`);
 
       // Track user session and command start
       audioMetrics.trackUserSessionStart(playData.userId, playData.guildId);
@@ -194,12 +321,66 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         textChannelId: playData.textChannelId,
         selfDeaf: true,                 // Bot doesn't need to hear other users
       });
-      await player.connect();
+
+      // Store user ID for predictive tracking
+      (player as any)._lastUserId = playData.userId;
+
+      // CRITICAL FIX: Store textChannelId for UI updates
+      guildTextChannels.set(playData.guildId, playData.textChannelId);
+
+      // CRITICAL FIX: Wait for voice credentials instead of connecting immediately
+      try {
+        logger.info({ guildId: playData.guildId }, 'VOICE_CONNECT: Waiting for Discord voice credentials...');
+        await waitForVoiceCredentials(player);
+        logger.info({ guildId: playData.guildId }, 'VOICE_CONNECT: Player connection established');
+      } catch (connectionError) {
+        logger.error({
+          guildId: playData.guildId,
+          error: connectionError instanceof Error ? connectionError.message : String(connectionError)
+        }, 'VOICE_CONNECT: Failed to establish voice connection');
+
+        // Send error response if requestId is provided
+        if (playData.requestId) {
+          await redisPub.publish(
+            `discord-bot:response:${playData.requestId}`,
+            JSON.stringify({
+              ok: false,
+              reason: 'voice_connection_failed',
+              message: 'Failed to connect to voice channel'
+            })
+          );
+        }
+
+        // Track failed connection
+        const commandLatency = Date.now() - startTime;
+        audioMetrics.trackCommandExecution(
+          'play',
+          playData.guildId,
+          commandLatency,
+          false,
+          'voice_connection_failed',
+          playData.userId
+        );
+
+        return; // Exit early on connection failure
+      }
       
       // STAGE 2: Intelligent Search with Performance Optimizations (extracted)
+      const searchStartTime = Date.now();
       const { smartSearch } = await import('./playback/search.js');
       const res = await smartSearch(player, playData.query, playData.userId, playData.guildId);
-      logger.info({ tracks: res.tracks.length }, 'audio: search results');
+      const searchResponseTime = Date.now() - searchStartTime;
+
+      logger.info({ tracks: res.tracks.length, responseTime: searchResponseTime }, 'audio: search results');
+
+      // Track search analytics for predictive caching
+      void predictiveCacheManager.trackUserSearch(
+        playData.userId,
+        playData.guildId,
+        playData.query,
+        res.tracks.length,
+        searchResponseTime
+      ).catch(e => logger.debug({ e }, 'Predictive search tracking failed'));
       
       /**
        * STAGE 3: Track Processing and Intelligent Playback Logic
@@ -265,12 +446,97 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
 
         /**
          * STAGE 3B: Playback Initiation
-         * 
-         * Start immediate playback if the player is idle, otherwise add to queue.
-         * This ensures a seamless user experience without interrupting ongoing music.
+         *
+         * Handle different command types:
+         * - 'playnow': Always play immediately, replacing current track
+         * - 'play'/'playnext': Start immediate playback if idle, otherwise add to queue
          */
-        if (!player.playing && !player.paused && !player.queue.current) {
-          await player.play({ clientTrack: first });
+        logger.info({
+          guildId: playData.guildId,
+          playerPlaying: player.playing,
+          playerPaused: player.paused,
+          hasCurrent: !!player.queue.current,
+          currentTrack: player.queue.current?.info?.title,
+          commandType: data?.type
+        }, 'audio: player state before play decision');
+
+        // PLAYNOW: Always play immediately, replacing current track
+        if (data?.type === 'playnow') {
+          logger.info({ guildId: playData.guildId }, 'audio: playnow - replacing current track immediately');
+
+          // Clear the queue and set the new track as current
+          player.queue.tracks.splice(0, player.queue.tracks.length); // Clear queue
+          await player.queue.add(first);
+
+          // Force stop current track and play new one
+          if (player.playing || player.paused) {
+            await player.skip();
+          }
+
+          try {
+            await player.play();
+            logger.info({ guildId: playData.guildId }, 'audio: playnow completed successfully');
+          } catch (error) {
+            logger.error({ guildId: playData.guildId, error }, 'audio: playnow failed');
+            throw error;
+          }
+
+          // Track song playback metrics for playnow
+          const trackInfo = first as { info?: { title?: string; author?: string; duration?: number; uri?: string } };
+          if (trackInfo.info) {
+            audioMetrics.trackSongPlayback(
+              playData.guildId,
+              {
+                title: trackInfo.info.title || 'Unknown',
+                author: trackInfo.info.author,
+                duration: trackInfo.info.duration || 0,
+                source: 'youtube',
+                uri: trackInfo.info.uri,
+              },
+              false, // Not autoplay
+              playData.userId
+            );
+
+            void trackPlaybackAnalytics(
+              playData.guildId,
+              playData.userId,
+              first as Track,
+              'user_request'
+            ).catch(e => logger.debug({ e }, 'Worker analytics tracking failed'));
+          }
+
+          // Force UI update after playnow
+          void (async () => {
+            try {
+              await delay(500); // Wait for player state to stabilize
+              await pushNowPlaying(player);
+            } catch (e) {
+              logger.error({ e }, 'Failed to push playnow UI state');
+            }
+          })();
+
+        } else if (!player.playing && !player.paused) {
+          // PLAY/PLAYNEXT: Standard behavior when nothing is playing
+          logger.info({ guildId: playData.guildId }, 'audio: adding track to queue and initiating playback');
+          await player.queue.add(first);
+
+          // Log player state before play
+          logger.info({
+            guildId: playData.guildId,
+            connected: player.connected,
+            voiceChannelId: player.voiceChannelId,
+            queueLength: player.queue.tracks.length,
+            playing: player.playing,
+            paused: player.paused
+          }, 'audio: player state before play()');
+
+          try {
+            await player.play();
+            logger.info({ guildId: playData.guildId }, 'audio: player.play() completed successfully');
+          } catch (error) {
+            logger.error({ guildId: playData.guildId, error }, 'audio: player.play() failed');
+            throw error;
+          }
 
           // Track song playback metrics
           const trackInfo = first as { info?: { title?: string; author?: string; duration?: number; uri?: string } };
@@ -287,7 +553,17 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
               false, // Not autoplay
               playData.userId
             );
+
+            // Track playback analytics in Worker Service
+            void trackPlaybackAnalytics(
+              playData.guildId,
+              playData.userId,
+              first as Track,
+              'user_request'
+            ).catch(e => logger.debug({ e }, 'Worker analytics tracking failed'));
           }
+
+          // Note: Do NOT send track_queued for first track - UI is handled by pushNowPlaying()
 
           // CRITICAL FIX: Force UI creation after immediate playback
           void (async () => {
@@ -316,11 +592,11 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
               try {
                 const userId = playData.userId;
                 const seeded = await seedRelatedQueue(
-                  player as unknown as import('./autoplay.js').LLPlayer,
-                  first as unknown as import('./autoplay.js').LLTrack,
+                  player as unknown as import('./autoplay').LLPlayer,
+                  first as unknown as import('./autoplay').LLTrack,
                   async (q: string) => {
                     const r = await player.search({ query: q }, { id: userId || 'system' } as { id: string });
-                    return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
+                    return { tracks: r.tracks as unknown as import('./autoplay').LLTrack[] };
                   },
                   10, // Seed up to 10 related tracks for variety
                 );
@@ -333,8 +609,17 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
             })();
           }
         } else {
-          // Priority insertion for subsequent user adds
-          await player.queue.add(first, 0);
+          // PLAY/PLAYNEXT: Add to queue when music is already playing
+          const isPlayNext = data?.type === 'playnext';
+          const position = isPlayNext ? 0 : undefined; // playnext goes to front, play goes to end
+
+          logger.info({
+            guildId: playData.guildId,
+            commandType: data?.type,
+            position: position === 0 ? 'front' : 'end'
+          }, 'audio: adding track to queue');
+
+          await player.queue.add(first, position);
 
           // Track queue operation
           audioMetrics.trackQueueOperation(
@@ -343,6 +628,62 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
             player.queue.tracks.length,
             playData.userId
           );
+
+          // Track queue analytics in Worker Service
+          void trackQueueAnalytics(
+            playData.guildId,
+            playData.userId,
+            'add',
+            player.queue.tracks.length
+          ).catch(e => logger.debug({ e }, 'Worker queue analytics failed'));
+
+          // Send queued notification to Discord gateway
+          const trackInfo = first as { info?: { title?: string; author?: string; artworkUrl?: string; duration?: number; uri?: string } };
+          if (trackInfo.info) {
+            try {
+              await redisPub.publish(
+                'discord-bot:to-discord',
+                JSON.stringify({
+                  guildId: playData.guildId,
+                  payload: {
+                    op: 'track_queued',
+                    track: {
+                      title: trackInfo.info.title || 'Unknown Track',
+                      artist: trackInfo.info.author || 'Unknown Artist',
+                      thumbnail: trackInfo.info.artworkUrl,
+                      duration: trackInfo.info.duration,
+                      uri: trackInfo.info.uri
+                    },
+                    queuePosition: player.queue.tracks.length,
+                    requestedBy: playData.userId,
+                    textChannelId: playData.textChannelId,
+                    command: data?.type, // Command type (play/playnext)
+                    isFirstTrack: false // This is always in the 'else' branch (subsequent tracks)
+                  }
+                })
+              );
+              logger.info({ guildId: playData.guildId, trackTitle: trackInfo.info.title }, 'Sent queued notification to Discord');
+            } catch (e) {
+              logger.error({ e }, 'Failed to send queued notification');
+            }
+          }
+
+          // Send response to Gateway for request-response pattern
+          logger.info({ requestId: playData.requestId, hasRequestId: !!playData.requestId }, 'Checking requestId for response');
+          if (playData.requestId) {
+            await redisPub.publish(
+              `discord-bot:response:${playData.requestId}`,
+              JSON.stringify({
+                ok: true,
+                title: trackInfo.info?.title ?? 'Unknown Track',
+                uri: trackInfo.info?.uri,
+                artworkUrl: trackInfo.info?.artworkUrl
+              })
+            );
+            logger.info({ requestId: playData.requestId }, 'Sent response to Gateway');
+          } else {
+            logger.warn('No requestId found in playData - cannot send response to Gateway');
+          }
         }
         batchQueueSaver.scheduleUpdate(playData.guildId, player, playData.voiceChannelId, playData.textChannelId);
 
@@ -505,6 +846,21 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       }
       return;
     }
+    if (data.type === 'disconnect') {
+      const player = manager.getPlayer(data.guildId);
+      if (player) {
+        logger.info({
+          guildId: data.guildId,
+          reason: data.reason || 'unknown'
+        }, 'Disconnecting bot from voice channel');
+
+        await player.stopPlaying(true, false);
+        await player.destroy();
+        await pushIdleState(player);
+        batchQueueSaver.scheduleUpdate(data.guildId, player);
+      }
+      return;
+    }
     if (data.type === 'volume') {
       const player = manager.getPlayer(data.guildId);
       if (player) await player.setVolume(Math.max(0, Math.min(200, data.percent)));
@@ -560,11 +916,11 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         }, 'seedRelated: seeding tracks');
         
         const seeded = await seedRelatedQueue(
-          player as unknown as import('./autoplay.js').LLPlayer,
-          current as unknown as import('./autoplay.js').LLTrack,
+          player as unknown as import('./autoplay').LLPlayer,
+          current as unknown as import('./autoplay').LLTrack,
           async (q: string) => {
             const r = await player.search({ query: q }, { id: 'seed-related' } as { id: string });
-            return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
+            return { tracks: r.tracks as unknown as import('./autoplay').LLTrack[] };
           },
           seedAmount,
         );
@@ -718,7 +1074,7 @@ advancedHealth.registerComponent('redis-circuit-breaker', async () => {
     message: `Redis circuit breaker status: ${metrics.redisStatus}`,
     details: {
       circuitState: metrics.state,
-      fallbackCacheSize: metrics.fallbackCacheSize,
+      fallbackCacheSize: metrics.fallbackCache.size,
       failures: metrics.failures,
       successes: metrics.successes,
     },
@@ -843,6 +1199,23 @@ advancedHealth.registerComponent('cache-performance', async () => {
   };
 });
 
+advancedHealth.registerComponent('worker-integration', async () => {
+  try {
+    const workerHealth = await checkWorkerIntegrationHealth();
+    return {
+      status: workerHealth.healthy ? 'healthy' : 'unhealthy',
+      message: workerHealth.healthy ? 'Worker Service integration operational' : 'Worker Service integration unavailable',
+      details: workerHealth.details,
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      message: 'Worker Service integration check failed',
+      details: { error: error instanceof Error ? error.message : String(error) },
+    };
+  }
+});
+
 // Metrics + Health
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
@@ -851,8 +1224,15 @@ const lavalinkEvents = new Counter({ name: 'lavalink_events_total', help: 'Laval
 
 manager.on('trackStart', (player, track) => {
   lavalinkEvents.labels('trackStart').inc();
-  const info = (track as { info?: { title?: string; uri?: string } })?.info;
+  const info = (track as { info?: { title?: string; uri?: string; duration?: number } })?.info;
   logger.info({ guildId: player.guildId, title: info?.title, uri: info?.uri }, 'audio: track start');
+
+  // Track listening analytics for predictive caching
+  if (info?.title) {
+    // Store track start time for later duration calculation
+    (player as any)._trackStartTime = Date.now();
+  }
+
   // push immediate now-playing snapshot
   void pushNowPlaying(player);
 });
@@ -916,7 +1296,7 @@ const healthServer = http.createServer(async (req, res) => {
               message: `Redis circuit breaker status: ${metrics.redisStatus}`,
               details: {
                 circuitState: metrics.state,
-                fallbackCacheSize: metrics.fallbackCacheSize,
+                fallbackCacheSize: metrics.fallbackCache.size,
                 failures: metrics.failures,
                 successes: metrics.successes,
               },
@@ -946,6 +1326,14 @@ const healthServer = http.createServer(async (req, res) => {
               details: { heapUsagePercent, activePlayers, performanceScore },
             };
           })],
+          ['worker-integration', () => advancedHealth.checkComponent('worker-integration', async () => {
+            const workerHealth = await checkWorkerIntegrationHealth();
+            return {
+              status: workerHealth.healthy ? 'healthy' : 'unhealthy',
+              message: workerHealth.healthy ? 'Worker Service integration operational' : 'Worker Service unavailable',
+              details: workerHealth.details,
+            };
+          })],
         ]);
 
         const componentResults = await advancedHealth.checkAllComponents(healthChecks);
@@ -963,6 +1351,7 @@ const healthServer = http.createServer(async (req, res) => {
           'redis-circuit-breaker': advancedHealth.getComponentTrends('redis-circuit-breaker', 30),
           'lavalink-nodes': advancedHealth.getComponentTrends('lavalink-nodes', 30),
           'audio-performance': advancedHealth.getComponentTrends('audio-performance', 30),
+          'worker-integration': advancedHealth.getComponentTrends('worker-integration', 30),
         };
 
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -1016,6 +1405,8 @@ const healthServer = http.createServer(async (req, res) => {
     const memoryStats = memoryManager.getMemoryStats();
     const cacheStats = audioCacheManager.getCacheStats();
     const businessInsights = audioMetrics.getBusinessInsights();
+    const adaptiveAnalytics = adaptiveCacheManager.getPerformanceAnalytics();
+    const predictiveAnalytics = predictiveCacheManager.getAnalytics();
 
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
@@ -1024,6 +1415,8 @@ const healthServer = http.createServer(async (req, res) => {
       memory: memoryStats,
       cache: cacheStats,
       business: businessInsights,
+      adaptive: adaptiveAnalytics,
+      predictive: predictiveAnalytics,
       timestamp: new Date().toISOString()
     }, null, 2));
     return;
@@ -1051,6 +1444,45 @@ const healthServer = http.createServer(async (req, res) => {
     }, null, 2));
     return;
   }
+
+  // Adaptive cache endpoint
+  if (req.url.startsWith('/cache/adaptive')) {
+    if (req.method === 'POST') {
+      // Trigger cache optimization
+      const optimization = await adaptiveCacheManager.optimizeCache();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(optimization, null, 2));
+    } else {
+      // Get adaptive cache analytics
+      const analytics = adaptiveCacheManager.getPerformanceAnalytics();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(analytics, null, 2));
+    }
+    return;
+  }
+
+  // Predictive cache endpoint
+  if (req.url.startsWith('/cache/predictive')) {
+    const guildId = new URL(req.url, 'http://localhost').searchParams.get('guildId');
+    if (guildId) {
+      const suggestions = await predictiveCacheManager.getPredictiveSearches('system', guildId);
+      const recommendations = await adaptiveCacheManager.getGuildCacheRecommendations(guildId);
+
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        guildId,
+        predictiveSearches: suggestions,
+        cacheRecommendations: recommendations,
+        analytics: predictiveCacheManager.getAnalytics(),
+        timestamp: new Date().toISOString()
+      }, null, 2));
+    } else {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'guildId parameter required' }));
+    }
+    return;
+  }
+
   res.writeHead(404); res.end();
 });
 healthServer.listen(env.AUDIO_HTTP_PORT, () => logger.info(`Audio health on :${env.AUDIO_HTTP_PORT}`));
@@ -1078,9 +1510,20 @@ process.on('SIGINT', async () => {
     // Cleanup TTL maps
     autoplayCooldown.destroy();
     lastUiPush.destroy();
+    guildTextChannels.destroy();
+
+    // CRITICAL FIX: Reject any pending voice connections during shutdown
+    for (const [guildId, entry] of pendingPlayerConnections.entries()) {
+      clearTimeout(entry.timeoutId);
+      entry.reject(new Error('Service shutting down'));
+    }
+    pendingPlayerConnections.clear();
 
     // Cleanup cache system
     await audioCacheManager.flushAllCaches().catch(() => {});
+
+    // Close Worker Service integration
+    await closeWorkerIntegration().catch(() => {});
 
     // Close Redis connections
     await Promise.all([
@@ -1107,7 +1550,9 @@ process.on('SIGTERM', async () => {
 // Persistence helpers
 import { saveQueue, resumeQueues, getQueueCached as _getQueueCached } from './services/database.js';
 
-void resumeQueues(manager);
+// Queue resuming should be explicit, not automatic on service start
+// Only resume queues when explicitly requested via command or specific condition
+// void resumeQueues(manager);
 
 // Cached queue loading for better performance (exported for future use)
 export async function getQueueCached(guildId: string) { return _getQueueCached(guildId); }
@@ -1148,7 +1593,7 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   const pick = await pickAutomixTrack(
     async (q: string) => {
       const res = await player.search({ query: q }, { id: 'automix' } as { id: string });
-      return { tracks: res.tracks as unknown as import('./autoplay.js').LLTrack[] };
+      return { tracks: res.tracks as unknown as import('./autoplay').LLTrack[] };
     },
     title,
     author,
@@ -1196,17 +1641,17 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
 
   } catch { /* ignore */ }
 
-  await ensurePlayback(player as unknown as import('./autoplay.js').LLPlayer, pick as unknown as import('./autoplay.js').LLTrack);
+  await ensurePlayback(player as unknown as import('./autoplay').LLPlayer, pick as unknown as import('./autoplay').LLTrack);
   // Si la cola queda corta, volver a sembrar relacionados para mantener reproducción continua
   try {
     const qlen = player.queue.tracks.length;
     if (qlen < 3) {
       const seeded = await seedRelatedQueue(
-        player as unknown as import('./autoplay.js').LLPlayer,
-        pick as unknown as import('./autoplay.js').LLTrack,
+        player as unknown as import('./autoplay').LLPlayer,
+        pick as unknown as import('./autoplay').LLTrack,
         async (q: string) => {
           const r = await player.search({ query: q }, { id: 'automix' } as { id: string });
-          return { tracks: r.tracks as unknown as import('./autoplay.js').LLTrack[] };
+          return { tracks: r.tracks as unknown as import('./autoplay').LLTrack[] };
         },
         10,
       );
@@ -1219,8 +1664,8 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
 }
 
 const autoplayCooldown = new TTLMap<string, number>({
-  maxSize: 500,           // Max 500 guilds
-  defaultTTL: 300000,     // 5 minutes TTL (cooldown duration)
+  maxSize: 200,           // Max 200 guilds
+  defaultTTL: 180000,     // 3 minutes TTL (cooldown duration)
   cleanupInterval: 60000  // Cleanup every minute
 });
 
@@ -1229,6 +1674,30 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
     // Reason may be undefined depending on library version. Only block on explicit non-finished reasons.
     const reason = (payload as { reason?: string } | undefined)?.reason;
     logger.info({ guildId: player.guildId, reason: reason ?? 'none' }, 'audio: track end');
+
+    // Track listening behavior for predictive caching
+    const trackInfo = (track as { info?: { title?: string; duration?: number } })?.info;
+    const startTime = (player as any)._trackStartTime;
+    if (trackInfo?.title && startTime) {
+      const listenTime = Date.now() - startTime;
+      const skipped = reason === 'REPLACED' || reason === 'STOPPED';
+      const duration = trackInfo.duration || 0;
+
+      // Track user listening analytics (use most recent user from player context)
+      const lastUserId = (player as any)._lastUserId || 'unknown';
+      void predictiveCacheManager.trackUserListening(
+        lastUserId,
+        player.guildId,
+        trackInfo.title,
+        duration,
+        skipped,
+        listenTime
+      ).catch(e => logger.debug({ e }, 'Predictive listening tracking failed'));
+
+      // Clear track start time
+      delete (player as any)._trackStartTime;
+    }
+
     if (isBlockReason(reason)) { logger.info({ guildId: player.guildId, reason }, 'audio: track end blocked for autoplay'); return; }
     // Pequeña espera para que el estado del player/cola se estabilice
     await delay(900);
@@ -1259,11 +1728,70 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
 
 // --- Real-time push updates to Gateway ---
 const lastUiPush = new TTLMap<string, number>({
-  maxSize: 1000,          // Max 1000 guilds
-  defaultTTL: 1800000,    // 30 minutes TTL
+  maxSize: 300,           // Max 300 guilds
+  defaultTTL: 900000,     // 15 minutes TTL
   cleanupInterval: 300000 // Cleanup every 5 minutes
 });
 const minUiInterval = Math.max(1000, env.NOWPLAYING_UPDATE_MS ?? 5000);
+
+// CRITICAL FIX: Store textChannelId for each guild to send UI updates to correct channel
+const guildTextChannels = new TTLMap<string, string>({
+  maxSize: 300,           // Max 300 guilds
+  defaultTTL: 1800000,    // 30 minutes TTL
+  cleanupInterval: 300000 // Cleanup every 5 minutes
+});
+
+// CRITICAL FIX: Track pending players waiting for voice credentials
+const pendingPlayerConnections = new Map<string, {
+  player: import('lavalink-client').Player;
+  createdAt: number;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeoutId: NodeJS.Timeout;
+}>();
+
+/**
+ * CRITICAL FIX: Wait for voice credentials before connecting player
+ * This prevents the race condition where player.connect() is called before
+ * Discord voice credentials (sessionId, token, endpoint) are available.
+ */
+async function waitForVoiceCredentials(player: import('lavalink-client').Player): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const guildId = player.guildId;
+
+    // Check if player is already connected
+    if (player.connected) {
+      logger.info({ guildId }, 'VOICE_CONNECT: Player already connected, skipping wait');
+      resolve();
+      return;
+    }
+
+    // Set up timeout for 30 seconds
+    const timeoutId = setTimeout(() => {
+      pendingPlayerConnections.delete(guildId);
+      logger.warn({ guildId }, 'VOICE_CONNECT: Player connection timed out waiting for credentials');
+      reject(new Error('Voice connection timeout - credentials not received'));
+    }, 30000);
+
+    // Set up pending connection entry
+    const entry = {
+      player,
+      createdAt: Date.now(),
+      resolve: () => {
+        clearTimeout(timeoutId);
+        resolve();
+      },
+      reject: (error: Error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+      timeoutId,
+    };
+
+    pendingPlayerConnections.set(guildId, entry);
+    logger.info({ guildId }, 'VOICE_CONNECT: Player registered for pending voice connection');
+  });
+}
 
 manager.on('playerUpdate', (playerJson) => {
   const p = manager.getPlayer((playerJson as { guildId?: string }).guildId as string);
@@ -1280,7 +1808,10 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
     const current = player.queue.current as { info?: { title?: string; uri?: string; author?: string; duration?: number; isStream?: boolean; artworkUrl?: string } } | undefined;
     if (!current?.info) return;
     lastUiPush.set(guildId, now);
-    const payload: { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused: boolean; repeatMode?: 'off' | 'track' | 'queue'; queueLen: number; hasTrack: boolean; canSeek: boolean } = {
+    // CRITICAL FIX: Get stored textChannelId for this guild
+    const textChannelId = guildTextChannels.get(guildId);
+
+    const payload: { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused: boolean; repeatMode?: 'off' | 'track' | 'queue'; queueLen: number; hasTrack: boolean; canSeek: boolean; textChannelId?: string } = {
       guildId,
       title: current.info.title ?? 'Unknown',
       durationMs: Math.floor((current.info.duration ?? 0) as number),
@@ -1291,6 +1822,7 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
       queueLen: player.queue.tracks.length,
       hasTrack: !!player.queue.current,
       canSeek: !current.info.isStream,
+      ...(textChannelId ? { textChannelId } : {}),
     };
     
     if (current.info.uri !== undefined) {
@@ -1314,6 +1846,9 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
 // render controls enabled for autoplay while disabling playback actions.
 async function pushIdleState(player: import('lavalink-client').Player) {
   try {
+    // CRITICAL FIX: Get stored textChannelId for this guild
+    const textChannelId = guildTextChannels.get(player.guildId);
+
     const payload = {
       guildId: player.guildId,
       title: 'Nothing playing',
@@ -1328,6 +1863,7 @@ async function pushIdleState(player: import('lavalink-client').Player) {
       queueLen: player.queue.tracks.length,
       hasTrack: false,
       canSeek: false,
+      ...(textChannelId ? { textChannelId } : {}),
     };
     await redisPub.publish('discord-bot:ui:now', JSON.stringify(payload));
   } catch { /* ignore */ }
