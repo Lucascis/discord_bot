@@ -8,28 +8,28 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/main.js",
-    "dev": "node --loader ts-node/esm src/index.ts",
-    "prod": "NODE_ENV=production node dist/main.js"
+    "start": "node dist/index.js",
+    "dev": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' src/index.ts",
+    "prod": "NODE_ENV=production node dist/index.js"
   },
   "dependencies": {
+    "@discord-bot/cache": "workspace:*",
     "@discord-bot/config": "workspace:*",
     "@discord-bot/database": "workspace:*",
     "@discord-bot/logger": "workspace:*",
-    "@discord-bot/commands": "workspace:*",
-    "@discord-bot/cqrs": "workspace:*",
-    "@discord-bot/event-store": "workspace:*",
-    "@discord-bot/cache": "workspace:*",
     "@discordjs/rest": "^1.7.1",
+    "@discordjs/voice": "^0.19.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.62.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.203.0",
     "@opentelemetry/sdk-node": "^0.203.0",
     "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "lavalink-client": "^2.5.9",
     "prom-client": "^15.1.3",
-    "redis": "^5.8.2",
-    "ioredis": "^5.4.1"
+    "redis": "^5.8.2"
   },
   "optionalDependencies": {
     "@opentelemetry/resources": "^1.23.0",

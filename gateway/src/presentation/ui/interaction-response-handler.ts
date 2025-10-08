@@ -6,9 +6,12 @@ import {
   InteractionEditReplyOptions,
   InteractionUpdateOptions,
   EmbedBuilder,
-  Message
+  Message,
+  MessageFlags
 } from 'discord.js';
 import { MusicUIBuilder } from './music-ui-builder.js';
+import { DiscordErrorHandler } from '../../utils/discord-error-handler.js';
+import { logger } from '@discord-bot/logger';
 
 /**
  * Interaction Response Handler
@@ -21,25 +24,17 @@ export class InteractionResponseHandler {
     interaction: CommandInteraction | ButtonInteraction,
     options: InteractionReplyOptions
   ): Promise<InteractionResponse | Message | void> {
-    try {
-      if (interaction.replied || interaction.deferred) {
-        // Convert to editReply options (remove ephemeral and flags not supported)
-        const editOptions: InteractionEditReplyOptions = {
-          content: options.content,
-          embeds: options.embeds,
-          components: options.components,
-          files: options.files,
-          allowedMentions: options.allowedMentions
-        };
-        return await interaction.editReply(editOptions);
-      } else {
-        return await interaction.reply(options);
-      }
-    } catch (error) {
-      console.error('Failed to send success response:', error);
-      // Try to send a fallback message
-      await this.sendFallbackError(interaction);
-    }
+    const context = {
+      operationName: 'sendSuccess',
+      interactionId: interaction.id,
+      guildId: interaction.guildId || undefined
+    };
+
+    return await DiscordErrorHandler.replyToInteraction(
+      interaction,
+      options,
+      context
+    );
   }
 
   async sendError(
@@ -47,35 +42,28 @@ export class InteractionResponseHandler {
     message: string,
     title: string = 'Error'
   ): Promise<InteractionResponse | Message | void> {
-    try {
-      const embed = this.musicUIBuilder.buildErrorEmbed(
-        title,
-        message,
-        interaction.user
-      );
+    const embed = this.musicUIBuilder.buildErrorEmbed(
+      title,
+      message,
+      interaction.user
+    );
 
-      const options: InteractionReplyOptions = {
-        embeds: [embed],
-        ephemeral: true // Errors are ephemeral by default
-      };
+    const options: InteractionReplyOptions = {
+      embeds: [embed],
+      flags: MessageFlags.Ephemeral // Errors are ephemeral by default
+    };
 
-      if (interaction.replied || interaction.deferred) {
-        // Convert to editReply options (remove ephemeral and flags not supported)
-        const editOptions: InteractionEditReplyOptions = {
-          content: options.content,
-          embeds: options.embeds,
-          components: options.components,
-          files: options.files,
-          allowedMentions: options.allowedMentions
-        };
-        return await interaction.editReply(editOptions);
-      } else {
-        return await interaction.reply(options);
-      }
-    } catch (error) {
-      console.error('Failed to send error response:', error);
-      await this.sendFallbackError(interaction);
-    }
+    const context = {
+      operationName: 'sendError',
+      interactionId: interaction.id,
+      guildId: interaction.guildId || undefined
+    };
+
+    return await DiscordErrorHandler.replyToInteraction(
+      interaction,
+      options,
+      context
+    );
   }
 
   async sendThinking(
@@ -86,7 +74,7 @@ export class InteractionResponseHandler {
         await interaction.deferReply();
       }
     } catch (error) {
-      console.error('Failed to defer interaction:', error);
+      logger.error({ error, interactionId: interaction.id }, 'Failed to defer interaction');
     }
   }
 
@@ -96,7 +84,7 @@ export class InteractionResponseHandler {
   ): Promise<InteractionResponse | Message | void> {
     return this.sendSuccess(interaction, {
       ...options,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -115,7 +103,7 @@ export class InteractionResponseHandler {
       };
       return await interaction.update(updateOptions);
     } catch (error) {
-      console.error('Failed to update components:', error);
+      logger.error({ error, interactionId: interaction.id }, 'Failed to update components');
       // Fall back to edit reply
       return this.sendSuccess(interaction, options);
     }
@@ -128,7 +116,7 @@ export class InteractionResponseHandler {
     try {
       return await interaction.followUp(options);
     } catch (error) {
-      console.error('Failed to send follow-up:', error);
+      logger.error({ error, interactionId: interaction.id }, 'Failed to send follow-up');
       throw error;
     }
   }
@@ -226,18 +214,18 @@ export class InteractionResponseHandler {
     interaction: CommandInteraction | ButtonInteraction
   ): Promise<void> {
     try {
-      const fallbackMessage = {
-        content: '❌ An error occurred while processing your request.',
-        ephemeral: true
-      };
+      const fallbackMessage = '❌ An error occurred while processing your request.';
 
       if (interaction.replied || interaction.deferred) {
         await interaction.editReply(fallbackMessage);
       } else {
-        await interaction.reply(fallbackMessage);
+        await interaction.reply({
+          content: fallbackMessage,
+          ephemeral: true
+        });
       }
     } catch (fallbackError) {
-      console.error('Failed to send fallback error:', fallbackError);
+      logger.error({ error: fallbackError, interactionId: interaction.id }, 'Failed to send fallback error');
       // At this point, we can't communicate with Discord
     }
   }

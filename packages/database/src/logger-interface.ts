@@ -3,9 +3,9 @@
  * Abstraction to avoid circular dependencies with @discord-bot/logger
  */
 export interface DatabaseLogger {
-  info(obj: any, msg?: string): void;
-  warn(obj: any, msg?: string): void;
-  error(obj: any, msg?: string): void;
+  info(obj: Record<string, unknown>, msg?: string): void;
+  warn(obj: Record<string, unknown>, msg?: string): void;
+  error(obj: Record<string, unknown>, msg?: string): void;
 }
 
 /**
@@ -29,15 +29,15 @@ export class NoOpLogger implements DatabaseLogger {
  * Console fallback logger for development
  */
 export class ConsoleLogger implements DatabaseLogger {
-  info(obj: any, msg?: string): void {
+  info(obj: Record<string, unknown>, msg?: string): void {
     console.log('[DATABASE INFO]', msg || '', obj);
   }
 
-  warn(obj: any, msg?: string): void {
+  warn(obj: Record<string, unknown>, msg?: string): void {
     console.warn('[DATABASE WARN]', msg || '', obj);
   }
 
-  error(obj: any, msg?: string): void {
+  error(obj: Record<string, unknown>, msg?: string): void {
     console.error('[DATABASE ERROR]', msg || '', obj);
   }
 }

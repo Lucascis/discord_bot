@@ -40,6 +40,80 @@ export class PlayMusicCommand {
 }
 
 /**
+ * Play Next Music Command
+ * Adds track to the beginning of the queue
+ */
+export class PlayNextMusicCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly query: SearchQuery,
+    public readonly voiceChannelId: string,
+    public readonly textChannelId: string,
+    public readonly userRoles: string[] = [],
+    public readonly isUserAloneInChannel: boolean = false,
+    public readonly requestedAt: Date = new Date()
+  ) {}
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    query: string;
+    voiceChannelId: string;
+    textChannelId: string;
+    userRoles?: string[];
+    isUserAloneInChannel?: boolean;
+  }): PlayNextMusicCommand {
+    return new PlayNextMusicCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      SearchQuery.from(data.query),
+      data.voiceChannelId,
+      data.textChannelId,
+      data.userRoles ?? [],
+      data.isUserAloneInChannel ?? false
+    );
+  }
+}
+
+/**
+ * Play Now Music Command
+ * Interrupts current track and plays immediately
+ */
+export class PlayNowMusicCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly query: SearchQuery,
+    public readonly voiceChannelId: string,
+    public readonly textChannelId: string,
+    public readonly userRoles: string[] = [],
+    public readonly isUserAloneInChannel: boolean = false,
+    public readonly requestedAt: Date = new Date()
+  ) {}
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    query: string;
+    voiceChannelId: string;
+    textChannelId: string;
+    userRoles?: string[];
+    isUserAloneInChannel?: boolean;
+  }): PlayNowMusicCommand {
+    return new PlayNowMusicCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      SearchQuery.from(data.query),
+      data.voiceChannelId,
+      data.textChannelId,
+      data.userRoles ?? [],
+      data.isUserAloneInChannel ?? false
+    );
+  }
+}
+
+/**
  * Pause Music Command
  */
 export class PauseMusicCommand {

@@ -1,6 +1,7 @@
 import type { Player } from 'lavalink-client';
 import { searchCache } from '../services/cache.js';
 import { audioMetrics } from '../services/metrics.js';
+import { searchOptimizer } from '../services/search-optimizer.js';
 import { PerformanceTracker, SearchThrottler } from '../performance.js';
 
 export type SearchResultLike = { tracks: unknown[] };
@@ -29,7 +30,17 @@ export async function smartSearch(
 
   // Try to get from enhanced cache first (URLs are not cached)
   if (!isUrl) {
-    const cached = await searchCache.getCachedSearchResult(query, source, userId);
+    // Try exact match first
+    let cached = await searchCache.getCachedSearchResult(query, source, userId);
+
+    // If no exact match, try normalized version for better hit rates
+    if (!cached) {
+      const normalizedQuery = normalizeQueryForCache(query);
+      if (normalizedQuery !== query) {
+        cached = await searchCache.getCachedSearchResult(normalizedQuery, source, userId);
+      }
+    }
+
     if (cached) {
       const searchLatency = Date.now() - startTime;
 
@@ -46,18 +57,45 @@ export async function smartSearch(
         );
       }
 
+      // Track for search optimization
+      searchOptimizer.trackSearch(query, source, searchLatency, true);
+
       return { tracks: cached };
     }
   }
 
   // Perform actual search with throttling and performance tracking
-  const searchResult = await SearchThrottler.throttle(() =>
-    PerformanceTracker.measure('search', () =>
-      player.search(
-        { query },
-        { id: userId } as { id: string },
-      )
-    )
+  // CRITICAL FIX: Use manager search as fallback if player search fails
+  const searchResult = await SearchThrottler.throttle(async () =>
+    PerformanceTracker.measure('search', async () => {
+      try {
+        // Try player search first (requires full connection)
+        const result = await player.search(
+          { query },
+          { id: userId } as { id: string },
+        );
+
+        // If no results found, try with more specific YouTube search prefix
+        if (result.tracks.length === 0 && !isUrl) {
+          console.log(`No results for "${query}", trying with "music" suffix...`);
+          const enhancedQuery = `${query} music`;
+          const enhancedResult = await player.search(
+            { query: enhancedQuery },
+            { id: userId } as { id: string },
+          );
+          if (enhancedResult.tracks.length > 0) {
+            return enhancedResult;
+          }
+        }
+
+        return result;
+      } catch (error) {
+        console.log('Player search failed, using alternative search method:', error);
+        // Just throw the error and let the calling code handle no results
+        // since we can't reliably access the manager from here
+        throw error;
+      }
+    })
   );
 
   const result = searchResult as SearchResultLike;
@@ -77,12 +115,40 @@ export async function smartSearch(
     );
   }
 
-  // Cache successful results (not URLs)
+  // Track for search optimization
+  searchOptimizer.trackSearch(query, source, searchLatency, false);
+
+  // Cache successful results (not URLs) - cache both original and normalized queries
   if (resultCount > 0 && !isUrl) {
     await searchCache.cacheSearchResult(query, result.tracks, source, userId);
+
+    // Also cache normalized version for better hit rates
+    const normalizedQuery = normalizeQueryForCache(query);
+    if (normalizedQuery !== query) {
+      await searchCache.cacheSearchResult(normalizedQuery, result.tracks, source, userId);
+    }
   }
 
   return result;
+}
+
+/**
+ * Normalize query for better cache hit rates
+ */
+function normalizeQueryForCache(query: string): string {
+  return query
+    .toLowerCase()
+    .trim()
+    // Remove extra whitespace
+    .replace(/\s+/g, ' ')
+    // Remove common music suffixes that don't affect search results
+    .replace(/\s+(official\s+)?(music\s+)?(video|audio|lyric|lyrics|live|remix|cover|acoustic|version)$/i, '')
+    // Remove common prefixes that don't matter
+    .replace(/^(the\s+|a\s+|an\s+)/i, '')
+    // Standardize featuring/ft variations
+    .replace(/\s+(feat\.?|featuring|ft\.?|with)\s+/gi, ' ft ')
+    // Remove punctuation that doesn't affect search
+    .replace(/[.,!?;:'"()[\]{}]/g, '');
 }
 
 /**

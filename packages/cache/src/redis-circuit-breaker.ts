@@ -9,13 +9,26 @@ export interface RedisCircuitBreakerConfig extends CircuitBreakerConfig {
     enableReadyCheck: boolean;
     lazyConnect: boolean;
   };
+  fallbackCache?: {
+    maxSize: number;
+    cleanupIntervalMs: number;
+  };
+}
+
+interface FallbackCacheEntry {
+  value: unknown;
+  expiry: number;
+  lastAccessed: number;
 }
 
 export class RedisCircuitBreaker {
   private circuitBreaker: CircuitBreaker;
   private redis: Redis;
-  private fallbackCache = new Map<string, { value: unknown; expiry: number }>();
+  private fallbackCache = new Map<string, FallbackCacheEntry>();
   private fallbackTTL = 300000; // 5 minutes
+  private readonly fallbackCacheMaxSize: number;
+  private readonly cleanupIntervalMs: number;
+  private cleanupTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly name: string,
@@ -26,6 +39,10 @@ export class RedisCircuitBreaker {
       `redis-${name}`,
       config
     );
+
+    // Initialize fallback cache configuration
+    this.fallbackCacheMaxSize = config.fallbackCache?.maxSize ?? 100;
+    this.cleanupIntervalMs = config.fallbackCache?.cleanupIntervalMs ?? 300000; // 5 minutes
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.redis = new Redis(redisOptions as any);
@@ -45,8 +62,8 @@ export class RedisCircuitBreaker {
       logger.warn({ circuit: this.name }, 'Redis reconnecting');
     });
 
-    // Cleanup fallback cache periodically
-    setInterval(() => this.cleanupFallbackCache(), 60000);
+    // Setup periodic cleanup for fallback cache
+    this.setupPeriodicCleanup();
   }
 
   async get(key: string): Promise<string | null> {
@@ -140,8 +157,16 @@ export class RedisCircuitBreaker {
 
     if (Date.now() > cached.expiry) {
       this.fallbackCache.delete(key);
+      logger.debug({
+        circuit: this.name,
+        key,
+        reason: 'expired'
+      }, 'Removed expired entry from fallback cache');
       return null;
     }
+
+    // Update last accessed time for LRU tracking
+    cached.lastAccessed = Date.now();
 
     logger.debug({
       circuit: this.name,
@@ -153,14 +178,26 @@ export class RedisCircuitBreaker {
   }
 
   private setFallback(key: string, value: string, ttlSeconds?: number): 'OK' {
-    const expiry = Date.now() + (ttlSeconds ? ttlSeconds * 1000 : this.fallbackTTL);
-    this.fallbackCache.set(key, { value: value as unknown, expiry });
+    const now = Date.now();
+    const expiry = now + (ttlSeconds ? ttlSeconds * 1000 : this.fallbackTTL);
+
+    // Check if we need to evict entries before adding new one
+    if (this.fallbackCache.size >= this.fallbackCacheMaxSize && !this.fallbackCache.has(key)) {
+      this.evictLRUEntries(1);
+    }
+
+    this.fallbackCache.set(key, {
+      value: value as unknown,
+      expiry,
+      lastAccessed: now
+    });
 
     logger.debug({
       circuit: this.name,
       key,
       ttl: ttlSeconds,
-      cacheSize: this.fallbackCache.size
+      cacheSize: this.fallbackCache.size,
+      maxSize: this.fallbackCacheMaxSize
     }, 'Stored value in fallback cache');
 
     return 'OK';
@@ -181,9 +218,21 @@ export class RedisCircuitBreaker {
     return 1;
   }
 
-  private cleanupFallbackCache(): void {
+  private setupPeriodicCleanup(): void {
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupExpiredEntries();
+    }, this.cleanupIntervalMs);
+
+    logger.debug({
+      circuit: this.name,
+      intervalMs: this.cleanupIntervalMs
+    }, 'Setup periodic fallback cache cleanup');
+  }
+
+  private cleanupExpiredEntries(): void {
     const now = Date.now();
     let removed = 0;
+    const initialSize = this.fallbackCache.size;
 
     for (const [key, cached] of this.fallbackCache.entries()) {
       if (now > cached.expiry) {
@@ -193,25 +242,68 @@ export class RedisCircuitBreaker {
     }
 
     if (removed > 0) {
-      logger.debug({
+      logger.info({
         circuit: this.name,
         removed,
-        remaining: this.fallbackCache.size
+        initialSize,
+        remaining: this.fallbackCache.size,
+        operation: 'expired-cleanup'
       }, 'Cleaned up expired fallback cache entries');
+    }
+  }
+
+  private evictLRUEntries(count: number): void {
+    if (this.fallbackCache.size === 0) return;
+
+    // Convert to array and sort by lastAccessed (oldest first)
+    const entries = Array.from(this.fallbackCache.entries())
+      .sort(([, a], [, b]) => a.lastAccessed - b.lastAccessed);
+
+    let evicted = 0;
+    for (let i = 0; i < Math.min(count, entries.length); i++) {
+      const [key] = entries[i];
+      this.fallbackCache.delete(key);
+      evicted++;
+    }
+
+    if (evicted > 0) {
+      logger.info({
+        circuit: this.name,
+        evicted,
+        remaining: this.fallbackCache.size,
+        maxSize: this.fallbackCacheMaxSize,
+        operation: 'lru-eviction'
+      }, 'Evicted LRU entries from fallback cache');
     }
   }
 
   getMetrics() {
     return {
       ...this.circuitBreaker.getMetrics(),
-      fallbackCacheSize: this.fallbackCache.size,
+      fallbackCache: {
+        size: this.fallbackCache.size,
+        maxSize: this.fallbackCacheMaxSize,
+        utilizationPercent: (this.fallbackCache.size / this.fallbackCacheMaxSize) * 100
+      },
       redisStatus: this.redis.status
     };
   }
 
   async disconnect(): Promise<void> {
+    // Clear cleanup timer
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+
     await this.redis.disconnect();
+
+    const cacheSize = this.fallbackCache.size;
     this.fallbackCache.clear();
-    logger.info({ circuit: this.name }, 'Redis circuit breaker disconnected');
+
+    logger.info({
+      circuit: this.name,
+      clearedCacheEntries: cacheSize
+    }, 'Redis circuit breaker disconnected');
   }
 }

@@ -130,9 +130,9 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
   }
 
   const validTypes = [
-    'play', 'skip', 'pause', 'resume', 'toggle', 'stop', 'volume', 'loop',
+    'play', 'playnow', 'playnext', 'skip', 'pause', 'resume', 'toggle', 'stop', 'volume', 'loop',
     'loopSet', 'volumeAdjust', 'nowplaying', 'queue', 'seek', 'seekAdjust',
-    'shuffle', 'remove', 'clear', 'move', 'seedRelated'
+    'shuffle', 'remove', 'clear', 'move', 'seedRelated', 'disconnect', 'previous', 'mute', 'filters'
   ];
 
   if (!validTypes.includes(msg.type)) {
@@ -164,6 +164,76 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
 
     if (!msg.userId || typeof msg.userId !== 'string') {
       return { success: false, error: 'User ID is required for play command' };
+    }
+
+    const queryValidation = validateSearchQuery(msg.query);
+    if (!queryValidation.success) {
+      return { success: false, error: queryValidation.error || 'Invalid query' };
+    }
+
+    msg.query = queryValidation.data;
+
+    // Validate channel IDs
+    const voiceValidation = validateSnowflake(msg.voiceChannelId, 'Voice Channel ID');
+    if (!voiceValidation.success) return { success: false, error: voiceValidation.error || 'Invalid voice channel ID' };
+
+    const textValidation = validateSnowflake(msg.textChannelId, 'Text Channel ID');
+    if (!textValidation.success) return { success: false, error: textValidation.error || 'Invalid text channel ID' };
+
+    const userValidation = validateSnowflake(msg.userId, 'User ID');
+    if (!userValidation.success) return { success: false, error: userValidation.error || 'Invalid user ID' };
+  }
+
+  if (msg.type === 'playnow') {
+    if (!msg.query || typeof msg.query !== 'string') {
+      return { success: false, error: 'Query is required for playnow command' };
+    }
+
+    if (!msg.voiceChannelId || typeof msg.voiceChannelId !== 'string') {
+      return { success: false, error: 'Voice channel ID is required for playnow command' };
+    }
+
+    if (!msg.textChannelId || typeof msg.textChannelId !== 'string') {
+      return { success: false, error: 'Text channel ID is required for playnow command' };
+    }
+
+    if (!msg.userId || typeof msg.userId !== 'string') {
+      return { success: false, error: 'User ID is required for playnow command' };
+    }
+
+    const queryValidation = validateSearchQuery(msg.query);
+    if (!queryValidation.success) {
+      return { success: false, error: queryValidation.error || 'Invalid query' };
+    }
+
+    msg.query = queryValidation.data;
+
+    // Validate channel IDs
+    const voiceValidation = validateSnowflake(msg.voiceChannelId, 'Voice Channel ID');
+    if (!voiceValidation.success) return { success: false, error: voiceValidation.error || 'Invalid voice channel ID' };
+
+    const textValidation = validateSnowflake(msg.textChannelId, 'Text Channel ID');
+    if (!textValidation.success) return { success: false, error: textValidation.error || 'Invalid text channel ID' };
+
+    const userValidation = validateSnowflake(msg.userId, 'User ID');
+    if (!userValidation.success) return { success: false, error: userValidation.error || 'Invalid user ID' };
+  }
+
+  if (msg.type === 'playnext') {
+    if (!msg.query || typeof msg.query !== 'string') {
+      return { success: false, error: 'Query is required for playnext command' };
+    }
+
+    if (!msg.voiceChannelId || typeof msg.voiceChannelId !== 'string') {
+      return { success: false, error: 'Voice channel ID is required for playnext command' };
+    }
+
+    if (!msg.textChannelId || typeof msg.textChannelId !== 'string') {
+      return { success: false, error: 'Text channel ID is required for playnext command' };
+    }
+
+    if (!msg.userId || typeof msg.userId !== 'string') {
+      return { success: false, error: 'User ID is required for playnext command' };
     }
 
     const queryValidation = validateSearchQuery(msg.query);

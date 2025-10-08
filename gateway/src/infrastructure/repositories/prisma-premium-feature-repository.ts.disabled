@@ -1,0 +1,178 @@
+/**
+ * Prisma Premium Feature Repository
+ * Infrastructure adapter for premium feature persistence using Prisma ORM
+ */
+
+import { PrismaClient } from '@discord-bot/database';
+import { PremiumFeature, FeatureCategory, FeatureStatus } from '../../domain/entities/premium-feature';
+import { FeatureName } from '../../domain/value-objects/feature-gate';
+import { SubscriptionTier } from '@discord-bot/config';
+import { PremiumFeatureRepository } from '../../application/use-cases/premium-feature-management-use-case';
+
+export class PrismaPremiumFeatureRepository implements PremiumFeatureRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async findByName(featureName: FeatureName): Promise<PremiumFeature | null> {
+    const feature = await this.prisma.premiumFeature.findUnique({
+      where: { name: featureName },
+      include: {
+        metrics: true,
+        restrictions: true
+      }
+    });
+
+    if (!feature) return null;
+
+    return this.toDomainEntity(feature);
+  }
+
+  async findByCategory(category: FeatureCategory): Promise<PremiumFeature[]> {
+    const features = await this.prisma.premiumFeature.findMany({
+      where: { category },
+      include: {
+        metrics: true,
+        restrictions: true
+      },
+      orderBy: { displayName: 'asc' }
+    });
+
+    return features.map(feature => this.toDomainEntity(feature));
+  }
+
+  async findByTier(tier: SubscriptionTier): Promise<PremiumFeature[]> {
+    const features = await this.prisma.premiumFeature.findMany({
+      where: {
+        restrictions: {
+          some: {
+            requiredTier: tier
+          }
+        }
+      },
+      include: {
+        metrics: true,
+        restrictions: true
+      },
+      orderBy: { displayName: 'asc' }
+    });
+
+    return features.map(feature => this.toDomainEntity(feature));
+  }
+
+  async findAll(): Promise<PremiumFeature[]> {
+    const features = await this.prisma.premiumFeature.findMany({
+      include: {
+        metrics: true,
+        restrictions: true
+      },
+      orderBy: [
+        { category: 'asc' },
+        { displayName: 'asc' }
+      ]
+    });
+
+    return features.map(feature => this.toDomainEntity(feature));
+  }
+
+  async save(feature: PremiumFeature): Promise<void> {
+    const existingFeature = await this.prisma.premiumFeature.findUnique({
+      where: { id: feature.id }
+    });
+
+    const featureData = {
+      name: feature.name,
+      displayName: feature.displayName,
+      description: feature.description,
+      category: feature.category,
+      status: feature.status,
+      rolloutPercentage: feature.rolloutPercentage,
+      betaFeature: feature.betaFeature,
+      updatedAt: new Date()
+    };
+
+    if (existingFeature) {
+      await this.prisma.premiumFeature.update({
+        where: { id: feature.id },
+        data: featureData
+      });
+    } else {
+      await this.prisma.premiumFeature.create({
+        data: {
+          id: feature.id,
+          ...featureData,
+          createdAt: new Date()
+        }
+      });
+    }
+
+    // Update metrics if they exist
+    if (feature.metrics) {
+      await this.prisma.featureMetrics.upsert({
+        where: { featureId: feature.id },
+        create: {
+          featureId: feature.id,
+          totalUsage: feature.metrics.totalUsage,
+          uniqueUsers: feature.metrics.uniqueUsers,
+          averageUsagePerUser: feature.metrics.averageUsagePerUser,
+          conversionRate: feature.metrics.conversionRate,
+          lastUpdated: new Date()
+        },
+        update: {
+          totalUsage: feature.metrics.totalUsage,
+          uniqueUsers: feature.metrics.uniqueUsers,
+          averageUsagePerUser: feature.metrics.averageUsagePerUser,
+          conversionRate: feature.metrics.conversionRate,
+          lastUpdated: new Date()
+        }
+      });
+    }
+  }
+
+  async updateUsageMetrics(featureName: FeatureName, usageCount: number): Promise<void> {
+    const feature = await this.prisma.premiumFeature.findUnique({
+      where: { name: featureName },
+      include: { metrics: true }
+    });
+
+    if (!feature) return;
+
+    await this.prisma.featureMetrics.upsert({
+      where: { featureId: feature.id },
+      create: {
+        featureId: feature.id,
+        totalUsage: usageCount,
+        uniqueUsers: 1,
+        averageUsagePerUser: usageCount,
+        conversionRate: 0,
+        lastUpdated: new Date()
+      },
+      update: {
+        totalUsage: {
+          increment: usageCount
+        },
+        lastUpdated: new Date()
+      }
+    });
+  }
+
+  private toDomainEntity(prismaFeature: any): PremiumFeature {
+    return PremiumFeature.reconstitute(
+      prismaFeature.id,
+      prismaFeature.name as FeatureName,
+      prismaFeature.displayName,
+      prismaFeature.description,
+      prismaFeature.category as FeatureCategory,
+      prismaFeature.status as FeatureStatus,
+      prismaFeature.rolloutPercentage,
+      prismaFeature.betaFeature,
+      prismaFeature.metrics ? {
+        totalUsage: prismaFeature.metrics.totalUsage,
+        uniqueUsers: prismaFeature.metrics.uniqueUsers,
+        averageUsagePerUser: prismaFeature.metrics.averageUsagePerUser,
+        conversionRate: prismaFeature.metrics.conversionRate,
+        lastUpdated: prismaFeature.metrics.lastUpdated
+      } : undefined,
+      prismaFeature.createdAt,
+      prismaFeature.updatedAt
+    );
+  }
+}

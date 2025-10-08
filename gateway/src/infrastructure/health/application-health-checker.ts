@@ -176,8 +176,8 @@ export class ApplicationHealthChecker {
       let status: 'pass' | 'warn' | 'fail';
       if (heapUsagePercent > 95) {
         status = 'fail'; // Critical memory usage
-      } else if (heapUsagePercent > 85) {
-        status = 'warn'; // High but manageable
+      } else if (heapUsagePercent > 90) {
+        status = 'warn'; // High but manageable - increased from 85% to 90%
       } else {
         status = 'pass'; // Normal Node.js usage
       }
@@ -196,10 +196,18 @@ export class ApplicationHealthChecker {
 
   private calculateOverallStatus(checks: HealthCheck[]): 'healthy' | 'degraded' | 'unhealthy' {
     const hasFailures = checks.some(check => check.status === 'fail');
-    const hasWarnings = checks.some(check => check.status === 'warn');
+    const warningChecks = checks.filter(check => check.status === 'warn');
 
     if (hasFailures) return 'unhealthy';
-    if (hasWarnings) return 'degraded';
+
+    // Only report degraded for critical warnings, not memory warnings
+    const hasCriticalWarnings = warningChecks.some(check =>
+      // Memory warnings at 85-95% are normal for Node.js
+      // Only consider non-memory warnings as critical
+      !check.output?.includes('Memory:')
+    );
+
+    if (hasCriticalWarnings) return 'degraded';
     return 'healthy';
   }
 

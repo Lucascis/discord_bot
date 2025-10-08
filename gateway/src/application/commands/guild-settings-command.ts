@@ -147,3 +147,115 @@ export class SetExplicitContentCommand {
     );
   }
 }
+
+/**
+ * Set Ephemeral Messages Setting Command
+ */
+export class SetEphemeralMessagesCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly ephemeralEnabled: boolean,
+    public readonly userRoles: string[] = [],
+    public readonly requestedAt: Date = new Date()
+  ) {}
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    ephemeralEnabled: boolean;
+    userRoles?: string[];
+  }): SetEphemeralMessagesCommand {
+    return new SetEphemeralMessagesCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      data.ephemeralEnabled,
+      data.userRoles ?? []
+    );
+  }
+}
+
+/**
+ * Set DJ Only Mode Command
+ */
+export class SetDjOnlyModeCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly djOnlyEnabled: boolean,
+    public readonly userRoles: string[] = [],
+    public readonly requestedAt: Date = new Date()
+  ) {}
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    djOnlyEnabled: boolean;
+    userRoles?: string[];
+  }): SetDjOnlyModeCommand {
+    return new SetDjOnlyModeCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      data.djOnlyEnabled,
+      data.userRoles ?? []
+    );
+  }
+}
+
+/**
+ * Set Vote Skip Enabled Command
+ */
+export class SetVoteSkipEnabledCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly voteSkipEnabled: boolean,
+    public readonly userRoles: string[] = [],
+    public readonly requestedAt: Date = new Date()
+  ) {}
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    voteSkipEnabled: boolean;
+    userRoles?: string[];
+  }): SetVoteSkipEnabledCommand {
+    return new SetVoteSkipEnabledCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      data.voteSkipEnabled,
+      data.userRoles ?? []
+    );
+  }
+}
+
+/**
+ * Set Vote Skip Threshold Command
+ */
+export class SetVoteSkipThresholdCommand {
+  constructor(
+    public readonly guildId: GuildId,
+    public readonly userId: UserId,
+    public readonly threshold: number,
+    public readonly userRoles: string[] = [],
+    public readonly requestedAt: Date = new Date()
+  ) {
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1) {
+      throw new Error('Vote skip threshold must be between 0.01 and 1.0 (1% to 100%)');
+    }
+  }
+
+  static create(data: {
+    guildId: string;
+    userId: string;
+    threshold: number;
+    userRoles?: string[];
+  }): SetVoteSkipThresholdCommand {
+    return new SetVoteSkipThresholdCommand(
+      GuildId.from(data.guildId),
+      UserId.from(data.userId),
+      data.threshold,
+      data.userRoles ?? []
+    );
+  }
+}

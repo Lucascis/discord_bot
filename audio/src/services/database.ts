@@ -2,10 +2,7 @@ import { prisma, getTransactionManager } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import type { LavalinkManager, Track, UnresolvedTrack, Player } from 'lavalink-client';
 import { queueCache } from '../cache.js';
-import {
-  trackQueueOperation,
-  trackQueueOptimization
-} from '@discord-bot/database';
+// Queue operation tracking is disabled (functions not available)
 
 export async function saveQueue(
   guildId: string,
@@ -86,7 +83,7 @@ export async function saveQueue(
           }
         });
         logger.debug({ guildId, removedCount: itemsToRemove.length }, 'Removed outdated queue items');
-        trackQueueOperation('incremental_remove');
+        // trackQueueOperation('incremental_remove'); // Disabled
       }
 
       if (itemsToAdd.length > 0) {
@@ -94,14 +91,14 @@ export async function saveQueue(
           data: itemsToAdd.map((it) => ({ ...it, queueId: queue!.id }))
         });
         logger.debug({ guildId, addedCount: itemsToAdd.length }, 'Added new queue items');
-        trackQueueOperation('incremental_add');
-        trackQueueOptimization('incremental_update', itemsToAdd.length);
+        // trackQueueOperation('incremental_add'); // Disabled
+        // trackQueueOptimization('incremental_update', itemsToAdd.length); // Disabled
       }
 
       // If no changes needed, skip rebuild entirely
       if (itemsToRemove.length === 0 && itemsToAdd.length === 0) {
         logger.debug({ guildId, itemCount: items.length }, 'Queue unchanged, skipping database update');
-        trackQueueOptimization('skipped_rebuild', 1);
+        // trackQueueOptimization('skipped_rebuild', 1); // Disabled
         return;
       }
 
@@ -163,7 +160,7 @@ export async function addSingleTrackToQueue(
     logger.debug({ guildId, trackTitle: track.title }, 'Added single track to queue');
   });
 
-  trackQueueOperation('incremental_add');
+  // trackQueueOperation('incremental_add'); // Disabled
   invalidateQueueCache(guildId);
 }
 
@@ -199,7 +196,7 @@ export async function removeSingleTrackFromQueue(
   });
 
   if (result) {
-    trackQueueOperation('incremental_remove');
+    // trackQueueOperation('incremental_remove'); // Disabled
     invalidateQueueCache(guildId);
   }
 
@@ -223,7 +220,7 @@ export async function clearQueue(guildId: string): Promise<void> {
     }
   });
 
-  trackQueueOperation('clear');
+  // trackQueueOperation('clear'); // Disabled
   invalidateQueueCache(guildId);
 }
 

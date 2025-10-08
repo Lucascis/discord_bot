@@ -8,10 +8,14 @@ export {
   MultiLayerCache,
   SearchCache,
   UserCache,
-  QueueCache
+  QueueCache,
+  SettingsCache
 } from './multi-layer-cache.js';
 export type {
   CacheLayerStats,
   MultiLayerCacheConfig,
   CacheEntry
 } from './multi-layer-cache.js';
+export { RedisStreamsManager, redisStreams } from './redis-streams.js';
+export type { StreamMessage, StreamCommandData, StreamResponseData } from './redis-streams.js';
+export { RedisStreamsMonitoring, audioStreamsMonitoring, gatewayStreamsMonitoring } from './redis-streams-monitoring.js';

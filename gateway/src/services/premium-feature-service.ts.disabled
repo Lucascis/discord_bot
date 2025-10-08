@@ -1,0 +1,504 @@
+/**
+ * Premium Feature Service
+ * Concrete implementation of premium features using the enhanced architecture
+ */
+
+import { FeatureName, SubscriptionTier, hasFeatureAccess, getQuotaForTier } from '@discord-bot/config';
+import { PremiumFeatureManagementUseCase, AccessCheckResult } from '../application/use-cases/premium-feature-management-use-case';
+import { AudioQualityManagementUseCase } from '../application/use-cases/audio-quality-management-use-case';
+import { BillingManagementUseCase } from '../application/use-cases/billing-management-use-case';
+
+export interface FeatureValidationResult {
+  allowed: boolean;
+  reason?: string;
+  upgradeRequired?: {
+    currentTier: SubscriptionTier;
+    requiredTier: SubscriptionTier;
+    upgradeUrl: string;
+  };
+  quota?: {
+    current: number;
+    limit: number;
+    remaining: number;
+  };
+}
+
+export interface FeatureUsageContext {
+  userId: string;
+  guildId: string;
+  deviceInfo?: {
+    userAgent?: string;
+    connectionType?: string;
+    bandwidth?: number;
+  };
+  requestMetadata?: Record<string, any>;
+}
+
+export class PremiumFeatureService {
+  constructor(
+    private readonly premiumFeatureUseCase: PremiumFeatureManagementUseCase,
+    private readonly audioQualityUseCase: AudioQualityManagementUseCase,
+    private readonly billingUseCase: BillingManagementUseCase
+  ) {}
+
+  /**
+   * Validate access to a premium feature with detailed response
+   */
+  async validateFeatureAccess(
+    featureName: FeatureName,
+    context: FeatureUsageContext,
+    checkQuota: boolean = true
+  ): Promise<FeatureValidationResult> {
+    try {
+      const accessResult = await this.premiumFeatureUseCase.checkFeatureAccess(
+        context.userId,
+        context.guildId,
+        featureName,
+        context.requestMetadata
+      );
+
+      if (accessResult.accessGranted) {
+        return {
+          allowed: true,
+          quota: accessResult.quota
+        };
+      }
+
+      // Check if upgrade is needed
+      if (accessResult.reason?.includes('tier')) {
+        const upgradeValidation = await this.audioQualityUseCase.validateQualityUpgrade(
+          context.userId,
+          context.guildId,
+          'lossless' // Default target for feature upgrades
+        );
+
+        return {
+          allowed: false,
+          reason: accessResult.reason,
+          upgradeRequired: {
+            currentTier: upgradeValidation.currentTier,
+            requiredTier: upgradeValidation.requiredTier || 'premium',
+            upgradeUrl: upgradeValidation.upgradeUrl || '/upgrade'
+          }
+        };
+      }
+
+      return {
+        allowed: false,
+        reason: accessResult.reason,
+        quota: accessResult.quota
+      };
+
+    } catch (error) {
+      console.error('Feature validation error:', error);
+      return {
+        allowed: false,
+        reason: 'Service temporarily unavailable'
+      };
+    }
+  }
+
+  /**
+   * Use a premium feature and record analytics
+   */
+  async useFeature(
+    featureName: FeatureName,
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Validate access first
+      const validation = await this.validateFeatureAccess(featureName, context);
+      if (!validation.allowed) {
+        return {
+          success: false,
+          error: validation.reason || 'Access denied'
+        };
+      }
+
+      // Record feature usage
+      await this.premiumFeatureUseCase.recordFeatureUsage(
+        context.userId,
+        context.guildId,
+        featureName,
+        usageData
+      );
+
+      // Execute feature-specific logic
+      const executionResult = await this.executeFeature(featureName, context, usageData);
+
+      return { success: executionResult.success, error: executionResult.error };
+
+    } catch (error) {
+      console.error('Feature usage error:', error);
+      return {
+        success: false,
+        error: 'Feature execution failed'
+      };
+    }
+  }
+
+  /**
+   * Get feature recommendations for user
+   */
+  async getFeatureRecommendations(
+    userId: string,
+    guildId: string
+  ): Promise<{
+    currentFeatures: FeatureName[];
+    availableUpgrades: FeatureName[];
+    recommendations: {
+      feature: FeatureName;
+      reason: string;
+      benefitScore: number;
+    }[];
+  }> {
+    try {
+      const recommendations = await this.premiumFeatureUseCase.getFeatureRecommendations(
+        userId,
+        guildId
+      );
+
+      return {
+        currentFeatures: recommendations.currentFeatures,
+        availableUpgrades: recommendations.availableUpgrades,
+        recommendations: recommendations.recommendations
+      };
+
+    } catch (error) {
+      console.error('Failed to get recommendations:', error);
+      return {
+        currentFeatures: [],
+        availableUpgrades: [],
+        recommendations: []
+      };
+    }
+  }
+
+  /**
+   * Handle feature rollout and A/B testing
+   */
+  async checkFeatureRollout(
+    userId: string,
+    featureName: FeatureName,
+    userRegion?: string
+  ): Promise<{
+    enabled: boolean;
+    rolloutGroup?: 'control' | 'treatment';
+    metadata?: Record<string, any>;
+  }> {
+    try {
+      const rolloutResult = await this.premiumFeatureUseCase.checkFeatureRollout(
+        userId,
+        featureName,
+        userRegion
+      );
+
+      return {
+        enabled: rolloutResult.enabled,
+        rolloutGroup: rolloutResult.rolloutGroup,
+        metadata: rolloutResult.metadata
+      };
+
+    } catch (error) {
+      console.error('Feature rollout check failed:', error);
+      return { enabled: false };
+    }
+  }
+
+  /**
+   * Execute feature-specific logic
+   */
+  private async executeFeature(
+    featureName: FeatureName,
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    switch (featureName) {
+      case 'high_quality_audio':
+      case 'lossless_audio':
+      case 'spatial_audio':
+        return this.executeAudioQualityFeature(featureName, context, usageData);
+
+      case 'adaptive_streaming':
+        return this.executeAdaptiveStreamingFeature(context, usageData);
+
+      case 'spotify_integration':
+      case 'apple_music_integration':
+      case 'deezer_integration':
+        return this.executeMusicSourceFeature(featureName, context, usageData);
+
+      case 'smart_recommendations':
+        return this.executeSmartRecommendationsFeature(context, usageData);
+
+      case 'lyrics_display':
+        return this.executeLyricsFeature(context, usageData);
+
+      case 'advanced_search':
+        return this.executeAdvancedSearchFeature(context, usageData);
+
+      case 'playlist_management':
+        return this.executePlaylistFeature(context, usageData);
+
+      case 'analytics_dashboard':
+        return this.executeAnalyticsFeature(context, usageData);
+
+      case 'webhook_integrations':
+        return this.executeWebhookFeature(context, usageData);
+
+      default:
+        return { success: true }; // Generic features
+    }
+  }
+
+  private async executeAudioQualityFeature(
+    featureName: FeatureName,
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const sessionId = usageData?.sessionId;
+      if (!sessionId) {
+        return { success: false, error: 'Session ID required for audio quality features' };
+      }
+
+      const qualityLevel = this.mapFeatureToQuality(featureName);
+      const deviceCapabilities = this.parseDeviceCapabilities(context.deviceInfo);
+
+      const result = await this.audioQualityUseCase.setAudioQuality(
+        sessionId,
+        context.userId,
+        context.guildId,
+        qualityLevel,
+        deviceCapabilities
+      );
+
+      return { success: result.success, error: result.error };
+
+    } catch (error) {
+      return { success: false, error: 'Audio quality feature failed' };
+    }
+  }
+
+  private async executeAdaptiveStreamingFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const sessionId = usageData?.sessionId;
+      if (!sessionId) {
+        return { success: false, error: 'Session ID required for adaptive streaming' };
+      }
+
+      const deviceCapabilities = this.parseDeviceCapabilities(context.deviceInfo);
+
+      const result = await this.audioQualityUseCase.enableAdaptiveStreaming(
+        sessionId,
+        context.userId,
+        context.guildId,
+        deviceCapabilities,
+        usageData?.adaptiveConfig
+      );
+
+      return { success: result.success, error: result.error };
+
+    } catch (error) {
+      return { success: false, error: 'Adaptive streaming feature failed' };
+    }
+  }
+
+  private async executeMusicSourceFeature(
+    featureName: FeatureName,
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Implementation would integrate with specific music source APIs
+      const sourceType = this.mapFeatureToSource(featureName);
+
+      console.log(`Executing ${sourceType} integration for guild ${context.guildId}`);
+
+      // Here would be actual integration logic:
+      // - Spotify: Use Web API for search/playlists
+      // - Apple Music: Use MusicKit integration
+      // - Deezer: Use API integration
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: `${featureName} integration failed` };
+    }
+  }
+
+  private async executeSmartRecommendationsFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Implementation would use ML/AI for smart recommendations
+      const userHistory = usageData?.userHistory || [];
+      const currentTrack = usageData?.currentTrack;
+
+      console.log(`Generating smart recommendations for user ${context.userId}`);
+
+      // Here would be recommendation engine logic:
+      // - Analyze listening history
+      // - Use collaborative filtering
+      // - Apply ML models for personalization
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Smart recommendations failed' };
+    }
+  }
+
+  private async executeLyricsFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const trackInfo = usageData?.trackInfo;
+      if (!trackInfo) {
+        return { success: false, error: 'Track information required for lyrics' };
+      }
+
+      console.log(`Fetching lyrics for track: ${trackInfo.title} by ${trackInfo.artist}`);
+
+      // Here would be lyrics fetching logic:
+      // - Integrate with lyrics APIs (Genius, Musixmatch, etc.)
+      // - Handle synchronized lyrics
+      // - Cache lyrics for performance
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Lyrics feature failed' };
+    }
+  }
+
+  private async executeAdvancedSearchFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const searchQuery = usageData?.query;
+      const filters = usageData?.filters || {};
+
+      console.log(`Executing advanced search: "${searchQuery}" with filters`, filters);
+
+      // Here would be advanced search logic:
+      // - Multi-source search aggregation
+      // - Advanced filtering (genre, year, duration, etc.)
+      // - Fuzzy matching and typo correction
+      // - Search result ranking
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Advanced search failed' };
+    }
+  }
+
+  private async executePlaylistFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const action = usageData?.action; // create, edit, delete, share
+      const playlistData = usageData?.playlist;
+
+      console.log(`Executing playlist action: ${action} for guild ${context.guildId}`);
+
+      // Here would be playlist management logic:
+      // - Create/edit/delete playlists
+      // - Cross-platform playlist syncing
+      // - Collaborative playlists
+      // - Playlist sharing and discovery
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Playlist management failed' };
+    }
+  }
+
+  private async executeAnalyticsFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const timeframe = usageData?.timeframe || 'month';
+
+      console.log(`Generating analytics dashboard for guild ${context.guildId}`);
+
+      // Here would be analytics dashboard logic:
+      // - Usage statistics and trends
+      // - Popular tracks and artists
+      // - User engagement metrics
+      // - Performance analytics
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Analytics dashboard failed' };
+    }
+  }
+
+  private async executeWebhookFeature(
+    context: FeatureUsageContext,
+    usageData?: Record<string, any>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const webhookConfig = usageData?.webhookConfig;
+      const eventType = usageData?.eventType;
+
+      console.log(`Executing webhook for event: ${eventType}`);
+
+      // Here would be webhook integration logic:
+      // - Configure webhook endpoints
+      // - Send real-time events
+      // - Handle webhook retries and failures
+      // - Webhook security and validation
+
+      return { success: true };
+
+    } catch (error) {
+      return { success: false, error: 'Webhook integration failed' };
+    }
+  }
+
+  // Helper methods
+
+  private mapFeatureToQuality(featureName: FeatureName): 'standard' | 'high' | 'lossless' | 'spatial' {
+    switch (featureName) {
+      case 'high_quality_audio': return 'high';
+      case 'lossless_audio': return 'lossless';
+      case 'spatial_audio': return 'spatial';
+      default: return 'standard';
+    }
+  }
+
+  private mapFeatureToSource(featureName: FeatureName): string {
+    switch (featureName) {
+      case 'spotify_integration': return 'spotify';
+      case 'apple_music_integration': return 'apple_music';
+      case 'deezer_integration': return 'deezer';
+      case 'soundcloud_integration': return 'soundcloud';
+      case 'bandcamp_integration': return 'bandcamp';
+      default: return 'unknown';
+    }
+  }
+
+  private parseDeviceCapabilities(deviceInfo?: FeatureUsageContext['deviceInfo']): any {
+    return {
+      maxBandwidth: deviceInfo?.bandwidth || 1000,
+      cpuScore: 75, // Default medium-range device
+      memoryMB: 2048,
+      audioCodecSupport: ['opus', 'mp3', 'aac'],
+      connectionType: deviceInfo?.connectionType || 'wifi',
+      batteryLevel: 80,
+      isLowPowerMode: false
+    };
+  }
+}

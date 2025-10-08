@@ -1,5 +1,5 @@
 server:
-  port: 2333
+  port: 2334
   # Performance optimization
   compression:
     enabled: true
@@ -7,7 +7,7 @@ server:
 
 lavalink:
   server:
-    password: "youshallnotpass"
+    password: "c0mm3rc1al_lav4l1nk_s3cur3_2025"
     # Disable built-in YouTube source to use plugin
     sources:
       youtube: false
@@ -42,19 +42,21 @@ lavalink:
     # Memory and CPU optimizations
     playerEventListenerBufferTimeout: 5000
     httpTimeout: 10000
-    # Connection pool settings
-    httpPoolSize: 16
-    httpMaxPendingRequests: 64
+    # Connection pool settings - optimized for search performance
+    httpPoolSize: 32  # Doubled for better concurrent search handling
+    httpMaxPendingRequests: 128  # Doubled to handle more concurrent searches
 
   # Plugin loading configuration
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
-      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:ff634d161ee4de95102cfcd725554a60bec6e5cf"
+      repository: "https://maven.lavalink.dev/snapshots"
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
       repository: "https://maven.lavalink.dev/releases"
     - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
       repository: "https://maven.lavalink.dev/releases"
     - dependency: "com.github.topi314.sponsorblock:sponsorblock-plugin:3.0.1"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:1.1.0"
       repository: "https://maven.lavalink.dev/releases"
 
 # Plugin-specific configuration
@@ -70,7 +72,7 @@ plugins:
       - ANDROID_VR
       - WEB
       - WEBEMBEDDED
-      - TV_EMBEDDED
+      # - TV_EMBEDDED  # Disabled: Failed to resolve TV_EMBEDDED into a Client
     clientOptions:
       # YouTube Music client - best for music content and restricted videos
       MUSIC:
@@ -96,17 +98,17 @@ plugins:
         videoLoading: true
         playlistLoading: true
         searching: true
-      # TV embedded - additional bypass option
-      TV_EMBEDDED:
-        playback: true
-        videoLoading: true
-        playlistLoading: false
-        searching: false
-    # Additional performance settings
-    playlistLoadLimit: 100
-    videoLoadLimit: 100
-    maxRetryAttempts: 3
-    retryDelayMs: 1000
+      # TV embedded - additional bypass option (disabled due to resolution issues)
+      # TV_EMBEDDED:
+      #   playback: true
+      #   videoLoading: true
+      #   playlistLoading: false
+      #   searching: false
+    # Additional performance settings - optimized for search speed
+    playlistLoadLimit: 50  # Reduced to prioritize search speed over large playlist loading
+    videoLoadLimit: 25     # Reduced for faster individual video loading
+    maxRetryAttempts: 2    # Reduced from 3 to 2 for faster fallback
+    retryDelayMs: 500      # Reduced from 1000ms to 500ms for faster retries
     # Enhanced token management for better reliability
     oauth:
       enabled: false
@@ -161,8 +163,18 @@ plugins:
       - preview
       - music_offtopic
       - filler
-  
-    
+
+  lavalyrics:
+    sources:
+      spotify: true
+      deezer: true
+      youtube: true
+      genius: true
+      musixmatch: true
+      lrclib: true
+      tekstowo: true
+      azlyrics: true
+
 logging:
   level:
     root: INFO

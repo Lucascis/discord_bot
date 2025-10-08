@@ -31,7 +31,7 @@ export class MemoryCache<T> {
   private maxSize: number;
   private defaultTtl: number;
   
-  constructor(maxSize = 1000, defaultTtl = 300000) { // 5 minutes default TTL
+  constructor(maxSize = 500, defaultTtl = 180000) { // 3 minutes default TTL
     this.maxSize = maxSize;
     this.defaultTtl = defaultTtl;
     

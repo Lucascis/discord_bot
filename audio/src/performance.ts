@@ -353,7 +353,7 @@ export class PerformanceTracker {
 // Concurrency control for search operations
 export class SearchThrottler {
   private static concurrentSearches = 0;
-  private static readonly maxConcurrentSearches = 5;
+  private static readonly maxConcurrentSearches = 15; // Increased from 5 to 15 for better throughput
   private static readonly waitingQueue: Array<() => void> = [];
   
   static async throttle<T>(fn: () => Promise<T>): Promise<T> {

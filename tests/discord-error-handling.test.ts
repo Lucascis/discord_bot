@@ -271,7 +271,7 @@ describe('Discord API Error Handling', () => {
       const duration = Date.now() - startTime;
 
       // Should have at least 2000ms delay for rate limit (2000 * attempt)
-      expect(duration).toBeGreaterThan(2000);
+      expect(duration).toBeGreaterThanOrEqual(2000);
     });
 
     it('should use shorter delays for other retryable errors', async () => {

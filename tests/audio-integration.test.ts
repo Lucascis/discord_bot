@@ -14,7 +14,7 @@ const mockAudioCacheManager = {
     queue: { overall: { hitRate: 92 } },
     user: { overall: { hitRate: 78 } },
     featureFlags: { overall: { hitRate: 95 } },
-    redis: { redisStatus: 'ready', state: 'closed', fallbackCacheSize: 0 },
+    redis: { redisStatus: 'ready', state: 'closed', fallbackCache: { size: 0, maxSize: 100, utilizationPercent: 0 } },
     overall: { totalCaches: 4, healthScore: 87 }
   }),
   getCacheSizes: () => ({

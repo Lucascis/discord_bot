@@ -22,12 +22,13 @@ export function createLavalinkManager(sendToShard: SendToShardFn): LavalinkManag
         host: env.LAVALINK_HOST,
         port: env.LAVALINK_PORT,
         authorization: env.LAVALINK_PASSWORD,
+        secure: false,
       },
     ],
     sendToShard,
     client: {
       id: env.DISCORD_APPLICATION_ID,
-      username: 'discord-bot',
+      username: 'NebuDJ',
     },
   });
 
@@ -82,6 +83,6 @@ export async function waitForLavalinkRestReady(maxWaitMs = 60000): Promise<boole
 
 export async function initManager(manager: LavalinkManager): Promise<void> {
   await waitForLavalinkRestReady();
-  await manager.init({ id: env.DISCORD_APPLICATION_ID, username: 'discord-bot' } as BotClientOptions);
+  await manager.init({ id: env.DISCORD_APPLICATION_ID, username: 'NebuDJ' } as BotClientOptions);
 }
 

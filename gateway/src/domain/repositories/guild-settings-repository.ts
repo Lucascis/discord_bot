@@ -1,4 +1,4 @@
-import { GuildSettings } from '../entities/guild-settings.js';
+import { GuildSettings } from '../entities/guild-settings';
 import { GuildId } from '../value-objects/guild-id.js';
 
 /**

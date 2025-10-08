@@ -1,5 +1,5 @@
 import { MusicSession } from '../entities/music-session.js';
-import { GuildSettings } from '../entities/guild-settings.js';
+import { GuildSettings } from '../entities/guild-settings';
 import { UserId } from '../value-objects/user-id.js';
 
 /**

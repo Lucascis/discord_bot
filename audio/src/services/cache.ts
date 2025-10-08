@@ -87,9 +87,9 @@ export class AudioSearchCache extends BaseSearchCache {
       resultCount: results.length,
     };
 
-    // Use shorter TTL for empty results
-    const ttl = results.length > 0 ? 300000 : 60000; // 5min vs 1min
-    await this.set(key, cacheData, ttl);
+    // Optimized TTL for better cache utilization
+    const ttl = results.length > 0 ? 600000 : 180000; // 10min vs 3min (increased from 5min vs 1min)
+    await super.set(key, cacheData, ttl);
   }
 
   // Get cached search results with validation
@@ -99,7 +99,7 @@ export class AudioSearchCache extends BaseSearchCache {
     userId?: string
   ): Promise<unknown[] | null> {
     const key = this.generateSearchKey(query, source, userId);
-    const cached = await this.get(key);
+    const cached = await super.get(key);
 
     if (!cached) return null;
 
@@ -108,7 +108,7 @@ export class AudioSearchCache extends BaseSearchCache {
     if (cachedData.timestamp) {
       const age = Date.now() - cachedData.timestamp;
       if (age > 600000) { // 10 minutes max age
-        await this.delete(key);
+        await super.delete(key);
         return null;
       }
     }
@@ -147,19 +147,19 @@ export class AudioQueueCache extends BaseQueueCache {
       trackCount: queueData.tracks.length,
     };
 
-    await this.set(key, stateData, 300000); // 5 minutes
+    await super.set(key, stateData, 300000); // 5 minutes
   }
 
   // Get cached queue state
   async getCachedQueueState(guildId: string): Promise<unknown | null> {
     const key = this.generateKey(guildId);
-    return await this.get(key);
+    return await super.get(key);
   }
 
   // Invalidate queue cache when state changes
   async invalidateQueueCache(guildId: string): Promise<void> {
     const key = this.generateKey(guildId);
-    await this.delete(key);
+    await super.delete(key);
   }
 }
 
@@ -193,7 +193,7 @@ export class AudioUserCache extends UserCache {
       lastUpdated: Date.now(),
     };
 
-    await this.set(key, prefData, 3600000); // 1 hour
+    await super.set(key, prefData, 3600000); // 1 hour
   }
 
   // Get cached user preferences
@@ -202,7 +202,7 @@ export class AudioUserCache extends UserCache {
     guildId: string
   ): Promise<unknown | null> {
     const key = this.generateKey(userId, guildId);
-    return await this.get(key);
+    return await super.get(key);
   }
 
   // Cache user behavior patterns for recommendations
@@ -223,7 +223,7 @@ export class AudioUserCache extends UserCache {
       timestamp: Date.now(),
     };
 
-    await this.set(key, behaviorData, 1800000); // 30 minutes
+    await super.set(key, behaviorData, 1800000); // 30 minutes
   }
 }
 
@@ -237,8 +237,8 @@ export class FeatureFlagCache extends MultiLayerCache<boolean> {
   constructor() {
     super('feature-flags', cacheRedis, {
       memory: {
-        maxSize: 1000,
-        defaultTTL: 300000, // 5 minutes
+        maxSize: 400, // Increased from 250 for better feature flag caching
+        defaultTTL: 180000, // 3 minutes
         cleanupInterval: 60000,
       },
       redis: {
@@ -254,7 +254,7 @@ export class FeatureFlagCache extends MultiLayerCache<boolean> {
 
   async getFlagValue(guildId: string, flagName: string): Promise<boolean> {
     const key = this.generateFlagKey(guildId, flagName);
-    const cached = await this.get(key);
+    const cached = await super.get(key);
     return cached ?? false;
   }
 
@@ -264,7 +264,7 @@ export class FeatureFlagCache extends MultiLayerCache<boolean> {
     value: boolean
   ): Promise<void> {
     const key = this.generateFlagKey(guildId, flagName);
-    await this.set(key, value);
+    await super.set(key, value);
   }
 
   async invalidateGuildFlags(guildId: string): Promise<void> {

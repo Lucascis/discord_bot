@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.0.8
+    container_name: lavalink-premium
+    restart: unless-stopped
+    environment:
+      - _JAVA_OPTIONS=-Xmx2G -Xms1G
+      - SERVER_PORT=2334
+      - LAVALINK_SERVER_PASSWORD=${LAVALINK_PASSWORD:-c0mm3rc1al_lav4l1nk_s3cur3_2025}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - APPLE_MUSIC_MEDIA_TOKEN=${APPLE_MUSIC_MEDIA_TOKEN:-}
+      - DEEZER_ARL=${DEEZER_ARL:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+    volumes:
+      - ./application.yml:/opt/Lavalink/application.yml:ro
+      - ./logs:/opt/Lavalink/logs
+      - ./plugins:/opt/Lavalink/plugins
+    ports:
+      - "2334:2334"
+    networks:
+      - discord-bot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2334/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+networks:
+  discord-bot-network:
+    external: true

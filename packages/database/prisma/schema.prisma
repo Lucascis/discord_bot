@@ -82,6 +82,167 @@ model FeatureFlag {
   @@index([name])
 }
 
+// Premium Features and Configuration
+model ServerConfiguration {
+  id                    String   @id @default(cuid())
+  guildId              String   @unique
+  subscriptionTier     String   @default("free") // free, basic, premium, enterprise
+  subscriptionExpiresAt DateTime?
+
+  // Plugin feature toggles
+  spotifyEnabled       Boolean  @default(false)
+  appleMusicEnabled    Boolean  @default(false)
+  deezerEnabled        Boolean  @default(false)
+  lyricsEnabled        Boolean  @default(false)
+  sponsorBlockEnabled  Boolean  @default(true)
+  advancedSearchEnabled Boolean @default(false)
+
+  // Audio quality settings
+  maxAudioQuality      String   @default("medium") // low, medium, high, lossless
+  volumeLimit          Int      @default(200) // 0-200%
+
+  // Queue settings
+  maxQueueSize         Int      @default(100)
+  maxSongDuration      Int      @default(3600) // seconds
+  allowExplicitContent Boolean  @default(true)
+
+  // DJ and permission settings
+  djRoleId             String?
+  djOnlyMode           Boolean  @default(false)
+  voteSkipEnabled      Boolean  @default(true)
+  voteSkipThreshold    Float    @default(0.5) // 50%
+
+  // Autoplay settings
+  autoplayEnabled      Boolean  @default(false)
+  autoplayMode         String   @default("similar") // similar, artist, genre, mixed
+  autoplayQueueSize    Int      @default(10) // number of tracks to add when queue is low
+
+  // UI settings
+  ephemeralMessages    Boolean  @default(false) // make button interaction messages ephemeral
+
+  // Premium features
+  persistentConnection Boolean  @default(false) // 24/7 voice connection (premium only)
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  channels             ChannelConfiguration[]
+
+  @@index([guildId])
+  @@index([subscriptionTier])
+  @@index([subscriptionExpiresAt])
+}
+
+model ChannelConfiguration {
+  id                    String   @id @default(cuid())
+  guildId              String
+  channelId            String
+
+  // Channel-specific overrides
+  musicEnabled         Boolean  @default(true)
+  playlistsEnabled     Boolean  @default(true)
+  spotifyEnabled       Boolean?  // null = inherit from server
+  appleMusicEnabled    Boolean?
+  deezerEnabled        Boolean?
+  lyricsEnabled        Boolean?
+  sponsorBlockEnabled  Boolean?
+
+  // Volume and quality overrides
+  volumeLimit          Int?     // null = inherit from server
+  maxQueueSize         Int?
+  maxSongDuration      Int?
+
+  // Channel-specific permissions
+  djOnlyMode           Boolean? // null = inherit from server
+  allowExplicitContent Boolean?
+
+  serverConfig         ServerConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([guildId, channelId])
+  @@index([guildId])
+  @@index([channelId])
+}
+
+model UserSubscription {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  tier            String   @default("free") // free, basic, premium, enterprise
+  expiresAt       DateTime?
+
+  // Payment information
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  paymentMethod        String? // stripe, paypal, crypto
+
+  // Usage tracking
+  monthlyPlayTime      Int     @default(0) // minutes
+  monthlyRequests      Int     @default(0)
+
+  // Premium features granted
+  premiumServers       Int     @default(0) // number of servers they can upgrade
+  customBotEnabled     Boolean @default(false)
+  prioritySupport      Boolean @default(false)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tier])
+  @@index([expiresAt])
+}
+
+model LyricsCache {
+  id         String   @id @default(cuid())
+  trackId    String   // unique identifier for track (title + artist hash)
+  title      String
+  artist     String
+  lyrics     String   // full lyrics text
+  source     String   // lyrics provider (genius, musixmatch, etc.)
+  language   String   @default("en")
+
+  // Timed lyrics support
+  timedLyrics Boolean  @default(false)
+  lyricsData  String?  // JSON with timed lyrics if available
+
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime // lyrics cache expiration
+
+  @@unique([trackId])
+  @@index([title, artist])
+  @@index([expiresAt])
+}
+
+model PlaybackHistory {
+  id           String   @id @default(cuid())
+  guildId      String
+  userId       String
+  channelId    String
+
+  // Track information
+  title        String
+  artist       String
+  url          String
+  duration     Int
+  source       String   // youtube, spotify, deezer, etc.
+
+  // Playback metadata
+  playedAt     DateTime @default(now())
+  playedFully  Boolean  @default(false) // if track was played to completion
+  skipReason   String?  // manual, vote, error, etc.
+
+  // Analytics data
+  playbackQuality String? // audio quality used
+  pluginsUsed     String[] // which plugins were active
+
+  @@index([guildId])
+  @@index([userId])
+  @@index([guildId, playedAt])
+  @@index([source])
+}
+
 // Event Store Tables for Event Sourcing
 model EventStoreEvent {
   id                Int      @id @default(autoincrement())
@@ -116,4 +277,18 @@ model EventStoreSnapshot {
   @@unique([aggregateId, aggregateType])
   @@index([aggregateType])
   @@index([timestamp])
+}
+
+model WebhookSubscription {
+  id         String   @id @default(cuid())
+  guildId    String
+  webhookUrl String
+  events     String[] // Array of event types to listen for
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([guildId, webhookUrl])
+  @@index([guildId])
+  @@index([isActive])
 }

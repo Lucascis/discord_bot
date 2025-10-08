@@ -133,13 +133,17 @@ describe('Monitoring Endpoints Integration Tests', () => {
       const response = await fetch(`${baseUrl}/metrics/business`);
       expect(response.status).toBe(200);
 
-      const businessData = await response.json();
-      expect(businessData).toHaveProperty('engagement');
-      expect(businessData).toHaveProperty('usage');
-      expect(businessData).toHaveProperty('performance');
-      expect(businessData).toHaveProperty('guilds');
-      expect(businessData).toHaveProperty('technical');
-      expect(businessData).toHaveProperty('timestamp');
+      const contentType = response.headers.get('content-type');
+      expect(contentType).toContain('text/plain');
+
+      const businessData = await response.text();
+      expect(businessData).toContain('# HELP');
+      expect(businessData).toContain('# TYPE');
+
+      // Check for expected business metrics in Prometheus format
+      expect(businessData).toMatch(/engagement_\w+/);
+      expect(businessData).toMatch(/usage_\w+/);
+      expect(businessData).toMatch(/performance_\w+/);
 
       // Validate engagement metrics
       if (businessData.engagement) {
@@ -257,15 +261,14 @@ describe('Monitoring Endpoints Integration Tests', () => {
         return;
       }
 
-      const endpoints = [
+      const jsonEndpoints = [
         '/health',
         '/performance',
-        '/metrics/business',
         '/cache/stats',
         '/players'
       ];
 
-      for (const endpoint of endpoints) {
+      for (const endpoint of jsonEndpoints) {
         const response = await fetch(`${baseUrl}${endpoint}`);
 
         if (response.ok) {
@@ -303,7 +306,6 @@ describe('Monitoring Endpoints Integration Tests', () => {
 
       const timestampEndpoints = [
         '/performance',
-        '/metrics/business',
         '/cache/stats'
       ];
 

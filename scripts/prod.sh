@@ -59,7 +59,7 @@ $DC up -d --build lavalink
 INFO "Waiting for Lavalink /v4/info"
 out=""
 for i in {1..60}; do
-  if out=$(curl -sf -H 'Authorization: youshallnotpass' http://localhost:2333/v4/info); then
+  if out=$(curl -sf -H "Authorization: ${LAVALINK_PASSWORD}" http://localhost:${LAVALINK_PORT:-2333}/v4/info); then
     echo "$out" | grep -q 'sourceManagers' && break
   fi
   sleep 2

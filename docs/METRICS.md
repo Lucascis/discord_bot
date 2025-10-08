@@ -4,10 +4,10 @@ This document describes the Prometheus metrics exposed by the Discord music bot 
 
 ## Health Endpoints
 
-- **Gateway**: `http://localhost:3001/health` & `http://localhost:3001/metrics`
-- **Audio**: `http://localhost:3002/health` & `http://localhost:3002/metrics`
-- **API**: `http://localhost:3000/health` & `http://localhost:3000/metrics`
-- **Worker**: `http://localhost:3003/health` & `http://localhost:3003/metrics`
+- **Gateway**: `http://<host>:<gateway_port>/health` & `http://<host>:<gateway_port>/metrics`
+- **Audio**: `http://<host>:<audio_port>/health` & `http://<host>:<audio_port>/metrics`
+- **API**: `http://<host>:<api_port>/health` & `http://<host>:<api_port>/metrics`
+- **Worker**: `http://<host>:<worker_port>/health` & `http://<host>:<worker_port>/metrics`
 
 ## Discord API Error Metrics
 
@@ -15,14 +15,14 @@ This document describes the Prometheus metrics exposed by the Discord music bot 
 **Type**: Counter
 **Description**: Total number of Discord API errors encountered
 **Labels**:
-- `operation`: The operation being performed (e.g., `fetch_message_guild123`, `edit_message_guild456`)
+- `operation`: The operation being performed (e.g., `fetch_message_guild<id>`, `edit_message_guild<id>`)
 - `error_code`: Discord API error code (e.g., `10008`, `50001`, `20028`)
 - `retryable`: Whether the error can be retried (`true`/`false`)
 
 **Example**:
 ```
-discord_api_errors_total{operation="edit_message_375086837103984650",error_code="10008",retryable="false"} 3
-discord_api_errors_total{operation="send_message_guild123",error_code="20028",retryable="true"} 1
+discord_api_errors_total{operation="edit_message_<message_id>",error_code="10008",retryable="false"} 3
+discord_api_errors_total{operation="send_message_guild<id>",error_code="20028",retryable="true"} 1
 ```
 
 ### `discord_operation_retries_total`
@@ -34,8 +34,8 @@ discord_api_errors_total{operation="send_message_guild123",error_code="20028",re
 
 **Example**:
 ```
-discord_operation_retries_total{operation="edit_message_375086837103984650",attempt="2"} 1
-discord_operation_retries_total{operation="fetch_message_guild123",attempt="3"} 2
+discord_operation_retries_total{operation="edit_message_<message_id>",attempt="2"} 1
+discord_operation_retries_total{operation="fetch_message_guild<id>",attempt="3"} 2
 ```
 
 ### `discord_operation_duration_seconds_total`
@@ -47,9 +47,9 @@ discord_operation_retries_total{operation="fetch_message_guild123",attempt="3"} 
 
 **Example**:
 ```
-discord_operation_duration_seconds_total{operation="edit_message_guild123",success="true"} 2.45
-discord_operation_duration_seconds_total{operation="send_message_guild456",success="false"} 5.12
-discord_operation_duration_seconds_total{operation="edit_message_guild789_fallback",success="true"} 1.23
+discord_operation_duration_seconds_total{operation="edit_message_guild<id>",success="true"} 2.45
+discord_operation_duration_seconds_total{operation="send_message_guild<id>",success="false"} 5.12
+discord_operation_duration_seconds_total{operation="edit_message_guild<id>_fallback",success="true"} 1.23
 ```
 
 ## Business Metrics
@@ -104,7 +104,7 @@ discord_operation_duration_seconds_total{operation="edit_message_guild789_fallba
 
 ### Retryable Errors (Exponential Backoff)
 - `20028`: Rate Limited - Wait 2-8 seconds before retry
-- `130000`: API Overloaded - Wait 0.5-2 seconds before retry
+- `1<api_port>0`: API Overloaded - Wait 0.5-2 seconds before retry
 
 ## Monitoring Queries
 

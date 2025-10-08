@@ -1,3 +1,6 @@
+// Load environment variables first
+import './env-loader.js';
+
 import { app } from './app.js';
 import { logger, initializeSentry } from '@discord-bot/logger';
 import { injectLogger } from '@discord-bot/database';

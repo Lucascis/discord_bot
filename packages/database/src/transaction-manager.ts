@@ -92,7 +92,6 @@ export class TransactionManager {
         const result = await this.prisma.$transaction(
           async (tx) => {
             // Track operations for debugging
-            const originalTx = tx as any;
             const operationTracker = this.createOperationTracker(metrics);
 
             // Wrap common operations for tracking
@@ -104,7 +103,7 @@ export class TransactionManager {
                     get(modelTarget, modelProp) {
                       const modelOriginal = modelTarget[modelProp as keyof typeof modelTarget];
                       if (typeof modelOriginal === 'function') {
-                        return function(...args: any[]) {
+                        return function(...args: unknown[]) {
                           operationTracker(`${String(prop)}.${String(modelProp)}`);
                           return (modelOriginal as any).apply(modelTarget, args);
                         };
@@ -299,7 +298,7 @@ export class TransactionManager {
       activeTransactions: this.activeTransactions.size
     }, 'Emergency abort of all active transactions initiated');
 
-    for (const [transactionId, metrics] of this.activeTransactions) {
+    for (const [, metrics] of this.activeTransactions) {
       metrics.status = 'aborted';
       metrics.endTime = Date.now();
       metrics.duration = metrics.endTime - metrics.startTime;

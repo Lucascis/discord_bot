@@ -1,0 +1,293 @@
+/**
+ * Redis Feature Subscription Repository
+ * Infrastructure adapter for feature subscription caching using Redis
+ */
+
+import { Redis } from 'ioredis';
+import { PrismaClient } from '@discord-bot/database';
+import { FeatureSubscription, SubscriptionStatus } from '../../domain/entities/feature-subscription';
+import { FeatureSubscriptionRepository } from '../../application/use-cases/premium-feature-management-use-case';
+import { SubscriptionTier } from '@discord-bot/config';
+import { BillingPeriod, PeriodType } from '../../domain/value-objects/billing-period';
+import { PaymentPlan } from '../../domain/entities/payment-plan';
+
+export class RedisFeatureSubscriptionRepository implements FeatureSubscriptionRepository {
+  private readonly CACHE_TTL = 3600; // 1 hour
+  private readonly CACHE_PREFIX = 'subscription:';
+
+  constructor(
+    private readonly redis: Redis,
+    private readonly prisma: PrismaClient
+  ) {}
+
+  async findByUserAndGuild(userId: string, guildId: string): Promise<FeatureSubscription | null> {
+    const cacheKey = `${this.CACHE_PREFIX}${userId}:${guildId}`;
+
+    // Try cache first
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      return this.deserializeSubscription(JSON.parse(cached));
+    }
+
+    // Fallback to database
+    const subscription = await this.prisma.featureSubscription.findUnique({
+      where: {
+        userId_guildId: {
+          userId,
+          guildId
+        }
+      },
+      include: {
+        paymentPlan: true,
+        usageRecords: true,
+        billingHistory: true
+      }
+    });
+
+    if (!subscription) return null;
+
+    const domainSubscription = this.toDomainEntity(subscription);
+
+    // Cache for future requests
+    await this.redis.setex(
+      cacheKey,
+      this.CACHE_TTL,
+      JSON.stringify(this.serializeSubscription(domainSubscription))
+    );
+
+    return domainSubscription;
+  }
+
+  async findByUserId(userId: string): Promise<FeatureSubscription[]> {
+    const cacheKey = `${this.CACHE_PREFIX}user:${userId}`;
+
+    // Try cache first
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      const serializedSubscriptions = JSON.parse(cached);
+      return serializedSubscriptions.map((sub: any) => this.deserializeSubscription(sub));
+    }
+
+    // Fallback to database
+    const subscriptions = await this.prisma.featureSubscription.findMany({
+      where: { userId },
+      include: {
+        paymentPlan: true,
+        usageRecords: true,
+        billingHistory: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const domainSubscriptions = subscriptions.map(sub => this.toDomainEntity(sub));
+
+    // Cache for future requests
+    await this.redis.setex(
+      cacheKey,
+      this.CACHE_TTL,
+      JSON.stringify(domainSubscriptions.map(sub => this.serializeSubscription(sub)))
+    );
+
+    return domainSubscriptions;
+  }
+
+  async save(subscription: FeatureSubscription): Promise<void> {
+    // Save to database
+    const existingSubscription = await this.prisma.featureSubscription.findUnique({
+      where: { id: subscription.id }
+    });
+
+    const subscriptionData = {
+      userId: subscription.userId,
+      guildId: subscription.guildId,
+      tier: subscription.tier,
+      status: subscription.status,
+      startDate: subscription.startDate,
+      endDate: subscription.endDate,
+      autoRenewal: subscription.hasAutoRenewal,
+      paymentPlanId: subscription.paymentPlan.id,
+      trialData: subscription.trialData ? JSON.stringify(subscription.trialData) : null,
+      billingPeriodData: JSON.stringify({
+        type: subscription.billingPeriod.type,
+        basePrice: subscription.billingPeriod.basePrice,
+        discountPercentage: subscription.billingPeriod.discountPercentage,
+        finalPrice: subscription.billingPeriod.finalPrice,
+        totalDays: subscription.billingPeriod.totalDays
+      }),
+      updatedAt: new Date()
+    };
+
+    if (existingSubscription) {
+      await this.prisma.featureSubscription.update({
+        where: { id: subscription.id },
+        data: subscriptionData
+      });
+    } else {
+      await this.prisma.featureSubscription.create({
+        data: {
+          id: subscription.id,
+          ...subscriptionData,
+          createdAt: new Date()
+        }
+      });
+    }
+
+    // Invalidate relevant caches
+    await this.invalidateCache(subscription.userId, subscription.guildId);
+
+    // Update cache with new data
+    const cacheKey = `${this.CACHE_PREFIX}${subscription.userId}:${subscription.guildId}`;
+    await this.redis.setex(
+      cacheKey,
+      this.CACHE_TTL,
+      JSON.stringify(this.serializeSubscription(subscription))
+    );
+  }
+
+  async findExpiring(days: number): Promise<FeatureSubscription[]> {
+    const expirationDate = new Date();
+    expirationDate.setDate(expirationDate.getDate() + days);
+
+    const subscriptions = await this.prisma.featureSubscription.findMany({
+      where: {
+        status: 'active',
+        endDate: {
+          lte: expirationDate
+        }
+      },
+      include: {
+        paymentPlan: true,
+        usageRecords: true,
+        billingHistory: true
+      },
+      orderBy: { endDate: 'asc' }
+    });
+
+    return subscriptions.map(sub => this.toDomainEntity(sub));
+  }
+
+  private async invalidateCache(userId: string, guildId: string): Promise<void> {
+    const keys = [
+      `${this.CACHE_PREFIX}${userId}:${guildId}`,
+      `${this.CACHE_PREFIX}user:${userId}`
+    ];
+
+    await this.redis.del(...keys);
+  }
+
+  private toDomainEntity(prismaSubscription: any): FeatureSubscription {
+    const billingPeriodData = JSON.parse(prismaSubscription.billingPeriodData);
+    const billingPeriod = BillingPeriod.reconstitute(
+      billingPeriodData.type as PeriodType,
+      billingPeriodData.basePrice,
+      billingPeriodData.discountPercentage,
+      billingPeriodData.finalPrice,
+      billingPeriodData.totalDays
+    );
+
+    const paymentPlan = PaymentPlan.reconstitute(
+      prismaSubscription.paymentPlan.id,
+      prismaSubscription.paymentPlan.tier as SubscriptionTier,
+      prismaSubscription.paymentPlan.billingPeriod as PeriodType,
+      prismaSubscription.paymentPlan.basePrice,
+      prismaSubscription.paymentPlan.finalPrice,
+      prismaSubscription.paymentPlan.features,
+      prismaSubscription.paymentPlan.isActive,
+      prismaSubscription.paymentPlan.createdAt,
+      prismaSubscription.paymentPlan.updatedAt
+    );
+
+    const trialData = prismaSubscription.trialData ?
+      JSON.parse(prismaSubscription.trialData) : undefined;
+
+    return FeatureSubscription.reconstitute(
+      prismaSubscription.id,
+      prismaSubscription.userId,
+      prismaSubscription.guildId,
+      prismaSubscription.tier as SubscriptionTier,
+      prismaSubscription.status as SubscriptionStatus,
+      billingPeriod,
+      paymentPlan,
+      prismaSubscription.startDate,
+      prismaSubscription.endDate,
+      prismaSubscription.autoRenewal,
+      trialData,
+      new Map(), // Feature usage would be loaded separately if needed
+      prismaSubscription.createdAt,
+      prismaSubscription.updatedAt
+    );
+  }
+
+  private serializeSubscription(subscription: FeatureSubscription): any {
+    return {
+      id: subscription.id,
+      userId: subscription.userId,
+      guildId: subscription.guildId,
+      tier: subscription.tier,
+      status: subscription.status,
+      startDate: subscription.startDate.toISOString(),
+      endDate: subscription.endDate.toISOString(),
+      hasAutoRenewal: subscription.hasAutoRenewal,
+      isActive: subscription.isActive,
+      isInTrial: subscription.isInTrial,
+      billingPeriod: {
+        type: subscription.billingPeriod.type,
+        basePrice: subscription.billingPeriod.basePrice,
+        discountPercentage: subscription.billingPeriod.discountPercentage,
+        finalPrice: subscription.billingPeriod.finalPrice,
+        totalDays: subscription.billingPeriod.totalDays
+      },
+      paymentPlan: {
+        id: subscription.paymentPlan.id,
+        tier: subscription.paymentPlan.tier,
+        billingPeriod: subscription.paymentPlan.billingPeriod,
+        basePrice: subscription.paymentPlan.basePrice,
+        finalPrice: subscription.paymentPlan.finalPrice,
+        features: subscription.paymentPlan.features,
+        isActive: subscription.paymentPlan.isActive
+      },
+      trialData: subscription.trialData,
+      createdAt: subscription.createdAt?.toISOString(),
+      updatedAt: subscription.updatedAt?.toISOString()
+    };
+  }
+
+  private deserializeSubscription(data: any): FeatureSubscription {
+    const billingPeriod = BillingPeriod.reconstitute(
+      data.billingPeriod.type,
+      data.billingPeriod.basePrice,
+      data.billingPeriod.discountPercentage,
+      data.billingPeriod.finalPrice,
+      data.billingPeriod.totalDays
+    );
+
+    const paymentPlan = PaymentPlan.reconstitute(
+      data.paymentPlan.id,
+      data.paymentPlan.tier,
+      data.paymentPlan.billingPeriod,
+      data.paymentPlan.basePrice,
+      data.paymentPlan.finalPrice,
+      data.paymentPlan.features,
+      data.paymentPlan.isActive,
+      new Date(),
+      new Date()
+    );
+
+    return FeatureSubscription.reconstitute(
+      data.id,
+      data.userId,
+      data.guildId,
+      data.tier,
+      data.status,
+      billingPeriod,
+      paymentPlan,
+      new Date(data.startDate),
+      new Date(data.endDate),
+      data.hasAutoRenewal,
+      data.trialData,
+      new Map(),
+      data.createdAt ? new Date(data.createdAt) : new Date(),
+      data.updatedAt ? new Date(data.updatedAt) : new Date()
+    );
+  }
+}

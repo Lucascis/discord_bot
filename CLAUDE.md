@@ -44,21 +44,25 @@ This Discord music bot uses a microservices architecture with four main services
 ### Communication
 - **Redis pub/sub** - Primary inter-service communication via channels:
   - `discord-bot:commands` - Gateway → Audio command routing
-  - `discord-bot:to-audio` - Gateway → Audio Discord events
+  - `discord-bot:to-audio` - Gateway → Audio Discord events & **raw voice events** (Critical Fix: September 24, 2025)
   - `discord-bot:to-discord` - Audio → Gateway Lavalink events
   - `discord-bot:ui:now` - Audio → Gateway real-time UI updates
 - **PostgreSQL** - Persistent storage for queues, settings, and feature flags
 - **Lavalink** - External audio processing server
 
+### Critical Voice Connection Fix (September 24, 2025)
+**Raw Discord Events Handler**: Gateway now forwards `VOICE_SERVER_UPDATE` and `VOICE_STATE_UPDATE` events to Audio service, enabling `player.connected = true` and functional audio playback. This resolves the race condition that prevented voice connection establishment.
+
 ## Key Technologies
 - **TypeScript + Node.js** with ES modules
 - **pnpm workspaces** for monorepo management
 - **Discord.js v14** for Discord API integration
-- **Lavalink v4** for audio streaming with advanced plugins:
+- **Lavalink v4.1.1** for audio streaming with advanced plugins:
   - **YouTube Plugin v1.13.5** - Multi-client YouTube support (MUSIC, ANDROID_VR, WEB, WEB_EMBEDDED)
   - **SponsorBlock Plugin** - Automatic sponsor segment skipping for long sets
   - **LavaSrc Plugin v4.8.1** - Multi-platform support (Spotify, YouTube Music)
   - **LavaSearch Plugin v1.0.0** - Advanced search capabilities
+- **lavalink-client v2.5.9** - Unified across all services (Critical Update: September 24, 2025)
 - **Prisma** for database ORM
 - **Vitest** for testing
 - **OpenTelemetry** for observability
@@ -84,10 +88,19 @@ Services communicate asynchronously via Redis pub/sub. Commands flow from Gatewa
 ### Error Handling
 All services implement graceful shutdown, health checks, and structured error logging. Error monitoring is integrated across all services using Sentry for production-grade observability. Use the shared logger package for consistent log formatting and automatic error tracking.
 
+#### Interaction Management
+- **Processing Messages**: Immediate ephemeral "🎵 Processing..." responses prevent Discord timeout errors
+- **Message Cleanup**: Automatic deletion of processing messages when UI is ready
+- **Fallback Strategies**: Automatic fallback to new messages when edits fail
+- **Command Context**: Audio service receives command type (`play`, `playnext`, `playnow`) for differential behavior
+- **Voice Connection Persistence**: UI message deletion no longer triggers voice disconnection, preventing progressive delays
+
 #### Discord API Error Resilience
 - **Robust Error Classification**: Automatic detection of retryable vs non-retryable Discord API errors
 - **Smart Retry Logic**: Exponential backoff for rate limits (code 20028), immediate fallback for non-retryable errors (10008, 50001, etc.)
 - **Automatic Fallbacks**: Failed message edits automatically create new messages with cleanup of old ones
+- **UI Message Management**: Single UI message per channel with automatic cleanup
+- **Interaction Timeout Prevention**: Immediate ephemeral responses prevent "application did not respond" errors
 - **Error Metrics**: Comprehensive Prometheus metrics for Discord operation monitoring:
   - `discord_api_errors_total` - Errors by operation, code, and retryable status
   - `discord_operation_retries_total` - Retry attempts by operation
@@ -115,12 +128,25 @@ The bot features an advanced autoplay system with multiple recommendation modes:
 - **Genre Detection**: Automatically detects electronic music genres from track titles/artists
 - **Quality Filtering**: Advanced blacklist system blocks aggregator channels and low-quality content
 
-### UI Controls
+### UI Controls & Command Behavior
 The Discord interface features an organized 3-row button layout:
 
-**Row 1**: ⏯️ Play/Pause | ⏪ -10s | ⏩ +10s | ⏭️ Skip  
-**Row 2**: 🔊 Vol + | 🔉 Vol - | 🔁 Loop | ⏹️ Stop  
+**Row 1**: ⏯️ Play/Pause | ⏪ -10s | ⏩ +10s | ⏭️ Skip
+**Row 2**: 🔊 Vol + | 🔉 Vol - | 🔁 Loop | ⏹️ Stop
 **Row 3**: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
+
+#### Music Command Behavior
+- **`/play`**:
+  - No music playing: Creates channel UI message with track info
+  - Music playing: Sends ephemeral "Track Queued" message, maintains existing UI
+- **`/playnext`**:
+  - No music playing: Creates channel UI message (behaves like `/play`)
+  - Music playing: Sends ephemeral "Track Queued" message, adds track to front of queue
+- **`/playnow`**:
+  - Immediately plays track without sending "Track Queued" notifications
+  - Updates existing UI or creates new one if none exists
+- **Queue Display**: Excludes currently playing track, shows only upcoming tracks
+- **UI Management**: Single UI message per channel with automatic cleanup
 
 ### Configuration
 Environment variables are validated through `@discord-bot/config` using Zod schemas. Check existing config schemas before adding new environment variables.

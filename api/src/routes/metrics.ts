@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import { register } from 'prom-client';
 import {
-  checkDatabaseHealth,
-  getDatabaseMetrics,
-  generatePerformanceSummary
+  checkDatabaseHealth
 } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
@@ -46,14 +44,15 @@ router.get('/health/database', async (req, res) => {
  */
 router.get('/database/performance', async (req, res) => {
   try {
-    const [metrics, summary] = await Promise.all([
-      getDatabaseMetrics(),
-      generatePerformanceSummary()
-    ]);
+    const health = await checkDatabaseHealth();
 
     res.json({
-      metrics,
-      summary,
+      metrics: health.metrics,
+      summary: {
+        status: health.status,
+        connectionPool: health.connectionPool,
+        responseTime: health.responseTime
+      },
       timestamp: new Date().toISOString()
     });
   } catch (error) {

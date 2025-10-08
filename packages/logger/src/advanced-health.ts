@@ -1,5 +1,7 @@
 import { logger } from './index.js';
 import type { HealthCheckResult } from './health.js';
+import { loadavg } from 'node:os';
+import v8 from 'node:v8';
 
 export interface AdvancedHealthConfig {
   timeout: number;
@@ -104,9 +106,11 @@ export class AdvancedHealthMonitor {
     name: string,
     healthCheck: () => Promise<HealthCheckResult>
   ): Promise<ComponentHealth> {
-    const component = this.components.get(name);
+    let component = this.components.get(name);
     if (!component) {
-      throw new Error(`Component ${name} not registered`);
+      // Auto-register component if not registered
+      this.registerComponent(name, healthCheck);
+      component = this.components.get(name)!;
     }
 
     let lastError: Error | null = null;
@@ -235,7 +239,7 @@ export class AdvancedHealthMonitor {
       },
       cpu: {
         percentage: this.getCPUUsage(),
-        loadAverage: require('os').loadavg(),
+        loadAverage: loadavg(),
       },
       uptime: process.uptime(),
       gc: this.getGCMetrics(),
@@ -391,7 +395,6 @@ export class AdvancedHealthMonitor {
 
   private initializeGCMonitoring(): void {
     try {
-      const v8 = require('v8');
       if (v8.getHeapStatistics) {
         // GC monitoring is available
         setInterval(() => {
@@ -410,7 +413,7 @@ export class AdvancedHealthMonitor {
   private getCPUUsage(): number {
     // Simplified CPU usage calculation
     // In a real implementation, you might want to use external libraries
-    const loadAvg = require('os').loadavg();
+    const loadAvg = loadavg();
     return Math.min(loadAvg[0] * 10, 100); // Rough approximation
   }
 

@@ -108,3 +108,38 @@ try {
 }
 
 export { env };
+
+// Export premium features
+export * from './premium-features.js';
+export * from './enhanced-premium-config.js';
+
+// Export types for easier imports
+export type {
+  FeatureName,
+  PeriodType,
+  FeatureCategory,
+  AudioQualityLevel,
+  Tier,
+  Quality
+} from './enhanced-premium-config.js';
+
+// Export helper functions
+export {
+  hasFeatureAccess,
+  getAvailableFeatures,
+  getQuotaForTier,
+  getRestrictionForTier,
+  calculatePriceWithPeriod,
+  getFeaturesByCategory,
+  validateUsageQuota
+} from './enhanced-premium-config.js';
+
+// Export feature configurations
+export {
+  ENHANCED_PREMIUM_FEATURES,
+  FEATURE_CATEGORIES,
+  FEATURE_TIER_REQUIREMENTS,
+  BILLING_PERIODS,
+  ENHANCED_PRICING,
+  FEATURE_ROLLOUT
+} from './enhanced-premium-config.js';

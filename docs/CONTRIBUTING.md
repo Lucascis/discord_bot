@@ -11,9 +11,9 @@ Este proyecto usa pnpm workspaces, Vitest y commitlint. Requiere Node 22+ y pnpm
 - Sanidad local con Docker (opcional pero recomendado en cambios de integración):
   - `bash scripts/prod.sh` (o `make prod-reset` para limpiar y reconstruir)
   - Validar health:
-    - Gateway: http://localhost:3001/health
-    - Audio: http://localhost:3002/health
-    - API: http://localhost:3000/health
+    - Gateway: http://<host>:<gateway_port>/health
+    - Audio: http://<host>:<audio_port>/health
+    - API: http://<host>:<api_port>/health
 
 ## Pruebas manuales de UI (Now Playing)
 

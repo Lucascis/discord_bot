@@ -28,7 +28,7 @@ export interface PlayMusicResult {
  * Defines contract for audio operations
  */
 export interface AudioService {
-  searchTrack(query: string, guildId: string): Promise<{
+  searchTrack(query: string, guildId: string, voiceChannelId?: string, textChannelId?: string, userId?: string): Promise<{
     tracks: Array<{ title: string; uri: string; duration: number }>;
     source: 'youtube' | 'spotify' | 'other';
     latency: number;
@@ -100,7 +100,7 @@ export class PlayMusicUseCase {
         };
       }
 
-      // 3. Search for the track
+      // 3. Parallel optimization: Search track and check voice connection simultaneously
       events.push(SearchRequestedEvent(
         command.guildId.value,
         command.query.value,
@@ -109,10 +109,14 @@ export class PlayMusicUseCase {
         command.query.isSpotifyUrl ? 'spotify' : 'other'
       ));
 
-      const searchResult = await this.audioService.searchTrack(
-        command.query.value,
-        command.guildId.value
-      );
+      // Execute search and voice connection check in parallel for performance
+      const [searchResult, isConnected] = await Promise.all([
+        this.audioService.searchTrack(
+          command.query.value,
+          command.guildId.value
+        ),
+        this.audioService.isConnectedToVoice(command.guildId.value)
+      ]);
 
       events.push(SearchCompletedEvent(
         command.guildId.value,
@@ -131,8 +135,7 @@ export class PlayMusicUseCase {
         };
       }
 
-      // 4. Connect to voice if not already connected
-      const isConnected = await this.audioService.isConnectedToVoice(command.guildId.value);
+      // 4. Connect to voice if not already connected (now using result from parallel check)
       if (!isConnected) {
         await this.audioService.connectToVoice(command.guildId.value, command.voiceChannelId);
       }

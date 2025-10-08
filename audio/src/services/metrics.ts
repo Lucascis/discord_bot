@@ -356,7 +356,7 @@ export class AudioMetricsCollector {
           redis: {
             status: (cacheStats.redis as Record<string, unknown>)?.redisStatus || 'unknown',
             circuitState: (cacheStats.redis as Record<string, unknown>)?.state || 'unknown',
-            fallbackCacheSize: (cacheStats.redis as Record<string, unknown>)?.fallbackCacheSize || 0,
+            fallbackCacheSize: ((cacheStats.redis as Record<string, unknown>)?.fallbackCache as Record<string, unknown>)?.size || 0,
           },
         },
         timestamp: new Date().toISOString(),
@@ -425,5 +425,15 @@ export class AudioMetricsCollector {
   }
 }
 
-// Export singleton instance
-export const audioMetrics = new AudioMetricsCollector();
+// Export a function to create singleton instance with shared registry
+let audioMetricsInstance: AudioMetricsCollector | null = null;
+
+export function getAudioMetrics(registry?: Registry): AudioMetricsCollector {
+  if (!audioMetricsInstance) {
+    audioMetricsInstance = new AudioMetricsCollector(registry);
+  }
+  return audioMetricsInstance;
+}
+
+// For backward compatibility
+export const audioMetrics = getAudioMetrics();
