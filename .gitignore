@@ -165,3 +165,24 @@ Thumbs.db
 **/.cache
 .jiti
 .vscode/.ropeproject
+
+# Lavalink binaries and plugins (downloaded on first run)
+lavalink/Lavalink.jar
+lavalink/plugins/*.jar
+
+# Database files (local development)
+*.db
+*.db-shm
+*.db-wal
+prisma/dev.db*
+*.sqlite
+*.sqlite3
+
+# Docker volumes and data
+docker-data/
+volumes/
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
