@@ -16,7 +16,10 @@ import { DiscordPermissionService } from './infrastructure/discord/discord-permi
 
 // Cache system imports
 import { RedisCircuitBreaker } from '@discord-bot/cache';
-import { SearchCache, UserCache, QueueCache } from '@discord-bot/cache';
+import { SearchCache, UserCache, QueueCache, SettingsCache } from '@discord-bot/cache';
+
+// Redis Streams services
+import { AudioCommandService } from './services/audio-command-service.js';
 
 // Domain Layer
 import { MusicSessionDomainService } from './domain/services/music-session-domain-service.js';
@@ -32,6 +35,7 @@ import { InteractionResponseHandler } from './presentation/ui/interaction-respon
 
 // Settings Service
 import { SettingsService } from './services/settings-service.js';
+import { VoteSkipService } from './services/vote-skip-service.js';
 
 // Commercial Use Cases
 import { SubscriptionManagementUseCase } from './application/use-cases/subscription-management-use-case.js';
@@ -54,12 +58,15 @@ class GatewayApplication {
   private redisClient!: any;
   private redisSubscriber!: any;
   private audioRedisClient!: any;
+  private audioCommandService!: AudioCommandService;
   private musicController!: MusicController;
   private healthChecker!: ApplicationHealthChecker;
   private healthServer!: HealthServer;
   private guildSettingsRepository!: PrismaGuildSettingsRepository;
   private settingsService!: SettingsService;
   private uiBuilder!: MusicUIBuilder;
+  private permissionService!: DiscordPermissionService;
+  private voteSkipService!: VoteSkipService;
 
   // UI Message Tracking System (Rule 1: Only one UI PRINCIPAL per channel)
   private activeInteractions: Map<string, {
@@ -74,12 +81,16 @@ class GatewayApplication {
   // Voice Server Data Storage (for token and endpoint)
   private voiceServerData: Map<string, { token: string; endpoint: string; processedAt?: number }> = new Map();
 
+  // Request Deduplication System (prevents concurrent queue requests)
+  private pendingQueueRequests: Map<string, { requestId: string; timestamp: number; promise: Promise<any> }> = new Map();
+
   // Enterprise Cache System
   private cacheSystem!: {
     redisCircuitBreaker: RedisCircuitBreaker;
     searchCache: SearchCache;
     userCache: UserCache;
     queueCache: QueueCache;
+    settingsCache: SettingsCache;
   };
 
   async initialize(): Promise<void> {
@@ -96,6 +107,9 @@ class GatewayApplication {
 
     // Wire up dependencies
     this.wireUpDependencies();
+
+    // Initialize AudioCommandService for Redis Streams
+    await this.audioCommandService.initialize();
 
     // Setup Redis subscriptions for Audio service communication
     this.setupRedisSubscriptions();
@@ -235,12 +249,14 @@ class GatewayApplication {
     const searchCache = new SearchCache(redisCircuitBreaker);
     const userCache = new UserCache(redisCircuitBreaker);
     const queueCache = new QueueCache(redisCircuitBreaker);
+    const settingsCache = new SettingsCache(redisCircuitBreaker);
 
     this.cacheSystem = {
       redisCircuitBreaker,
       searchCache,
       userCache,
       queueCache,
+      settingsCache,
     };
 
     // Warm up critical caches for immediate performance
@@ -281,12 +297,16 @@ class GatewayApplication {
   private wireUpDependencies(): void {
     // Infrastructure Layer (Adapters)
     this.guildSettingsRepository = new PrismaGuildSettingsRepository(prisma);
-    this.settingsService = new SettingsService(prisma);
+    this.settingsService = new SettingsService(prisma, this.cacheSystem.settingsCache);
     const musicSessionRepository = new RedisMusicSessionRepository(this.redisClient);
 
     // Use enterprise-grade cache system instead of basic stub
     const audioService = new DiscordAudioService(this.redisClient, this.redisSubscriber, this.cacheSystem.searchCache);
     const permissionService = new DiscordPermissionService(this.discordClient);
+    this.permissionService = permissionService;
+
+    // Initialize VoteSkipService
+    this.voteSkipService = new VoteSkipService(this.permissionService, this.settingsService);
 
     // Commercial Infrastructure
     const customerRepository = new InMemoryCustomerRepository();
@@ -399,9 +419,13 @@ class GatewayApplication {
       this.uiBuilder,
       responseHandler,
       this.settingsService,
+      permissionService,
       registerProcessingMessage,
       clearUIBlock
     );
+
+    // Initialize AudioCommandService for Redis Streams
+    this.audioCommandService = new AudioCommandService();
 
     logger.info('Clean Architecture dependencies wired up successfully');
   }
@@ -516,11 +540,55 @@ class GatewayApplication {
 
     // Handle string-based operations (custom operations from audio service)
     if (data.payload?.op === 'track_queued') {
-      // Show ephemeral "Track Queued" message if enabled
-      const useEphemeral = await this.shouldUseEphemeral(data.guildId);
-      if (useEphemeral && data.payload?.textChannelId) {
-        // TODO: Send ephemeral message to user
-        logger.info({ guildId: data.guildId, track: data.payload.track.title }, 'Track queued notification');
+      // Show "Track Added to Queue" message (always visible, not ephemeral)
+      if (data.payload?.textChannelId) {
+        try {
+          const channel = await this.discordClient.channels.fetch(data.payload.textChannelId);
+          if (channel?.isTextBased() && 'send' in channel) {
+            const user = await this.discordClient.users.fetch(data.payload.requestedBy);
+
+            const embed = this.uiBuilder.buildAddedToQueueEmbed({
+              trackTitle: data.payload.track.title,
+              artist: data.payload.track.artist,
+              duration: data.payload.track.duration,
+              queuePosition: data.payload.queuePosition,
+              artworkUrl: data.payload.track.thumbnail,
+              requestedBy: user
+            });
+
+            await channel.send({ embeds: [embed] });
+            logger.info({ guildId: data.guildId, track: data.payload.track.title }, 'Track queued notification sent');
+
+            // After showing "Added to Queue" message, request a fresh UI update that will create a new UI message
+            // This ensures the UI is always the last message without manually deleting the previous one
+            setTimeout(async () => {
+              try {
+                // Mark the current UI as outdated so the next UI update creates a new message instead of editing
+                const channelKey = `${data.guildId}:${data.payload.textChannelId}`;
+                const trackingInteraction = this.activeInteractions.get(channelKey);
+                if (trackingInteraction) {
+                  // Clear the messageId to force creation of new UI message
+                  this.activeInteractions.set(channelKey, {
+                    ...trackingInteraction,
+                    messageId: ''
+                  });
+                }
+
+                await this.redisClient.publish('discord-bot:commands', JSON.stringify({
+                  guildId: data.guildId,
+                  type: 'nowplaying',
+                  channelId: data.payload.textChannelId,
+                  requestId: `ui_refresh_${Date.now()}`
+                }));
+                logger.info({ guildId: data.guildId }, 'Requested fresh UI update after Added to Queue message');
+              } catch (requestError) {
+                logger.warn({ error: requestError, guildId: data.guildId }, 'Failed to request UI update');
+              }
+            }, 1000); // Wait 1 second to ensure Added to Queue message is visible first
+          }
+        } catch (error) {
+          logger.warn({ error, guildId: data.guildId }, 'Failed to send track queued notification');
+        }
       }
     }
 
@@ -617,7 +685,9 @@ class GatewayApplication {
 
       logger.info({
         guildId: data.guildId,
-        credentialMessage: JSON.stringify(credentialMessage),
+        hasSessionId: !!credentialMessage.voiceCredentials?.sessionId,
+        hasToken: !!credentialMessage.voiceCredentials?.token,
+        hasEndpoint: !!credentialMessage.voiceCredentials?.endpoint,
         channel: 'discord-bot:to-audio'
       }, 'VOICE_CONNECT: About to publish voice credentials to Redis');
 
@@ -704,7 +774,9 @@ class GatewayApplication {
       // Send via Redis pub/sub to Audio service (consolidated channel)
       logger.info({
         guildId,
-        voiceCredentials: JSON.stringify(voiceCredentials),
+        hasSessionId: !!voiceCredentials.sessionId,
+        hasToken: !!voiceCredentials.token,
+        hasEndpoint: !!voiceCredentials.endpoint,
         channel: 'discord-bot:to-audio'
       }, 'VOICE_CONNECT: About to publish voice credentials to Redis (method 2)');
 
@@ -944,7 +1016,9 @@ class GatewayApplication {
         volume: data.volume || 100,
         loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue',
         queueLength: data.queueLen || 0,
-        isPaused: data.paused
+        isPaused: data.paused,
+        artworkUrl: data.artworkUrl,
+        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off'
       });
 
       const components = this.uiBuilder.buildMusicControlButtons({
@@ -952,9 +1026,11 @@ class GatewayApplication {
         isPaused: data.paused,
         hasQueue: data.queueLen > 0,
         queueLength: data.queueLen || 0,
-        canSkip: data.queueLen > 0,
+        // Remove canSkip override - let buildMusicControlButtons calculate it based on queue + autoplay
         volume: data.volume || 100,
-        loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue'
+        loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue',
+        isMuted: (data.volume || 0) === 0,
+        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off'
       });
 
       const messageContent = {
@@ -1094,9 +1170,15 @@ class GatewayApplication {
   }
 
   private async shouldUseEphemeral(guildId: string): Promise<boolean> {
-    // Check guild settings for ephemeral message preference (Rule 5)
-    // For now, always return false - can be enhanced later with proper settings
-    return false;
+    // Rule 5: Ephemeral messages only when setting is ON
+    try {
+      const settings = await this.settingsService.getGuildSettings(guildId);
+      return settings.ephemeralMessages;
+    } catch (error) {
+      logger.error({ error, guildId }, 'Failed to get guild settings for ephemeral check');
+      // Default to false on error for better UX
+      return false;
+    }
   }
 
   /**
@@ -1208,6 +1290,144 @@ class GatewayApplication {
     }
   }
 
+  private async handleVoteSkipCommand(interaction: any): Promise<void> {
+    try {
+      if (!interaction.guildId) {
+        await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+        return;
+      }
+
+      const guildId = interaction.guildId;
+      const userId = interaction.user.id;
+      const channelId = interaction.channelId;
+
+      // Check if there's already an active vote
+      const existingSession = this.voteSkipService.getActiveSession(guildId);
+
+      if (existingSession) {
+        // User is trying to join an existing vote
+        const result = await this.voteSkipService.castVote(guildId, userId);
+
+        if (result.completed) {
+          // Vote passed! Trigger skip
+          const showFeedback = await this.shouldUseEphemeral(guildId);
+          if (showFeedback) {
+            await interaction.reply({ content: result.message, ephemeral: true });
+          }
+
+          // Send skip command to audio service
+          try {
+            await this.audioCommandService.sendCommand('skip', guildId, {
+              triggeredBy: 'voteskip',
+              voteCount: String(result.session?.votes.size || 0),
+              timestamp: String(Date.now())
+            });
+          } catch (error) {
+            logger.error({ error, guildId }, 'Failed to send skip command after successful vote');
+          }
+        } else {
+          // Vote recorded but not completed yet
+          const showFeedback = await this.shouldUseEphemeral(guildId);
+          if (showFeedback) {
+            await interaction.reply({ content: result.message, ephemeral: true });
+          }
+        }
+      } else {
+        // Start a new vote skip session
+        const result = await this.voteSkipService.initiateVoteSkip(guildId, channelId, userId);
+
+        if (result.success) {
+          const showFeedback = await this.shouldUseEphemeral(guildId);
+          if (showFeedback) {
+            await interaction.reply({ content: result.message, ephemeral: true });
+          }
+
+          // If only one person needed and they started it, immediately skip
+          if (result.session && result.session.votes.size >= result.session.requiredVotes) {
+            try {
+              await this.audioCommandService.sendCommand('skip', guildId, {
+                triggeredBy: 'voteskip',
+                voteCount: String(result.session.votes.size),
+                timestamp: String(Date.now())
+              });
+            } catch (error) {
+              logger.error({ error, guildId }, 'Failed to send skip command after vote completion');
+            }
+          }
+        } else {
+          const showFeedback = await this.shouldUseEphemeral(guildId);
+          if (showFeedback) {
+            await interaction.reply({ content: result.message, ephemeral: true });
+          }
+        }
+      }
+
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId, userId: interaction.user.id }, 'Error handling voteskip command');
+      try {
+        const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
+        if (showFeedback) {
+          await interaction.reply({
+            content: '❌ An error occurred while processing your vote. Please try again.',
+            ephemeral: true
+          });
+        }
+      } catch (replyError) {
+        logger.error({ replyError }, 'Failed to send error response for voteskip command');
+      }
+    }
+  }
+
+  private async checkButtonDJPermissions(interaction: any): Promise<boolean> {
+    try {
+      const guildId = interaction.guildId!;
+      const userId = interaction.user.id;
+
+      // Get guild settings to check if DJ only mode is enabled and get DJ role
+      const guildSettings = await this.settingsService.getGuildSettings(guildId);
+
+      // If DJ only mode is disabled, allow all users
+      if (!guildSettings.djOnlyMode) {
+        return true;
+      }
+
+      // Get user roles for permission checking
+      const userRoles = await this.permissionService.getUserRoles(userId, guildId);
+
+      // Check if user has permission to control music
+      const hasPermission = await this.permissionService.hasPermissionToControlMusic(
+        userId,
+        guildId,
+        userRoles,
+        guildSettings.djRoleId || null
+      );
+
+      if (!hasPermission) {
+        const djRoleName = guildSettings.djRoleId || 'DJ';
+        const showFeedback = await this.shouldUseEphemeral(guildId);
+        if (showFeedback) {
+          await interaction.reply({
+            content: `🚫 DJ Only mode is enabled. You need the **${djRoleName}** role to use music controls.`,
+            ephemeral: true
+          });
+        }
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId, userId: interaction.user.id }, 'Error checking button DJ permissions');
+      const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
+      if (showFeedback) {
+        await interaction.reply({
+          content: '❌ Error checking permissions. Please try again.',
+          ephemeral: true
+        });
+      }
+      return false;
+    }
+  }
+
   private async handleButtonInteraction(interaction: any): Promise<void> {
     // Handle music control button interactions
     if (!interaction.guildId) {
@@ -1235,11 +1455,11 @@ class GatewayApplication {
           break;
         case 'music_volume_up':
           commandType = 'volumeAdjust';
-          additionalData.delta = 10;
+          additionalData.delta = '10';
           break;
         case 'music_volume_down':
           commandType = 'volumeAdjust';
-          additionalData.delta = -10;
+          additionalData.delta = '-10';
           break;
         case 'music_loop':
           commandType = 'loop';
@@ -1255,44 +1475,102 @@ class GatewayApplication {
           commandType = 'clear';
           break;
         case 'music_autoplay':
-          commandType = 'seedRelated';
+          commandType = 'autoplay';
           break;
         case 'music_seek_back':
           commandType = 'seekAdjust';
-          additionalData.deltaMs = -10000; // -10 seconds in milliseconds
+          additionalData.deltaMs = '-10000'; // -10 seconds in milliseconds
           break;
         case 'music_seek_forward':
           commandType = 'seekAdjust';
-          additionalData.deltaMs = 10000; // +10 seconds in milliseconds
+          additionalData.deltaMs = '10000'; // +10 seconds in milliseconds
+          break;
+        case 'music_previous':
+          commandType = 'previous';
+          break;
+        case 'music_seek_back_30':
+          commandType = 'seekAdjust';
+          additionalData.deltaMs = '-30000'; // -30 seconds in milliseconds
+          break;
+        case 'music_seek_forward_30':
+          commandType = 'seekAdjust';
+          additionalData.deltaMs = '30000'; // +30 seconds in milliseconds
+          break;
+        case 'music_mute':
+          commandType = 'mute';
+          break;
+        case 'music_filters':
+          commandType = 'filters';
           break;
         default:
           logger.warn({ customId }, 'Unknown button interaction');
-          await interaction.reply({ content: '❌ Unknown button action', ephemeral: true });
+          const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
+          if (showFeedback) {
+            await interaction.reply({ content: '❌ Unknown button action', ephemeral: true });
+          }
           return;
       }
 
-      // Acknowledge button interaction immediately
-      await interaction.deferReply({ ephemeral: true });
+      // Check DJ permissions for control commands (excluding queue which is read-only)
+      if (commandType !== 'queue') {
+        const hasPermission = await this.checkButtonDJPermissions(interaction);
+        if (!hasPermission) {
+          return; // Permission check already handled the response
+        }
+      }
 
-      // Special handling for queue command - needs response
+      // Special handling for queue command - always needs defer since it shows a response
       if (commandType === 'queue') {
+        await interaction.deferReply({ ephemeral: true });
         try {
-          // Send command to audio service via Redis and wait for response
-          const commandData = {
-            type: commandType,
-            guildId: interaction.guildId,
-            ...additionalData
-          };
+          const guildId = interaction.guildId!;
 
-          await this.redisClient.publish('discord-bot:commands', JSON.stringify(commandData));
+          // Check for existing pending request (deduplication)
+          const existingRequest = this.pendingQueueRequests.get(guildId);
+          if (existingRequest) {
+            logger.info({
+              guildId,
+              existingRequestId: existingRequest.requestId,
+              age: Date.now() - existingRequest.timestamp
+            }, 'Queue request already in progress, reusing existing request');
 
-          // Wait for response from audio service
-          const responseChannel = `discord-bot:response:${additionalData.requestId}`;
-          const response = await this.waitForAudioResponse(responseChannel, 5000);
+            // Reuse the existing promise
+            const response = await existingRequest.promise;
+            if (response?.items && Array.isArray(response.items)) {
+              const queueEmbed = this.uiBuilder.buildQueueEmbed({
+                tracks: response.items.map((item: any) => ({
+                  title: item.title || 'Unknown Track',
+                  artist: undefined,
+                  duration: undefined,
+                  requestedBy: 'Unknown'
+                })),
+                currentTrack: undefined,
+                totalDuration: undefined,
+                page: 1,
+                totalPages: 1
+              });
+              await interaction.editReply({ embeds: [queueEmbed] });
+            } else {
+              await interaction.editReply({ content: '📭 Queue is empty' });
+            }
+            return;
+          }
+
+          // Create new request promise
+          const requestPromise = this.executeQueueRequest(guildId, additionalData);
+
+          // Store in pending requests for deduplication
+          this.pendingQueueRequests.set(guildId, {
+            requestId: additionalData.requestId,
+            timestamp: Date.now(),
+            promise: requestPromise
+          });
+
+          const response = await requestPromise;
 
           if (response?.items && Array.isArray(response.items)) {
             const queueEmbed = this.uiBuilder.buildQueueEmbed({
-              tracks: response.items.map((item: any, index: number) => ({
+              tracks: response.items.map((item: any) => ({
                 title: item.title || 'Unknown Track',
                 artist: undefined,
                 duration: undefined,
@@ -1311,45 +1589,77 @@ class GatewayApplication {
         } catch (error) {
           logger.error({ error, commandType }, 'Failed to get queue response');
           await interaction.editReply({ content: '❌ Failed to retrieve queue' });
+        } finally {
+          // Always clean up pending request
+          const guildId = interaction.guildId!;
+          this.pendingQueueRequests.delete(guildId);
         }
         return;
       }
 
       // For other commands - provide immediate feedback and send command
-      const actionLabels: Record<string, string> = {
-        'toggle': '⏯️ Toggling playback...',
-        'skip': '⏭️ Skipping track...',
-        'stop': '⏹️ Stopping playback...',
-        'volumeAdjust': '🔊 Adjusting volume...',
-        'loop': '🔁 Cycling loop mode...',
-        'shuffle': '🔀 Shuffling queue...',
-        'clear': '🧹 Clearing queue...',
-        'seedRelated': '▶️ Adding autoplay tracks...',
-        'seekAdjust': '⏩ Seeking...'
-      };
+      const showButtonFeedback = await this.shouldUseEphemeral(interaction.guildId);
 
-      const feedbackMessage = actionLabels[commandType] || `🎵 ${commandType}...`;
-      await interaction.editReply({ content: feedbackMessage });
+      // All button interactions MUST be acknowledged within 3 seconds
+      if (showButtonFeedback) {
+        // Show feedback with deferReply (displays "Bot is thinking..." then custom message)
+        await interaction.deferReply({ ephemeral: true });
 
-      // Send command to audio service via Redis
-      const commandData = {
-        type: commandType,
-        guildId: interaction.guildId,
-        ...additionalData
-      };
+        const actionLabels: Record<string, string> = {
+          'toggle': '⏯️ Toggling playback...',
+          'skip': '⏭️ Skipping track...',
+          'stop': '⏹️ Stopping playback...',
+          'volumeAdjust': '🔊 Adjusting volume...',
+          'loop': '🔁 Cycling loop mode...',
+          'shuffle': '🔀 Shuffling queue...',
+          'clear': '🧹 Clearing queue...',
+          'seedRelated': '▶️ Adding autoplay tracks...',
+          'seekAdjust': '⏩ Seeking...'
+        };
 
-      await this.redisClient.publish('discord-bot:commands', JSON.stringify(commandData));
+        const feedbackMessage = actionLabels[commandType] || `🎵 ${commandType}...`;
+        await interaction.editReply({ content: feedbackMessage });
 
-      logger.info({ commandType, guildId: interaction.guildId }, 'Button command forwarded to audio service');
+        // Auto-delete feedback message after 3 seconds
+        setTimeout(async () => {
+          try {
+            await interaction.deleteReply();
+          } catch (error) {
+            // Ignore deletion errors (message might already be gone)
+            logger.debug({ error, commandType }, 'Button feedback message deletion failed (likely already deleted)');
+          }
+        }, 3000);
+      } else {
+        // No feedback: use deferUpdate to silently acknowledge the interaction
+        // This prevents "This interaction failed" error without showing any loading state
+        await interaction.deferUpdate();
+      }
+
+      // Send command to audio service via Redis Streams
+      try {
+        await this.audioCommandService.sendCommand(
+          commandType,
+          interaction.guildId,
+          additionalData
+        );
+
+        logger.info({ commandType, guildId: interaction.guildId }, 'Button command forwarded to audio service via Redis Streams');
+      } catch (commandError) {
+        logger.error({ error: commandError, commandType, guildId: interaction.guildId }, 'Failed to send command via Redis Streams');
+        throw commandError;
+      }
 
     } catch (error) {
       logger.error({ error, customId }, 'Error handling button interaction');
 
       try {
-        if (interaction.deferred) {
-          await interaction.editReply({ content: '❌ Failed to process button action.' });
-        } else {
-          await interaction.reply({ content: '❌ Failed to process button action.', ephemeral: true });
+        const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
+        if (showFeedback) {
+          if (interaction.deferred) {
+            await interaction.editReply({ content: '❌ Failed to process button action.' });
+          } else {
+            await interaction.reply({ content: '❌ Failed to process button action.', ephemeral: true });
+          }
         }
       } catch (responseError) {
         logger.error({ responseError }, 'Failed to send error response for button interaction');
@@ -1434,10 +1744,16 @@ class GatewayApplication {
             await this.musicController.handleMoveCommand(interaction);
             break;
           case 'nowplaying':
-            await this.musicController.handleNowPlayingCommand(interaction);
+            await this.musicController.handleControlCommand(interaction, 'nowplaying');
             break;
           case 'seek':
             await this.musicController.handleSeekCommand(interaction);
+            break;
+          case 'autoplay':
+            await this.musicController.handleAutoplayCommand(interaction);
+            break;
+          case 'voteskip':
+            await this.handleVoteSkipCommand(interaction);
             break;
           case 'settings':
             await this.musicController.handleSettingsCommand(interaction);
@@ -1606,28 +1922,140 @@ class GatewayApplication {
   }
 
   /**
-   * Wait for a response from the audio service via Redis
+   * Execute a queue request and wait for response from audio service
+   * Implements proper Redis pub/sub pattern with request-response correlation
    */
-  private async waitForAudioResponse(channel: string, timeoutMs: number = 5000): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.redisSubscriber.unsubscribe(channel);
-        reject(new Error(`Timeout waiting for response on ${channel}`));
-      }, timeoutMs);
+  private async executeQueueRequest(guildId: string, additionalData: any): Promise<any> {
+    logger.info({
+      guildId,
+      requestId: additionalData.requestId
+    }, 'gateway: sending queue command to audio service via Redis Streams');
 
-      this.redisSubscriber.subscribe(channel, (message: string) => {
+    try {
+      // Use Redis Streams AudioCommandService instead of pub/sub
+      const response = await this.audioCommandService.sendQueueCommand(guildId, {
+        timeout: 10000, // 10 seconds timeout
+        retries: 2
+      });
+
+      logger.info({
+        guildId,
+        requestId: additionalData.requestId,
+        response
+      }, 'gateway: received queue response via Redis Streams');
+
+      return response;
+    } catch (error) {
+      logger.error({
+        error,
+        guildId,
+        requestId: additionalData.requestId
+      }, 'gateway: failed to get queue response via Redis Streams');
+      throw error;
+    }
+  }
+
+  /**
+   * Wait for a response from the audio service via Redis
+   * Following Redis v5 best practices for subscription management with retry logic
+   */
+  private async waitForAudioResponse(channel: string, timeoutMs: number = 5000, maxRetries: number = 2): Promise<any> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.attemptRedisResponse(channel, timeoutMs);
+      } catch (error) {
+        lastError = error as Error;
+
+        // Check if error is retryable (connection issues, not parse errors)
+        const isRetryable = this.isRetryableRedisError(error as Error);
+
+        if (!isRetryable || attempt === maxRetries) {
+          throw error;
+        }
+
+        // Exponential backoff with jitter (following Redis official pattern)
+        const jitter = Math.floor(Math.random() * 200);
+        const delay = Math.min(Math.pow(2, attempt) * 100, 1000) + jitter;
+
+        logger.warn({
+          channel,
+          attempt: attempt + 1,
+          maxRetries: maxRetries + 1,
+          delay,
+          error: (error as Error).message
+        }, 'Redis operation failed, retrying...');
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError || new Error('All retry attempts failed');
+  }
+
+  /**
+   * Single attempt to get response from Redis
+   */
+  private async attemptRedisResponse(channel: string, timeoutMs: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      let timeout: NodeJS.Timeout;
+
+      // Define listener function to maintain reference for cleanup
+      const listener = (message: string) => {
         try {
+          logger.info({ channel, message }, 'gateway: received Redis response');
           clearTimeout(timeout);
-          this.redisSubscriber.unsubscribe(channel);
+          // Unsubscribe with specific listener reference to avoid memory leaks
+          this.redisSubscriber.unsubscribe(channel, listener);
           const response = JSON.parse(message);
           resolve(response);
         } catch (error) {
+          logger.error({ channel, message, error: error instanceof Error ? error.message : String(error) }, 'gateway: error parsing Redis response');
           clearTimeout(timeout);
-          this.redisSubscriber.unsubscribe(channel);
+          // Ensure cleanup on error
+          this.redisSubscriber.unsubscribe(channel, listener);
           reject(error);
         }
+      };
+
+      // Set timeout with proper cleanup
+      timeout = setTimeout(() => {
+        // Clean unsubscribe with listener reference
+        this.redisSubscriber.unsubscribe(channel, listener);
+        reject(new Error(`Timeout waiting for response on ${channel}`));
+      }, timeoutMs);
+
+      // Subscribe with listener reference for proper cleanup
+      this.redisSubscriber.subscribe(channel, listener).catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
       });
     });
+  }
+
+  /**
+   * Determine if a Redis error is retryable based on error type
+   */
+  private isRetryableRedisError(error: Error): boolean {
+    const retryableErrors = [
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'ETIMEDOUT',
+      'ECONNRESET',
+      'EPIPE',
+      'EHOSTUNREACH',
+      'EAI_AGAIN'
+    ];
+
+    // Check error message or code for retryable patterns
+    const errorMessage = error.message.toLowerCase();
+    const errorCode = (error as any).code;
+
+    return retryableErrors.some(retryableError =>
+      errorMessage.includes(retryableError.toLowerCase()) ||
+      errorCode === retryableError
+    ) || errorMessage.includes('connection') || errorMessage.includes('network');
   }
 
   async shutdown(): Promise<void> {

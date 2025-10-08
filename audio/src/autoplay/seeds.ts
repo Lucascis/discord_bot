@@ -135,10 +135,10 @@ function detectGenre(title: string, author: string): string[] {
 }
 
 async function executeSearchQueries(
-  player: LLPlayer, 
-  queries: string[], 
-  search: SearchFn, 
-  limit: number, 
+  player: LLPlayer,
+  queries: string[],
+  search: SearchFn,
+  limit: number,
   base: LLTrack
 ): Promise<number> {
   const { normalizeTitle } = await import('./recommendations.js');

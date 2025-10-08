@@ -21,7 +21,7 @@ import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue } from './autoplay/index.js';
+import { isBlockReason, pickAutomixTrack, ensurePlayback, seedRelatedQueue, seedByArtist, seedByGenre, seedMixed } from './autoplay/index.js';
 import { guildMutex } from './guildMutex.js';
 import { TTLMap } from '@discord-bot/cache';
 import { shouldAutomixAfterSkip, shouldSeedOnFirstPlay } from './logic.js';
@@ -52,6 +52,8 @@ import {
   trackUserInteractionAnalytics,
   requestPerformanceAnalysis
 } from './services/worker-integration.js';
+import { commandProcessor } from './services/command-processor.js';
+import { audioStreamsMonitoring } from '@discord-bot/cache';
 
 const redisUrl = env.REDIS_URL;
 
@@ -153,6 +155,22 @@ try {
   logger.error({ error }, 'Failed to initialize Worker Service integration - analytics disabled');
 }
 
+// Initialize Redis Streams CommandProcessor for reliable command handling
+try {
+  await commandProcessor.initialize();
+  logger.info('Redis Streams CommandProcessor initialized successfully');
+} catch (error) {
+  logger.error({ error }, 'Failed to initialize Redis Streams CommandProcessor');
+}
+
+// Initialize Redis Streams monitoring
+try {
+  await audioStreamsMonitoring.initialize();
+  logger.info('Redis Streams monitoring initialized successfully');
+} catch (error) {
+  logger.error({ error }, 'Failed to initialize Redis Streams monitoring');
+}
+
 import { createLavalinkManager, initManager } from './services/lavalink.js';
 
 const manager = createLavalinkManager(async (guildId, payload) => {
@@ -192,6 +210,392 @@ await new Promise<void>((resolve) => {
 searchPrewarmer.initialize(manager);
 logger.info('Search performance optimizations initialized');
 
+// Register Redis Streams command handlers
+try {
+  // Queue command handler
+  commandProcessor.registerHandler('queue', async (data) => {
+    logger.info({ guildId: data.guildId, requestId: data.requestId }, 'audio: queue command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    const items = (player?.queue.tracks ?? []).slice(0, 10).map((t: { info?: { title?: string; uri?: string } }) => {
+      const info = t.info;
+      return { title: info?.title ?? 'Unknown', uri: info?.uri };
+    });
+
+    const response = { items };
+
+    logger.info({
+      guildId: data.guildId,
+      requestId: data.requestId,
+      queueSize: items.length,
+      hasPlayer: !!player
+    }, 'audio: returning queue response via Redis Streams');
+
+    return response;
+  });
+
+  // Volume adjust handler
+  commandProcessor.registerHandler('volumeAdjust', async (data) => {
+    logger.info({ guildId: data.guildId, delta: data.delta }, 'audio: volumeAdjust command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    const delta = parseInt(data.delta, 10);
+    const newVol = Math.max(0, Math.min(200, (player.volume ?? 100) + delta));
+    await player.setVolume(newVol);
+
+    // Trigger immediate UI update to reflect new volume level
+    void pushNowPlaying(player);
+
+    logger.info({ guildId: data.guildId, oldVolume: player.volume, newVolume: newVol }, 'Volume adjusted');
+    return { success: true, volume: newVol };
+  });
+
+  // Toggle play/pause handler
+  commandProcessor.registerHandler('toggle', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: toggle command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    if (player.paused) {
+      await player.resume();
+    } else {
+      await player.pause();
+    }
+
+    // Trigger immediate UI update to reflect new play/pause state
+    void pushNowPlaying(player);
+
+    return { success: true, paused: player.paused };
+  });
+
+  // Skip handler
+  commandProcessor.registerHandler('skip', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: skip command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    // Check if queue is empty and autoplay is enabled
+    if (player.queue.tracks.length === 0) {
+      const autoplayConfig = await getAutoplayConfigCached(data.guildId);
+      if (autoplayConfig.enabled && autoplayConfig.mode !== 'off') {
+        // Trigger autoplay with current track as seed
+        const current = player.queue.current;
+        if (current) {
+          logger.info({ guildId: data.guildId, mode: autoplayConfig.mode }, 'Skip with empty queue - triggering autoplay');
+          await enqueueAutomix(player, current as { info?: { title?: string; author?: string; uri?: string; duration?: number } });
+          // Now skip to the new track
+          await player.skip();
+        } else {
+          return { success: false, error: 'No current track to base autoplay on' };
+        }
+      } else {
+        return { success: false, error: 'Cannot skip - queue is empty and autoplay is disabled' };
+      }
+    } else {
+      // Normal skip when queue has tracks
+      await player.skip();
+    }
+
+    // Trigger immediate UI update to reflect new track
+    void pushNowPlaying(player);
+
+    return { success: true };
+  });
+
+  // Stop handler
+  commandProcessor.registerHandler('stop', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: stop command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    await player.stopPlaying(true, false);
+
+    // Trigger immediate UI update to reflect stopped state
+    void pushNowPlaying(player);
+
+    return { success: true };
+  });
+
+  // Loop handler
+  commandProcessor.registerHandler('loop', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: loop command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    // Cycle through loop modes: off -> track -> queue -> off
+    const currentMode = player.repeatMode || 'off';
+    let newMode: 'off' | 'track' | 'queue';
+
+    switch (currentMode) {
+      case 'off':
+        newMode = 'track';
+        break;
+      case 'track':
+        newMode = 'queue';
+        break;
+      case 'queue':
+      default:
+        newMode = 'off';
+        break;
+    }
+
+    player.setRepeatMode(newMode);
+
+    // Trigger immediate UI update to reflect new loop mode
+    void pushNowPlaying(player);
+
+    return { success: true, mode: newMode };
+  });
+
+  // Shuffle handler
+  commandProcessor.registerHandler('shuffle', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: shuffle command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    player.queue.shuffle();
+
+    // Trigger immediate UI update to reflect shuffled queue
+    void pushNowPlaying(player);
+
+    return { success: true };
+  });
+
+  // Clear handler
+  commandProcessor.registerHandler('clear', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: clear command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    const len = player.queue.tracks.length;
+    if (len > 0) player.queue.splice(0, len);
+
+    // Trigger immediate UI update to reflect cleared queue
+    void pushNowPlaying(player);
+
+    return { success: true };
+  });
+
+  // Seek adjust handler
+  commandProcessor.registerHandler('seekAdjust', async (data) => {
+    logger.info({ guildId: data.guildId, deltaMs: data.deltaMs }, 'audio: seekAdjust command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player || !player.queue.current) return { success: false, error: 'No player or track found' };
+
+    const deltaMs = parseInt(data.deltaMs, 10);
+    const currentPosition = player.position || 0;
+    const newPosition = Math.max(0, currentPosition + deltaMs);
+
+    await player.seek(newPosition);
+
+    // Trigger immediate UI update to reflect new position
+    void pushNowPlaying(player);
+
+    return { success: true, position: newPosition };
+  });
+
+  // Autoplay toggle handler
+  commandProcessor.registerHandler('autoplay', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: autoplay command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    try {
+      // Get current autoplay settings
+      const settings = await prisma.serverConfiguration.findUnique({
+        where: { guildId: data.guildId },
+        select: { autoplayEnabled: true, autoplayMode: true, autoplayQueueSize: true }
+      });
+
+      const currentMode = settings?.autoplayMode || 'off';
+      let nextMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+      let nextEnabled: boolean;
+
+      // Cycle through modes: off -> similar -> artist -> genre -> mixed -> off
+      if (!settings?.autoplayEnabled || currentMode === 'off') {
+        nextMode = 'similar';
+        nextEnabled = true;
+      } else if (currentMode === 'similar') {
+        nextMode = 'artist';
+        nextEnabled = true;
+      } else if (currentMode === 'artist') {
+        nextMode = 'genre';
+        nextEnabled = true;
+      } else if (currentMode === 'genre') {
+        nextMode = 'mixed';
+        nextEnabled = true;
+      } else {
+        nextMode = 'off';
+        nextEnabled = false;
+      }
+
+      // Update configuration in database
+      await prisma.serverConfiguration.upsert({
+        where: { guildId: data.guildId },
+        create: {
+          guildId: data.guildId,
+          autoplayEnabled: nextEnabled,
+          autoplayMode: nextMode
+        },
+        update: {
+          autoplayEnabled: nextEnabled,
+          autoplayMode: nextMode
+        }
+      });
+
+      // Invalidate cache
+      const cacheKey = `autoplay_config_${data.guildId}`;
+      featureFlagCache.delete(cacheKey);
+      featureFlagCache.delete(featureFlagCache.generateFlagKey(data.guildId, 'autoplay'));
+
+      logger.info({ guildId: data.guildId, oldMode: currentMode, newMode: nextMode, enabled: nextEnabled }, 'Autoplay mode changed');
+
+      const current = player.queue.current as { info?: { title?: string; uri?: string; author?: string } } | undefined;
+
+      // If autoplay is enabled (any mode except 'off')
+      if (nextEnabled && nextMode !== 'off') {
+        // Clear current queue
+        player.queue.tracks.splice(0, player.queue.tracks.length);
+        logger.info({ guildId: data.guildId, mode: nextMode }, 'Cleared queue for autoplay mode change');
+
+        // Generate new queue based on selected mode
+        if (current?.info) {
+          const targetQueueSize = settings?.autoplayQueueSize || 10;
+          logger.info({ guildId: data.guildId, seedAmount: targetQueueSize, mode: nextMode }, 'Seeding queue with autoplay tracks');
+          await seedAutoplayTracks(player, current, nextMode as 'similar' | 'artist' | 'genre' | 'mixed', targetQueueSize);
+        }
+      } else if (!nextEnabled && nextMode === 'off') {
+        // Autoplay disabled, clear queue
+        player.queue.tracks.splice(0, player.queue.tracks.length);
+        logger.info({ guildId: data.guildId }, 'Cleared queue - autoplay disabled');
+      }
+
+      // Trigger immediate UI update to reflect new autoplay mode
+      void pushNowPlaying(player);
+
+      return { success: true, mode: nextMode, enabled: nextEnabled };
+    } catch (error) {
+      logger.error({ error, guildId: data.guildId }, 'Failed to toggle autoplay');
+      return { success: false, error: 'Failed to toggle autoplay' };
+    }
+  });
+
+  // SeedRelated handler (for backwards compatibility and manual triggering)
+  commandProcessor.registerHandler('seedRelated', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: seedRelated command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player || !player.queue.current) return { success: false, error: 'No player or track found' };
+
+    try {
+      // Get autoplay settings
+      const settings = await prisma.serverConfiguration.findUnique({
+        where: { guildId: data.guildId },
+        select: { autoplayEnabled: true, autoplayMode: true, autoplayQueueSize: true }
+      });
+
+      if (!settings?.autoplayEnabled) {
+        return { success: false, error: 'Autoplay not enabled' };
+      }
+
+      const current = player.queue.current as { info?: { title?: string; uri?: string; author?: string } };
+      const currentQueueLen = player.queue.tracks.length;
+      const targetQueueSize = settings.autoplayQueueSize || 10;
+      const seedAmount = Math.max(0, targetQueueSize - currentQueueLen);
+
+      if (seedAmount > 0) {
+        logger.info({ guildId: data.guildId, seedAmount, mode: settings.autoplayMode }, 'Seeding related tracks');
+        await seedAutoplayTracks(player, current, settings.autoplayMode as 'similar' | 'artist' | 'genre' | 'mixed', seedAmount);
+      }
+
+      return { success: true, tracksAdded: seedAmount };
+    } catch (error) {
+      logger.error({ error, guildId: data.guildId }, 'Failed to seed related tracks');
+      return { success: false, error: 'Failed to seed related tracks' };
+    }
+  });
+
+  // Previous handler
+  commandProcessor.registerHandler('previous', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: previous command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    // Skip to previous track in history (implementation depends on your queue system)
+    // For basic implementation, we can use the skipToPrevious if available
+    try {
+      if (player.queue.previous.length > 0) {
+        // Move current to queue front
+        if (player.queue.current) {
+          player.queue.tracks.unshift(player.queue.current);
+        }
+        // Get previous track and play it
+        const previousTrack = player.queue.previous.pop();
+        if (previousTrack) {
+          await player.play({ track: previousTrack });
+        }
+      } else {
+        // If no previous tracks, restart current track
+        await player.seek(0);
+      }
+
+      // Trigger immediate UI update to reflect new track
+      void pushNowPlaying(player);
+
+      return { success: true };
+    } catch (error) {
+      logger.error({ error, guildId: data.guildId }, 'Failed to skip to previous track');
+      return { success: false, error: 'Failed to skip to previous track' };
+    }
+  });
+
+  // Mute handler
+  commandProcessor.registerHandler('mute', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: mute command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    // Toggle mute by setting volume to 0 or restoring previous volume
+    const currentVolume = player.volume ?? 100;
+    const targetVolume = currentVolume > 0 ? 0 : 100;
+
+    await player.setVolume(targetVolume);
+
+    // Trigger immediate UI update to reflect new volume level
+    void pushNowPlaying(player);
+
+    return { success: true, volume: targetVolume, muted: targetVolume === 0 };
+  });
+
+  // Filters handler (placeholder)
+  commandProcessor.registerHandler('filters', async (data) => {
+    logger.info({ guildId: data.guildId }, 'audio: filters command received via Redis Streams');
+
+    const player = manager.getPlayer(data.guildId);
+    if (!player) return { success: false, error: 'No player found' };
+
+    // Placeholder for filters functionality
+    // This would cycle through different audio filters/effects
+    return { success: true, message: 'Filters not implemented yet' };
+  });
+
+  logger.info('Redis Streams command handlers registered successfully');
+} catch (error) {
+  logger.error({ error }, 'Failed to register Redis Streams command handlers');
+}
+
 
 type CommandMessage =
   | { type: 'play'; guildId: string; voiceChannelId: string; textChannelId: string; userId: string; query: string; requestId?: string }
@@ -207,7 +611,7 @@ type CommandMessage =
   | { type: 'loop'; guildId: string }
   | { type: 'loopSet'; guildId: string; mode: 'off' | 'track' | 'queue' }
   | { type: 'volumeAdjust'; guildId: string; delta: number }
-  | { type: 'nowplaying'; guildId: string; requestId: string }
+  | { type: 'nowplaying'; guildId: string; requestId?: string; channelId?: string }
   | { type: 'queue'; guildId: string; requestId: string }
   | { type: 'seek'; guildId: string; positionMs: number }
   | { type: 'seekAdjust'; guildId: string; deltaMs: number }
@@ -215,7 +619,10 @@ type CommandMessage =
   | { type: 'remove'; guildId: string; index: number }
   | { type: 'clear'; guildId: string }
   | { type: 'move'; guildId: string; from: number; to: number }
-  | { type: 'seedRelated'; guildId: string };
+  | { type: 'seedRelated'; guildId: string }
+  | { type: 'previous'; guildId: string }
+  | { type: 'mute'; guildId: string }
+  | { type: 'filters'; guildId: string };
 // Handle raw events from Discord via Redis
 await redisSub.subscribe('discord-bot:to-audio', async (message) => {
   try {
@@ -485,10 +892,13 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
        * - Intelligent autoplay seeding for enhanced user experience
        */
       if (res.tracks.length > 0) {
+        // PLAYLIST SUPPORT: Detect if this is a playlist (multiple tracks)
+        const isPlaylist = res.tracks.length > 1;
         let chosen = res.tracks[0] as Track | UnresolvedTrack;
+
         // If a YouTube URL was provided, try to pick the exact video-id match
         const isUrl = /^https?:\/\//i.test(playData.query);
-        if (isUrl) {
+        if (isUrl && !isPlaylist) { // Only for single tracks, not playlists
           try {
             const u = new URL(playData.query);
             let vid = '';
@@ -503,7 +913,19 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
             }
           } catch { /* ignore */ }
         }
+
         const first = chosen;
+
+        // PLAYLIST PROCESSING: Get all playlist tracks for later addition
+        const playlistTracks = isPlaylist ? res.tracks as (Track | UnresolvedTrack)[] : [];
+
+        if (isPlaylist) {
+          logger.info({
+            guildId: playData.guildId,
+            trackCount: res.tracks.length,
+            query: playData.query
+          }, 'PLAYLIST: Processing playlist with multiple tracks');
+        }
         
         // Validate track duration - reject tracks longer than 5 hours
         const MAX_DURATION_MS = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
@@ -716,6 +1138,16 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
               }
             })();
           }
+
+          // REMOVED: Automatic playlist track addition
+          // Only autoplay should generate queue tracks automatically
+          if (isPlaylist && playlistTracks.length > 1) {
+            logger.info({
+              guildId: playData.guildId,
+              playlistSize: playlistTracks.length,
+              query: playData.query
+            }, 'PLAYLIST: Detected playlist but only playing first track (autoplay will handle queue generation)');
+          }
         } else {
           // PLAY/PLAYNEXT: Add to queue when music is already playing
           const isPlayNext = data?.type === 'playnext';
@@ -728,6 +1160,22 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
           }, 'audio: adding track to queue');
 
           await player.queue.add(first, position);
+
+          // REMOVED: Automatic playlist track addition
+          // Only autoplay should generate queue tracks automatically
+          if (isPlaylist && playlistTracks.length > 1) {
+            logger.info({
+              guildId: playData.guildId,
+              playlistSize: playlistTracks.length,
+              query: playData.query,
+              commandType: data?.type
+            }, 'PLAYLIST: Detected playlist but only adding first track (autoplay will handle queue generation)');
+          }
+
+          // Calculate the actual position where the track was inserted
+          // For playnext (position = 0): track is at index 0, so display position is 1
+          // For play (position = undefined): track is at the end, so position is the length
+          const actualQueuePosition = isPlayNext ? 1 : player.queue.tracks.length;
 
           // Track queue operation
           audioMetrics.trackQueueOperation(
@@ -762,7 +1210,7 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
                       duration: trackInfo.info.duration,
                       uri: trackInfo.info.uri
                     },
-                    queuePosition: player.queue.tracks.length,
+                    queuePosition: actualQueuePosition,
                     requestedBy: playData.userId,
                     textChannelId: playData.textChannelId,
                     command: data?.type, // Command type (play/playnext)
@@ -1022,60 +1470,6 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       await saveQueue(data.guildId, player);
       return;
     }
-    if (data.type === 'seedRelated') {
-      const player = manager.getPlayer(data.guildId);
-      if (!player) return;
-      try {
-        const enabled = await isAutomixEnabledCached(player.guildId);
-        if (!enabled) {
-          logger.info({ guildId: data.guildId }, 'seedRelated: autoplay disabled, skipping');
-          return;
-        }
-        
-        const current = player.queue.current as { info?: { title?: string; uri?: string } } | undefined;
-        if (!current?.info) {
-          logger.warn({ guildId: data.guildId }, 'seedRelated: no current track to base recommendations on');
-          return;
-        }
-        
-        // Allow seeding even with existing queue, but limit to prevent over-population
-        const currentQueueLen = player.queue.tracks.length;
-        const maxSeedTarget = 10;
-        const seedAmount = Math.max(0, maxSeedTarget - currentQueueLen);
-        
-        if (seedAmount <= 0) {
-          logger.info({ guildId: data.guildId, currentQueueLen }, 'seedRelated: queue already sufficiently populated');
-          return;
-        }
-        
-        logger.info({ 
-          guildId: data.guildId, 
-          currentQueueLen, 
-          seedAmount,
-          trackTitle: current.info.title 
-        }, 'seedRelated: seeding tracks');
-        
-        const seeded = await seedRelatedQueue(
-          player as unknown as import('./autoplay').LLPlayer,
-          current as unknown as import('./autoplay').LLTrack,
-          async (q: string) => {
-            const r = await player.search({ query: q }, { id: 'seed-related' } as { id: string });
-            return { tracks: r.tracks as unknown as import('./autoplay').LLTrack[] };
-          },
-          seedAmount,
-        );
-        
-        if (seeded > 0) {
-          logger.info({ guildId: data.guildId, seeded }, 'seedRelated: successfully added tracks');
-          batchQueueSaver.scheduleUpdate(data.guildId, player);
-        } else {
-          logger.warn({ guildId: data.guildId }, 'seedRelated: no suitable tracks found');
-        }
-      } catch (e) {
-        logger.error({ e, guildId: data.guildId }, 'seedRelated command failed');
-      }
-      return;
-    }
     if (data.type === 'volumeAdjust') {
       const player = manager.getPlayer(data.guildId);
       if (!player) return;
@@ -1091,29 +1485,86 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       const current = player?.queue.current;
       type TrackInfoLite = { title?: string; uri?: string; author?: string; duration?: number; isStream?: boolean; artworkUrl?: string };
       const info = current ? ((current as { info?: TrackInfoLite }).info) : undefined;
-      const response = info
-        ? {
-            title: info.title ?? 'Unknown',
-            uri: info.uri,
-            author: info.author,
-            durationMs: (info.duration ?? 0) as number,
-            positionMs: player?.position ?? 0,
-            isStream: !!info.isStream,
-            artworkUrl: info.artworkUrl,
-            paused: !!player?.paused,
-            repeatMode: (player?.repeatMode ?? 'off') as 'off' | 'track' | 'queue',
+
+      if (!info) {
+        // Send "no track playing" message to Discord
+        await redisPub.publish(
+          'discord-bot:to-discord',
+          JSON.stringify({
+            guildId: data.guildId,
+            payload: {
+              op: 'ephemeral_message',
+              message: 'No track currently playing.',
+              textChannelId: data.channelId
+            }
+          })
+        );
+        return;
+      }
+
+      // Format basic text response for free version
+      const formatTime = (ms: number): string => {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const sec = seconds % 60;
+        return `${minutes}:${sec.toString().padStart(2, '0')}`;
+      };
+
+      const position = player?.position ?? 0;
+      const duration = info.duration ?? 0;
+      const percentage = duration > 0 ? Math.round((position / duration) * 100) : 0;
+
+      let response = `🎵 **Now Playing**\n`;
+      response += `**${info.title}**\n`;
+      if (info.author) {
+        response += `*by ${info.author}*\n`;
+      }
+      if (!info.isStream) {
+        response += `**${formatTime(position)}** / **${formatTime(duration)}** (${percentage}%)\n`;
+      } else {
+        response += `**Live Stream**\n`;
+      }
+      if (player?.paused) {
+        response += `Status: **Paused**`;
+      } else {
+        response += `Status: **Playing**`;
+      }
+
+      // Send formatted message to Discord
+      await redisPub.publish(
+        'discord-bot:to-discord',
+        JSON.stringify({
+          guildId: data.guildId,
+          payload: {
+            op: 'ephemeral_message',
+            message: response,
+            textChannelId: data.channelId
           }
-        : null;
-      await redisPub.publish(`discord-bot:response:${data.requestId}`, JSON.stringify(response));
+        })
+      );
       return;
     }
     if (data.type === 'queue') {
+      logger.info({ guildId: data.guildId, requestId: data.requestId }, 'audio: queue command received');
+
       const player = manager.getPlayer(data.guildId);
       const items = (player?.queue.tracks ?? []).slice(0, 10).map((t: { info?: { title?: string; uri?: string } }) => {
         const info = t.info;
         return { title: info?.title ?? 'Unknown', uri: info?.uri };
       });
-      await redisPub.publish(`discord-bot:response:${data.requestId}`, JSON.stringify({ items }));
+
+      const response = { items };
+      const responseChannel = `discord-bot:response:${data.requestId}`;
+
+      logger.info({
+        guildId: data.guildId,
+        requestId: data.requestId,
+        responseChannel,
+        queueSize: items.length,
+        hasPlayer: !!player
+      }, 'audio: publishing queue response');
+
+      await redisPub.publish(responseChannel, JSON.stringify(response));
       return;
     }
     if (data.type === 'seek') {
@@ -1155,19 +1606,145 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       return;
     }
     if (data.type === 'move') {
+      logger.info({ guildId: data.guildId, from: data.from, to: data.to }, 'audio: move command received');
+
       const player = manager.getPlayer(data.guildId);
       if (player) {
         const from = Math.max(1, data.from) - 1;
         const to = Math.max(1, data.to) - 1;
         const track = player.queue.tracks[from];
+
+        logger.info({
+          guildId: data.guildId,
+          fromIndex: from,
+          toIndex: to,
+          trackTitle: track?.info?.title,
+          queueLength: player.queue.tracks.length
+        }, 'audio: executing move operation');
+
         if (track) {
           player.queue.splice(from, 1);
           await player.queue.add(track, to);
           batchQueueSaver.scheduleUpdate(data.guildId, player);
+
+          logger.info({
+            guildId: data.guildId,
+            trackTitle: track.info?.title,
+            from: data.from,
+            to: data.to
+          }, 'audio: track moved successfully');
+        } else {
+          logger.warn({
+            guildId: data.guildId,
+            from: data.from,
+            to: data.to,
+            queueLength: player.queue.tracks.length
+          }, 'audio: track not found at source position');
         }
+      } else {
+        logger.warn({ guildId: data.guildId }, 'audio: no player found for move command');
       }
       return;
     }
+
+    // Previous track command - implements the double-tap logic
+    if (data.type === 'previous') {
+      logger.info({ guildId: data.guildId }, 'audio: previous command received');
+
+      const player = manager.getPlayer(data.guildId);
+      if (player && player.queue.current) {
+        const now = Date.now();
+        const guildKey = `previous_${data.guildId}`;
+        const lastPreviousTime = previousTrackTimestamps.get(guildKey) || 0;
+
+        // Check if this is a double-tap (within 3 seconds)
+        if (now - lastPreviousTime < 3000) {
+          // Double-tap: go to previous track
+          const previousTrack = previousTracks.get(data.guildId);
+          if (previousTrack) {
+            logger.info({
+              guildId: data.guildId,
+              previousTrackTitle: previousTrack.info.title
+            }, 'audio: playing previous track (double-tap)');
+
+            // Store current track as the new previous
+            if (player.queue.current) {
+              previousTracks.set(data.guildId, player.queue.current);
+            }
+
+            await player.play({ track: previousTrack });
+          } else {
+            // No previous track, just restart current
+            logger.info({ guildId: data.guildId }, 'audio: no previous track, restarting current');
+            await player.seek(0);
+          }
+        } else {
+          // Single tap: restart current track
+          logger.info({ guildId: data.guildId }, 'audio: restarting current track (single-tap)');
+          await player.seek(0);
+        }
+
+        // Update timestamp for double-tap detection
+        previousTrackTimestamps.set(guildKey, now);
+      } else {
+        logger.warn({ guildId: data.guildId }, 'audio: no player or track found for previous command');
+      }
+      return;
+    }
+
+    // Mute/unmute command
+    if (data.type === 'mute') {
+      logger.info({ guildId: data.guildId }, 'audio: mute command received');
+
+      const player = manager.getPlayer(data.guildId);
+      if (player) {
+        const currentVolume = player.volume;
+        const guildKey = `mute_${data.guildId}`;
+
+        if (mutedVolumes.has(guildKey)) {
+          // Unmute: restore previous volume
+          const previousVolume = mutedVolumes.get(guildKey) || 100;
+          await player.setVolume(previousVolume);
+          mutedVolumes.delete(guildKey);
+
+          logger.info({
+            guildId: data.guildId,
+            restoredVolume: previousVolume
+          }, 'audio: unmuted, volume restored');
+        } else {
+          // Mute: store current volume and set to 0
+          mutedVolumes.set(guildKey, currentVolume);
+          await player.setVolume(0);
+
+          logger.info({
+            guildId: data.guildId,
+            storedVolume: currentVolume
+          }, 'audio: muted, volume stored');
+        }
+      } else {
+        logger.warn({ guildId: data.guildId }, 'audio: no player found for mute command');
+      }
+      return;
+    }
+
+    // Filters command (placeholder for future implementation)
+    if (data.type === 'filters') {
+      logger.info({ guildId: data.guildId }, 'audio: filters command received');
+
+      // For now, just log that filters are not yet implemented
+      logger.info({ guildId: data.guildId }, 'audio: filters feature coming soon');
+
+      // Send a UI response indicating filters are coming soon
+      await redisPub.publish('discord-bot:to-discord', JSON.stringify({
+        type: 'command_response',
+        guildId: data.guildId,
+        success: false,
+        message: '🎚️ Audio filters coming soon! Stay tuned for bass boost, nightcore, and more.',
+        responseType: 'filters_not_implemented'
+      }));
+      return;
+    }
+
   } catch (e) {
     // CRITICAL FIX: Simplified error logging with guaranteed information
     const errorMessage = e instanceof Error ? e.message : String(e);
@@ -1385,6 +1962,21 @@ manager.on('trackStart', (player, track) => {
   lavalinkEvents.labels('trackStart').inc();
   const info = (track as { info?: { title?: string; uri?: string; duration?: number } })?.info;
   logger.info({ guildId: player.guildId, title: info?.title, uri: info?.uri }, 'audio: track start');
+
+  // Store the current track as the new previous track for future use
+  // We store each track when it starts playing for the previous track functionality
+  const currentTrackData = (player as any)._lastTrack;
+  if (currentTrackData && currentTrackData !== track) {
+    previousTracks.set(player.guildId, currentTrackData);
+    logger.debug({
+      guildId: player.guildId,
+      previousTrackTitle: (currentTrackData as any)?.info?.title,
+      currentTrackTitle: info?.title
+    }, 'audio: stored previous track for double-tap functionality');
+  }
+
+  // Store current track for next time
+  (player as any)._lastTrack = track;
 
   // Track listening analytics for predictive caching
   if (info?.title) {
@@ -1685,7 +2277,13 @@ process.on('SIGINT', async () => {
   try {
     // Flush any pending queue updates
     await batchQueueSaver.flush();
-    
+
+    // Shutdown Redis Streams CommandProcessor
+    await commandProcessor.shutdown();
+
+    // Shutdown Redis Streams monitoring
+    await audioStreamsMonitoring.shutdown();
+
     // Stop memory monitoring
     memoryManager.stopMonitoring();
 
@@ -1745,11 +2343,11 @@ export async function getQueueCached(guildId: string) { return _getQueueCached(g
 // --- Automix (simple heuristic): when queue is empty after a track ends, enqueue a similar track if enabled ---
 async function isAutomixEnabled(guildId: string): Promise<boolean> {
   try {
-    const flag = await prisma.featureFlag.findFirst({ 
-      where: { guildId, OR: [{ name: 'autoplay' }, { name: 'automix' }] },
-      select: { enabled: true }
+    const config = await prisma.serverConfiguration.findUnique({
+      where: { guildId },
+      select: { autoplayEnabled: true }
     });
-    return !!flag?.enabled;
+    return !!config?.autoplayEnabled;
   } catch { return false; }
 }
 
@@ -1767,10 +2365,89 @@ async function isAutomixEnabledCached(guildId: string): Promise<boolean> {
   );
 }
 
+async function getAutoplayConfigCached(guildId: string): Promise<{ enabled: boolean; mode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed' }> {
+  const settings = await prisma.serverConfiguration.findUnique({
+    where: { guildId },
+    select: { autoplayEnabled: true, autoplayMode: true }
+  });
+  return {
+    enabled: settings?.autoplayEnabled ?? false,
+    mode: (settings?.autoplayMode || 'off') as 'off' | 'similar' | 'artist' | 'genre' | 'mixed'
+  };
+}
+
+async function seedAutoplayTracks(
+  player: import('lavalink-client').Player,
+  current: { info?: { title?: string; author?: string; uri?: string } },
+  mode: 'similar' | 'artist' | 'genre' | 'mixed',
+  count: number
+) {
+  logger.info({
+    guildId: player.guildId,
+    mode,
+    count,
+    currentTrack: current.info?.title,
+    hasPlayer: !!player,
+    hasQueue: !!player.queue
+  }, 'Seeding autoplay tracks');
+
+  const searchFn = async (q: string) => {
+    const res = await player.search({ query: q }, { id: 'automix' } as { id: string });
+    return { tracks: res.tracks as unknown as import('./autoplay').LLTrack[] };
+  };
+
+  const baseTrack = current as unknown as import('./autoplay').LLTrack;
+  let addedCount = 0;
+
+  try {
+    logger.info({ guildId: player.guildId, mode }, `About to call seed function for mode: ${mode}`);
+    switch (mode) {
+      case 'similar':
+        addedCount = await seedRelatedQueue(player as unknown as import('./autoplay').LLPlayer, baseTrack, searchFn, count);
+        break;
+      case 'artist':
+        addedCount = await seedByArtist(player as unknown as import('./autoplay').LLPlayer, baseTrack, searchFn, count);
+        break;
+      case 'genre':
+        addedCount = await seedByGenre(player as unknown as import('./autoplay').LLPlayer, baseTrack, searchFn, count);
+        break;
+      case 'mixed':
+        addedCount = await seedMixed(player as unknown as import('./autoplay').LLPlayer, baseTrack, searchFn, count);
+        break;
+      default:
+        logger.warn({ guildId: player.guildId, mode }, 'Unknown autoplay mode, defaulting to similar');
+        addedCount = await seedRelatedQueue(player as unknown as import('./autoplay').LLPlayer, baseTrack, searchFn, count);
+    }
+
+    // Trigger database save
+    batchQueueSaver.scheduleUpdate(player.guildId, player);
+
+    logger.info({ guildId: player.guildId, mode, requested: count, added: addedCount }, 'Finished seeding autoplay tracks');
+
+    // Track autoplay success metric
+    if (addedCount > 0) {
+      audioMetrics.trackAutoplayRecommendation(player.guildId, mode, true);
+    }
+  } catch (error) {
+    logger.error({
+      error: error instanceof Error ? { message: error.message, stack: error.stack, name: error.name } : error,
+      guildId: player.guildId,
+      mode
+    }, 'Failed to seed autoplay tracks');
+    audioMetrics.trackAutoplayRecommendation(player.guildId, mode, false);
+  }
+
+  return addedCount;
+}
+
 async function enqueueAutomix(player: import('lavalink-client').Player, last: { info?: { title?: string; author?: string; uri?: string; duration?: number } }) {
   const title = (last?.info?.title ?? '').trim();
   const author = (last?.info?.author ?? '').trim();
   const uri = last?.info?.uri ?? '';
+
+  // Get autoplay configuration to respect user's selected mode
+  const autoplayConfig = await getAutoplayConfigCached(player.guildId);
+  const mode = autoplayConfig.mode === 'off' ? 'similar' : autoplayConfig.mode;
 
   const pick = await pickAutomixTrack(
     async (q: string) => {
@@ -1783,12 +2460,12 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   );
 
   if (!pick) {
-    logger.warn({ guildId: player.guildId, title, author }, 'automix: no candidate found');
+    logger.warn({ guildId: player.guildId, title, author, mode }, 'automix: no candidate found');
 
     // Track failed autoplay recommendation
     audioMetrics.trackAutoplayRecommendation(
       player.guildId,
-      'similar', // Default type
+      mode,
       false // Failed
     );
 
@@ -1797,12 +2474,12 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
 
   try {
     const info = (pick as { info?: { title?: string; uri?: string; duration?: number } }).info;
-    logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri }, 'automix: picked candidate');
+    logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri, mode }, 'automix: picked candidate');
 
     // Track successful autoplay recommendation
     audioMetrics.trackAutoplayRecommendation(
       player.guildId,
-      'similar', // Default recommendation type
+      mode,
       true,      // Success
       info?.title
     );
@@ -1824,23 +2501,21 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   } catch { /* ignore */ }
 
   await ensurePlayback(player as unknown as import('./autoplay').LLPlayer, pick as unknown as import('./autoplay').LLTrack);
-  // Si la cola queda corta, volver a sembrar relacionados para mantener reproducción continua
+
+  // Use seedAutoplayTracks to respect the user's selected autoplay mode
   try {
     const qlen = player.queue.tracks.length;
     if (qlen < 3) {
-      const seeded = await seedRelatedQueue(
-        player as unknown as import('./autoplay').LLPlayer,
-        pick as unknown as import('./autoplay').LLTrack,
-        async (q: string) => {
-          const r = await player.search({ query: q }, { id: 'automix' } as { id: string });
-          return { tracks: r.tracks as unknown as import('./autoplay').LLTrack[] };
-        },
-        10,
+      const seeded = await seedAutoplayTracks(
+        player,
+        pick as { info?: { title?: string; author?: string; uri?: string } },
+        mode,
+        10
       );
-      if (seeded > 0) logger.info({ guildId: player.guildId, seeded }, 'automix: refilled related tracks');
+      if (seeded > 0) logger.info({ guildId: player.guildId, seeded, mode }, 'automix: refilled tracks using configured mode');
     }
   } catch (e) {
-    logger.error({ e }, 'automix: failed to refill related tracks');
+    logger.error({ e, mode }, 'automix: failed to refill tracks');
   }
   await saveQueue(player.guildId, player);
 }
@@ -1888,8 +2563,8 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
     const last = autoplayCooldown.get(player.guildId) ?? 0;
     if (now - last < 1500) return;
     autoplayCooldown.set(player.guildId, now);
-    // No ejecutar autoplay si loop está activo
-    if ((player.repeatMode ?? 'off') !== 'off') return;
+    // No ejecutar autoplay si loop de track está activo (queue loop debe permitir autoplay cuando se acaba la cola)
+    if ((player.repeatMode ?? 'off') === 'track') return;
     // Si hay reproducción en curso o cola con elementos, no hacemos autoplay
     if (player.playing || player.queue.current || player.queue.tracks.length > 0) return;
     // Autoplay habilitado?
@@ -1902,6 +2577,8 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
       }
       return;
     }
+
+    // Enqueue one track to start playing immediately
     await enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } });
   } catch (e) {
     logger.error({ e }, 'automix failed');
@@ -1922,6 +2599,15 @@ const guildTextChannels = new TTLMap<string, string>({
   defaultTTL: 1800000,    // 30 minutes TTL
   cleanupInterval: 300000 // Cleanup every 5 minutes
 });
+
+// Track previous tracks for double-tap previous functionality
+const previousTracks = new Map<string, import('lavalink-client').Track>();
+
+// Track timestamps for double-tap detection
+const previousTrackTimestamps = new Map<string, number>();
+
+// Store muted volumes for each guild
+const mutedVolumes = new Map<string, number>();
 
 // CRITICAL FIX: Track pending players waiting for voice credentials
 const pendingPlayerConnections = new Map<string, {
@@ -1997,7 +2683,10 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
     // CRITICAL FIX: Get stored textChannelId for this guild
     const textChannelId = guildTextChannels.get(guildId);
 
-    const payload: { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused: boolean; repeatMode?: 'off' | 'track' | 'queue'; queueLen: number; hasTrack: boolean; canSeek: boolean; volume: number; textChannelId?: string } = {
+    // Get autoplay state from database
+    const autoplayConfig = await getAutoplayConfigCached(guildId);
+
+    const payload: { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused: boolean; repeatMode?: 'off' | 'track' | 'queue'; queueLen: number; hasTrack: boolean; canSeek: boolean; volume: number; autoplay: boolean; autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed'; textChannelId?: string } = {
       guildId,
       title: current.info.title ?? 'Unknown',
       durationMs: Math.floor((current.info.duration ?? 0) as number),
@@ -2009,6 +2698,8 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
       hasTrack: !!player.queue.current,
       canSeek: !current.info.isStream,
       volume: player.volume ?? 100,
+      autoplay: autoplayConfig.enabled,
+      autoplayMode: autoplayConfig.mode,
       ...(textChannelId ? { textChannelId } : {}),
     };
     
@@ -2036,6 +2727,9 @@ async function pushIdleState(player: import('lavalink-client').Player) {
     // CRITICAL FIX: Get stored textChannelId for this guild
     const textChannelId = guildTextChannels.get(player.guildId);
 
+    // Get autoplay state from database
+    const autoplayConfig = await getAutoplayConfigCached(player.guildId);
+
     const payload = {
       guildId: player.guildId,
       title: 'Nothing playing',
@@ -2050,6 +2744,8 @@ async function pushIdleState(player: import('lavalink-client').Player) {
       queueLen: player.queue.tracks.length,
       hasTrack: false,
       canSeek: false,
+      autoplay: autoplayConfig.enabled,
+      autoplayMode: autoplayConfig.mode,
       ...(textChannelId ? { textChannelId } : {}),
     };
     await redisPub.publish('discord-bot:ui:now', JSON.stringify(payload));
