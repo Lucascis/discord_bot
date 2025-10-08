@@ -24,7 +24,7 @@
     "@discord-bot/database": "workspace:*"
   },
   "optionalDependencies": {
-    "@opentelemetry/resources": "^1.23.0",
+    "@opentelemetry/resources": "^2.1.0",
     "@opentelemetry/semantic-conventions": "^1.23.0"
   },
   "devDependencies": {
