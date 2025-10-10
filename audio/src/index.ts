@@ -2594,9 +2594,10 @@ const lastUiPush = new TTLMap<string, number>({
 const minUiInterval = Math.max(1000, env.NOWPLAYING_UPDATE_MS ?? 5000);
 
 // CRITICAL FIX: Store textChannelId for each guild to send UI updates to correct channel
+// Increased TTL to 24 hours to prevent UI freeze after 30 minutes
 const guildTextChannels = new TTLMap<string, string>({
   maxSize: 300,           // Max 300 guilds
-  defaultTTL: 1800000,    // 30 minutes TTL
+  defaultTTL: 86400000,   // 24 hours TTL (prevents UI freeze)
   cleanupInterval: 300000 // Cleanup every 5 minutes
 });
 
@@ -2680,8 +2681,12 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
     const current = player.queue.current as { info?: { title?: string; uri?: string; author?: string; duration?: number; isStream?: boolean; artworkUrl?: string } } | undefined;
     if (!current?.info) return;
     lastUiPush.set(guildId, now);
-    // CRITICAL FIX: Get stored textChannelId for this guild
+    // CRITICAL FIX: Get stored textChannelId for this guild and renew TTL
     const textChannelId = guildTextChannels.get(guildId);
+    // Renew TTL by setting it again if it exists (keeps UI channel alive while playing)
+    if (textChannelId) {
+      guildTextChannels.set(guildId, textChannelId);
+    }
 
     // Get autoplay state from database
     const autoplayConfig = await getAutoplayConfigCached(guildId);
@@ -2724,8 +2729,12 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
 // render controls enabled for autoplay while disabling playback actions.
 async function pushIdleState(player: import('lavalink-client').Player) {
   try {
-    // CRITICAL FIX: Get stored textChannelId for this guild
+    // CRITICAL FIX: Get stored textChannelId for this guild and renew TTL
     const textChannelId = guildTextChannels.get(player.guildId);
+    // Renew TTL by setting it again if it exists (keeps UI channel alive)
+    if (textChannelId) {
+      guildTextChannels.set(player.guildId, textChannelId);
+    }
 
     // Get autoplay state from database
     const autoplayConfig = await getAutoplayConfigCached(player.guildId);
