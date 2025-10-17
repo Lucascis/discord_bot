@@ -2,6 +2,7 @@ services:
   # Database service
   postgres:
     image: postgres:15-alpine
+    container_name: discord-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -24,6 +25,7 @@ services:
   # Redis cache service
   redis:
     image: redis:7-alpine
+    container_name: discord-redis
     ports:
       - "6379:6379"
     volumes:
@@ -40,18 +42,18 @@ services:
   # Lavalink audio server
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4
+    container_name: discord-lavalink
     env_file: .env
     environment:
-      SERVER_PORT: ${LAVALINK_PORT:-2333}
-      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD}
       JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
     ports:
-      - "${LAVALINK_PORT:-2333}:${LAVALINK_PORT:-2333}"
+      - "2333:2333"
     volumes:
       - lavalink_logs:/opt/Lavalink/logs
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - ./lavalink/plugins:/opt/Lavalink/plugins:rw
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -H 'Authorization: ${LAVALINK_PASSWORD}' http://localhost:${LAVALINK_PORT:-2333}/version || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:2333/version || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -66,11 +68,9 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    command: node gateway/dist/main.js
+    container_name: discord-gateway
+    command: node gateway/dist/index.js
     env_file: .env
-    environment:
-      NODE_ENV: production
-      PORT: 3001
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,19 +92,19 @@ services:
         reservations:
           memory: 256M
 
-  # REST API Service  
+  # REST API Service
   api:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    command: ["node", "api/dist/index.js"]
+    container_name: discord-api
+    command: node api/dist/index.js
     env_file: .env
-    environment:
-      NODE_ENV: production
-      PORT: 3000
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "3000:3000"
@@ -126,11 +126,9 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+    container_name: discord-audio
     command: node audio/dist/index.js
     env_file: .env
-    environment:
-      NODE_ENV: production
-      PORT: 3002
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,15 +156,13 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+    container_name: discord-worker
     command: node worker/dist/index.js
     env_file: .env
-    environment:
-      NODE_ENV: production
-      PORT: 3003
     depends_on:
       postgres:
         condition: service_healthy
-      lavalink:
+      redis:
         condition: service_healthy
     ports:
       - "3003:3003"

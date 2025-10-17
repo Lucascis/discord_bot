@@ -1,5 +1,6 @@
 server:
-  port: 2334
+  port: 2333
+  address: 0.0.0.0
   # Performance optimization
   compression:
     enabled: true
@@ -7,7 +8,7 @@ server:
 
 lavalink:
   server:
-    password: "c0mm3rc1al_lav4l1nk_s3cur3_2025"
+    password: ${LAVALINK_PASSWORD:youshallnotpass}
     # Disable built-in YouTube source to use plugin
     sources:
       youtube: false

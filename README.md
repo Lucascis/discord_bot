@@ -92,19 +92,72 @@ pnpm test
 - También existen tests básicos del paquete `@discord-bot/commands` para decoradores y middleware.
 - Si agregás un nuevo paquete del workspace que se importe en código testeado, recordá añadir su alias en `vitest.config.ts` para evitar fallas en CI por falta de `dist/`.
 
-## Docker
+## 🐳 Docker (Recomendado para Producción)
+
+### Quick Start con Docker
+
 ```bash
-docker-compose up --build
+# 1. Copiar configuración
+cp .env.example .env
+
+# 2. Editar .env con tus credenciales de Discord
+# DISCORD_TOKEN=tu-token-aqui
+# DISCORD_APPLICATION_ID=tu-app-id-aqui
+
+# 3. Iniciar todos los servicios
+docker compose up -d
+
+# 4. Verificar estado
+docker compose ps
+docker compose logs -f
 ```
 
-Para orquestación completa con healthchecks, métricas y migraciones, ver `make prod-reset` y `scripts/prod.sh`.
+### Servicios Incluidos
+- **PostgreSQL 15**: Base de datos principal
+- **Redis 7**: Cache y pub/sub para comunicación entre servicios
+- **Lavalink 4**: Servidor de audio con plugins avanzados
+- **Gateway**: Servicio de Discord.js (puerto 3001)
+- **Audio**: Procesamiento de música y autoplay (puerto 3002)
+- **API**: REST API (puerto 3000)
+- **Worker**: Tareas en segundo plano (puerto 3003)
 
-Build de la imagen monolítica (multi-stage):
+### Scripts de Testing
+
+**macOS/Linux:**
 ```bash
-DOCKER_BUILDKIT=1 docker build -t discord-bot:latest .
+./scripts/test-docker.sh
 ```
 
-La imagen incluye los 4 servicios (gateway/audio/api/worker). El entrypoint por defecto imprime ayuda; usá docker-compose para iniciar cada servicio con su comando.
+**Windows PowerShell:**
+```powershell
+.\scripts\test-docker.ps1
+```
+
+### Documentación Completa
+Ver **[DOCKER_README.md](./DOCKER_README.md)** para:
+- Guía detallada de deployment multi-plataforma (Windows/macOS/Linux)
+- Troubleshooting común
+- Comandos de mantenimiento
+- Configuración avanzada
+- Testing y validación
+
+### Comandos Útiles
+```bash
+# Ver logs de un servicio específico
+docker compose logs -f gateway
+
+# Reiniciar un servicio
+docker compose restart audio
+
+# Detener todo (mantiene datos)
+docker compose down
+
+# Resetear completamente (borra todo)
+docker compose down -v
+
+# Reconstruir después de cambios en el código
+docker compose up -d --build
+```
 
 ## Sistema Autoplay Avanzado (Fase 2)
 
