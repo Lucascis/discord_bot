@@ -228,7 +228,7 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: build-artifacts
 
