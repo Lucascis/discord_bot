@@ -42,25 +42,20 @@ services:
 
   # Lavalink Audio Server
   lavalink:
-    image: fredboat/lavalink:v4.0.8
+    image: ghcr.io/lavalink-devs/lavalink:4
     container_name: discord-bot-lavalink
     restart: unless-stopped
+    env_file: .env
+    environment:
+      JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
-      - ./lavalink/plugins:/opt/Lavalink/plugins:ro
+      - ./lavalink/plugins:/opt/Lavalink/plugins:rw
+      - lavalink_logs:/opt/Lavalink/logs
     ports:
       - "2333:2333"
     networks:
       - discord-bot-network
-    environment:
-      _JAVA_OPTIONS: "-Xmx2G"
-      SERVER_PORT: 2333
-      SERVER_ADDRESS: 0.0.0.0
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:2333/version || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Database Migrations
   migrate:
@@ -69,7 +64,7 @@ services:
       dockerfile: Dockerfile
       target: builder
     container_name: discord-bot-migrate
-    env_file: .env.docker
+    env_file: .env
     command: sh -c "pnpm --filter @discord-bot/database prisma migrate deploy && pnpm --filter @discord-bot/database prisma db seed"
     depends_on:
       postgres:
@@ -86,7 +81,7 @@ services:
       target: gateway
     container_name: discord-bot-gateway
     restart: unless-stopped
-    env_file: .env.docker
+    env_file: .env
     environment:
       SERVICE_NAME: gateway
       NODE_ENV: production
@@ -102,10 +97,11 @@ services:
     networks:
       - discord-bot-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -120,7 +116,7 @@ services:
       target: audio
     container_name: discord-bot-audio
     restart: unless-stopped
-    env_file: .env.docker
+    env_file: .env
     environment:
       SERVICE_NAME: audio
       NODE_ENV: production
@@ -138,10 +134,11 @@ services:
     networks:
       - discord-bot-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -156,7 +153,7 @@ services:
       target: api
     container_name: discord-bot-api
     restart: unless-stopped
-    env_file: .env.docker
+    env_file: .env
     environment:
       SERVICE_NAME: api
       NODE_ENV: production
@@ -172,10 +169,11 @@ services:
     networks:
       - discord-bot-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -190,7 +188,7 @@ services:
       target: worker
     container_name: discord-bot-worker
     restart: unless-stopped
-    env_file: .env.docker
+    env_file: .env
     environment:
       SERVICE_NAME: worker
       NODE_ENV: production
@@ -206,10 +204,11 @@ services:
     networks:
       - discord-bot-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3003/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -266,6 +265,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  lavalink_logs:
     driver: local
   prometheus_data:
     driver: local

@@ -4,6 +4,7 @@
  */
 
 import { SubscriptionTier, PeriodType, calculatePriceWithPeriod, ENHANCED_PRICING } from '@discord-bot/config';
+import { logger } from '@discord-bot/logger';
 import { BillingManagementUseCase } from '../application/use-cases/billing-management-use-case.js';
 import { PremiumFeatureManagementUseCase } from '../application/use-cases/premium-feature-management-use-case.js';
 import { FeatureSubscription } from '../domain/entities/feature-subscription.js';
@@ -146,7 +147,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Trial start failed:', error);
+      logger.error({ error, guildId }, 'Trial start failed');
       return {
         success: false,
         error: 'Service error'
@@ -224,7 +225,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Subscription upgrade failed:', error);
+      logger.error({ error, guildId, targetTier }, 'Subscription upgrade failed');
       return {
         success: false,
         error: 'Service error'
@@ -264,7 +265,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Subscription downgrade failed:', error);
+      logger.error({ error, guildId, targetTier }, 'Subscription downgrade failed');
       return {
         success: false,
         error: 'Service error'
@@ -309,7 +310,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Subscription cancellation failed:', error);
+      logger.error({ error, guildId }, 'Subscription cancellation failed');
       return {
         success: false,
         error: 'Service error'
@@ -359,7 +360,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Failed to get subscription status:', error);
+      logger.error({ error, guildId }, 'Failed to get subscription status');
       return this.getFreeSubscriptionStatus();
     }
   }
@@ -403,7 +404,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Trial conversion failed:', error);
+      logger.error({ error, guildId, targetTier }, 'Trial conversion failed');
       return {
         success: false,
         error: 'Service error'
@@ -440,7 +441,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Failed to get recommendations:', error);
+      logger.error({ error, guildId }, 'Failed to get recommendations');
       return {
         currentTier: 'free',
         recommendations: []
@@ -471,7 +472,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      console.error('Failed to get billing history:', error);
+      logger.error({ error, guildId }, 'Failed to get billing history');
       return {
         billingRecords: [],
         totalSpent: 0,

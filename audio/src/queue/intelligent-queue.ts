@@ -73,6 +73,17 @@ export interface QueueTemplate {
   };
 }
 
+interface QueueAnalytics {
+  totalTracks: number;
+  totalDuration: number;
+  averageEnergy: number;
+  genreDistribution: Record<string, number>;
+  repeatMode: QueueState['repeat']['mode'];
+  shuffleEnabled: boolean;
+  autoplayEnabled: boolean;
+  historySize: number;
+}
+
 export class IntelligentQueue extends EventEmitter {
   private guildQueues = new Map<string, QueueState>();
   private queueTemplates = new Map<string, QueueTemplate[]>();
@@ -160,7 +171,7 @@ export class IntelligentQueue extends EventEmitter {
    * Intelligent batch add with smart ordering
    */
   async addTracks(guildId: string, tracks: Track[]): Promise<number> {
-    const queue = await this.getOrCreateQueue(guildId);
+    await this.getOrCreateQueue(guildId);
     let addedCount = 0;
 
     // Smart ordering: group by artist, then by energy level
@@ -331,7 +342,7 @@ export class IntelligentQueue extends EventEmitter {
   /**
    * Queue analytics and insights
    */
-  getQueueAnalytics(guildId: string): any {
+  getQueueAnalytics(guildId: string): QueueAnalytics | null {
     const queue = this.guildQueues.get(guildId);
     if (!queue) return null;
 
@@ -587,7 +598,7 @@ export class IntelligentQueue extends EventEmitter {
   private setupAntiRepeatSystem(): void {
     // Clean up anti-repeat history periodically
     setInterval(() => {
-      for (const [guildId, history] of this.antiRepeatHistory.entries()) {
+      for (const [, history] of this.antiRepeatHistory.entries()) {
         if (history.size > 200) {
           const toDelete = Array.from(history).slice(0, 100);
           toDelete.forEach(id => history.delete(id));

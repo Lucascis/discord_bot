@@ -166,16 +166,35 @@ REQUEST_TIMEOUT=30000                          # Request timeout (ms)
 #### **Rate Limiting**
 ```env
 # Rate Limiting Settings
-RATE_LIMIT_WINDOW=60000                        # Rate limit window (ms)
-RATE_LIMIT_MAX_REQUESTS=30                     # Max requests per window
-RATE_LIMIT_SKIP_SUCCESSFUL=false               # Skip successful requests
-RATE_LIMIT_SKIP_FAILED=false                   # Skip failed requests
+RATE_LIMIT_WINDOW_MS=900000                    # Standard window (ms) for subscription-aware limiter
+RATE_LIMIT_STRICT_WINDOW_MS=900000             # Strict endpoint window (ms)
+RATE_LIMIT_STRICT_MAX=20                       # Max requests per window for strict endpoints
+API_RATE_LIMIT_IN_MEMORY=false                 # Force in-memory limiter (used for tests)
 
 # Command-Specific Rate Limits
 RATE_LIMIT_PLAY_COMMAND=10                     # Play command limit per minute
 RATE_LIMIT_SKIP_COMMAND=20                     # Skip command limit per minute
 RATE_LIMIT_QUEUE_COMMAND=5                     # Queue command limit per minute
 ```
+
+The API rate limiter is subscription-aware. Default per-minute limits are:
+
+| Tier         | Requests / Minute |
+|--------------|-------------------|
+| FREE         | 10                |
+| BASIC        | 30                |
+| PREMIUM      | 100               |
+| ENTERPRISE   | Unlimited         |
+
+For sensitive endpoints (metrics, security diagnostics) the limit is clamped by `RATE_LIMIT_STRICT_MAX` regardless of tier to guarantee platform stability.
+
+#### **Premium Testing Sandbox**
+```env
+# Comma-separated guild IDs that should start with Enterprise features enabled and allow in-place plan switching
+PREMIUM_TEST_GUILD_IDS=123456789012345678,987654321098765432
+```
+
+When set, the gateway automatically provisions the listed guilds with the ENTERPRISE subscription on startup and unlocks the `/premium demo` control panel so QA teams can cycle between tiers without touching Stripe.
 
 #### **CORS and Security**
 ```env

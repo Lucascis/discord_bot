@@ -62,15 +62,16 @@ export class AudioCommandService {
   /**
    * Send a queue command to the Audio service
    */
-  async sendQueueCommand(guildId: string, options: AudioCommandOptions = {}): Promise<QueueCommandResult> {
-    const { timeout = 10000, retries = 2 } = options;
+  async sendQueueCommand(guildId: string, options: AudioCommandOptions & { page?: number } = {}): Promise<QueueCommandResult> {
+    const { timeout = 10000, retries = 2, page = 1 } = options;
     const requestId = `queue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const commandData: StreamCommandData = {
       type: 'queue',
       guildId,
       requestId,
-      timestamp: Date.now().toString()
+      timestamp: Date.now().toString(),
+      page: page.toString()
     };
 
     return this.sendCommandWithResponse(commandData, timeout, retries);

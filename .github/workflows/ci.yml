@@ -287,7 +287,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./gateway/Dockerfile
+          file: ./Dockerfile
+          target: production
           tags: discord-bot-gateway:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -297,7 +298,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./audio/Dockerfile
+          file: ./Dockerfile
+          target: production
           tags: discord-bot-audio:test
           cache-from: type=gha
           cache-to: type=gha,mode=max

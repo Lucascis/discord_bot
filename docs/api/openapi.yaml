@@ -1,0 +1,868 @@
+openapi: 3.0.3
+
+info:
+  title: Discord Music Bot API
+  version: 1.0.0
+  description: |
+    RESTful API for the Discord Music Bot system.
+
+    Provides endpoints for:
+    - Analytics and metrics
+    - Guild management
+    - Music queue operations
+    - Premium subscriptions
+    - Webhook integrations (Stripe, Discord)
+
+    ## Authentication
+    All endpoints require API key authentication via the `X-API-Key` header,
+    except for webhook endpoints which use signature verification.
+
+    ## Rate Limiting
+    - General endpoints: 100 requests/minute
+    - Search endpoints: 10 requests/minute
+    - Webhook endpoints: 50 requests/minute
+
+  contact:
+    name: Discord Bot Team
+    url: https://github.com/your-org/discord-bot
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.discord-bot.example.com/api/v1
+    description: Production server
+  - url: https://staging-api.discord-bot.example.com/api/v1
+    description: Staging server
+  - url: http://localhost:3000/api/v1
+    description: Development server
+
+tags:
+  - name: Health
+    description: Health check and readiness endpoints
+  - name: Analytics
+    description: Analytics and statistics endpoints
+  - name: Guilds
+    description: Guild management and settings
+  - name: Music
+    description: Music playback and queue management
+  - name: Search
+    description: Music search operations
+  - name: Premium
+    description: Premium subscription management
+  - name: Webhooks
+    description: Webhook receivers for external integrations
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns the health status of the API service
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Returns readiness status (can accept traffic)
+      operationId: getReadiness
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /analytics/overview:
+    get:
+      tags:
+        - Analytics
+      summary: Get analytics overview
+      description: Returns system-wide analytics and statistics
+      operationId: getAnalyticsOverview
+      parameters:
+        - name: period
+          in: query
+          description: Time period for analytics
+          required: false
+          schema:
+            type: string
+            enum: [hour, day, week, month]
+            default: day
+      responses:
+        '200':
+          description: Analytics overview retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsOverview'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /analytics/guilds:
+    get:
+      tags:
+        - Analytics
+      summary: Get guild statistics
+      description: Returns statistics for all guilds
+      operationId: getGuildAnalytics
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Guild analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildAnalyticsList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /guilds/{guildId}:
+    get:
+      tags:
+        - Guilds
+      summary: Get guild information
+      description: Returns information about a specific guild
+      operationId: getGuild
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Guild retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Guild'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /guilds/{guildId}/settings:
+    get:
+      tags:
+        - Guilds
+      summary: Get guild settings
+      description: Returns settings for a specific guild
+      operationId: getGuildSettings
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Settings retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildSettings'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    patch:
+      tags:
+        - Guilds
+      summary: Update guild settings
+      description: Updates settings for a specific guild
+      operationId: updateGuildSettings
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuildSettingsUpdate'
+      responses:
+        '200':
+          description: Settings updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildSettings'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /music/{guildId}/queue:
+    get:
+      tags:
+        - Music
+      summary: Get music queue
+      description: Returns the current music queue for a guild
+      operationId: getMusicQueue
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Queue retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicQueue'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /music/{guildId}/queue/add:
+    post:
+      tags:
+        - Music
+      summary: Add track to queue
+      description: Adds a track to the guild's music queue
+      operationId: addToQueue
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTrackRequest'
+      responses:
+        '201':
+          description: Track added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueEntry'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /music/{guildId}/now-playing:
+    get:
+      tags:
+        - Music
+      summary: Get now playing
+      description: Returns currently playing track information
+      operationId: getNowPlaying
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Now playing information retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NowPlaying'
+        '404':
+          description: No track currently playing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /search:
+    get:
+      tags:
+        - Search
+      summary: Search for music
+      description: Searches for music across multiple platforms
+      operationId: searchMusic
+      parameters:
+        - name: query
+          in: query
+          description: Search query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: source
+          in: query
+          description: Search source
+          required: false
+          schema:
+            type: string
+            enum: [youtube, spotify, soundcloud, all]
+            default: all
+        - name: limit
+          in: query
+          description: Maximum number of results
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            default: 10
+      responses:
+        '200':
+          description: Search results retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /premium/subscription/{guildId}:
+    get:
+      tags:
+        - Premium
+      summary: Get subscription status
+      description: Returns premium subscription status for a guild
+      operationId: getSubscription
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Subscription retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: No active subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /premium/checkout:
+    post:
+      tags:
+        - Premium
+      summary: Create checkout session
+      description: Creates a Stripe checkout session for premium upgrade
+      operationId: createCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+      responses:
+        '201':
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /premium/cancel:
+    post:
+      tags:
+        - Premium
+      summary: Cancel subscription
+      description: Cancels premium subscription (at period end)
+      operationId: cancelSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+      responses:
+        '200':
+          description: Subscription cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /webhooks/stripe:
+    post:
+      tags:
+        - Webhooks
+      summary: Stripe webhook
+      description: Receives Stripe webhook events for subscription management
+      operationId: handleStripeWebhook
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StripeWebhookEvent'
+      responses:
+        '200':
+          description: Webhook processed successfully
+        '400':
+          description: Invalid webhook signature or payload
+
+  /webhooks/discord:
+    post:
+      tags:
+        - Webhooks
+      summary: Discord webhook
+      description: Receives Discord webhook events
+      operationId: handleDiscordWebhook
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscordWebhookEvent'
+      responses:
+        '200':
+          description: Webhook processed successfully
+        '400':
+          description: Invalid webhook signature or payload
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    GuildIdParam:
+      name: guildId
+      in: path
+      description: Discord guild ID
+      required: true
+      schema:
+        type: string
+        pattern: '^\d{17,19}$'
+
+    PageParam:
+      name: page
+      in: query
+      description: Page number
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    LimitParam:
+      name: limit
+      in: query
+      description: Items per page
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequestError:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UnauthorizedError:
+      description: Unauthorized - invalid or missing API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-RateLimit-Limit:
+          description: Request limit per time window
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          description: Remaining requests in current window
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Unix timestamp when limit resets
+          schema:
+            type: integer
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: integer
+          description: Uptime in seconds
+        version:
+          type: string
+        dependencies:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [healthy, unhealthy]
+            redis:
+              type: string
+              enum: [healthy, unhealthy]
+            lavalink:
+              type: string
+              enum: [healthy, unhealthy]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        statusCode:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    AnalyticsOverview:
+      type: object
+      properties:
+        totalGuilds:
+          type: integer
+        activeGuilds:
+          type: integer
+        totalUsers:
+          type: integer
+        activeUsers:
+          type: integer
+        tracksPlayed:
+          type: integer
+        commandsExecuted:
+          type: integer
+        premiumGuilds:
+          type: integer
+        averageQueueLength:
+          type: number
+        period:
+          type: string
+
+    GuildAnalyticsList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuildAnalytics'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    GuildAnalytics:
+      type: object
+      properties:
+        guildId:
+          type: string
+        tracksPlayed:
+          type: integer
+        commandsExecuted:
+          type: integer
+        activeUsers:
+          type: integer
+        averageSessionDuration:
+          type: integer
+        tier:
+          type: string
+          enum: [FREE, TRIAL, PREMIUM]
+
+    Guild:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        memberCount:
+          type: integer
+        tier:
+          type: string
+          enum: [FREE, TRIAL, PREMIUM]
+        joinedAt:
+          type: string
+          format: date-time
+
+    GuildSettings:
+      type: object
+      properties:
+        guildId:
+          type: string
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 200
+        autoplay:
+          type: boolean
+        autoplayMode:
+          type: string
+          enum: [similar, artist, genre, mixed]
+        loopMode:
+          type: string
+          enum: [off, track, queue]
+        djRoleId:
+          type: string
+          nullable: true
+        notificationChannelId:
+          type: string
+          nullable: true
+
+    GuildSettingsUpdate:
+      type: object
+      properties:
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 200
+        autoplay:
+          type: boolean
+        autoplayMode:
+          type: string
+          enum: [similar, artist, genre, mixed]
+        loopMode:
+          type: string
+          enum: [off, track, queue]
+        djRoleId:
+          type: string
+          nullable: true
+        notificationChannelId:
+          type: string
+          nullable: true
+
+    MusicQueue:
+      type: object
+      properties:
+        guildId:
+          type: string
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueEntry'
+        totalTracks:
+          type: integer
+        totalDuration:
+          type: integer
+
+    QueueEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+        title:
+          type: string
+        author:
+          type: string
+        url:
+          type: string
+        duration:
+          type: integer
+        thumbnail:
+          type: string
+          nullable: true
+        addedBy:
+          type: string
+        addedAt:
+          type: string
+          format: date-time
+
+    AddTrackRequest:
+      type: object
+      required:
+        - query
+        - userId
+      properties:
+        query:
+          type: string
+          description: YouTube URL or search query
+        userId:
+          type: string
+        position:
+          type: string
+          enum: [end, next, now]
+          default: end
+
+    NowPlaying:
+      type: object
+      properties:
+        track:
+          $ref: '#/components/schemas/QueueEntry'
+        position:
+          type: integer
+          description: Current position in milliseconds
+        isPaused:
+          type: boolean
+        volume:
+          type: integer
+        loopMode:
+          type: string
+          enum: [off, track, queue]
+
+    SearchResults:
+      type: object
+      properties:
+        query:
+          type: string
+        source:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        total:
+          type: integer
+
+    SearchResult:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        url:
+          type: string
+        duration:
+          type: integer
+        thumbnail:
+          type: string
+        source:
+          type: string
+          enum: [youtube, spotify, soundcloud]
+
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+        guildId:
+          type: string
+        tier:
+          type: string
+          enum: [FREE, TRIAL, PREMIUM]
+        status:
+          type: string
+          enum: [ACTIVE, CANCELLED, EXPIRED, PAST_DUE]
+        currentPeriodStart:
+          type: string
+          format: date-time
+        currentPeriodEnd:
+          type: string
+          format: date-time
+        cancelAtPeriodEnd:
+          type: boolean
+        stripeCustomerId:
+          type: string
+          nullable: true
+        stripeSubscriptionId:
+          type: string
+          nullable: true
+
+    CheckoutRequest:
+      type: object
+      required:
+        - guildId
+        - userId
+        - planId
+      properties:
+        guildId:
+          type: string
+        userId:
+          type: string
+        planId:
+          type: string
+          enum: [premium_monthly, premium_yearly]
+
+    CheckoutResponse:
+      type: object
+      properties:
+        checkoutUrl:
+          type: string
+        sessionId:
+          type: string
+
+    CancelRequest:
+      type: object
+      required:
+        - guildId
+      properties:
+        guildId:
+          type: string
+        cancelAtPeriodEnd:
+          type: boolean
+          default: true
+
+    StripeWebhookEvent:
+      type: object
+      description: Stripe webhook event payload
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        data:
+          type: object
+
+    DiscordWebhookEvent:
+      type: object
+      description: Discord webhook event payload
+      properties:
+        content:
+          type: string
+        embeds:
+          type: array
+          items:
+            type: object
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer

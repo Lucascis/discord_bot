@@ -37,7 +37,7 @@ fi
 
 # Start test infrastructure
 print_status "Starting test infrastructure (PostgreSQL, Redis)..."
-docker-compose -f docker-compose.test.yml up -d postgres-test redis-test
+docker compose -f docker-compose.test.yml up -d postgres-test redis-test
 
 # Wait for services
 print_status "Waiting for test services to be ready..."
@@ -56,7 +56,7 @@ pnpm --filter @discord-bot/database prisma db seed
 print_status "Running TypeScript type checking..."
 if ! pnpm typecheck; then
     print_error "TypeScript type checking failed!"
-    docker-compose -f docker-compose.test.yml down
+    docker compose -f docker-compose.test.yml down
     exit 1
 fi
 
@@ -82,7 +82,7 @@ pnpm test --coverage || true
 
 # Cleanup test infrastructure
 print_status "Cleaning up test infrastructure..."
-docker-compose -f docker-compose.test.yml down
+docker compose -f docker-compose.test.yml down
 
 echo ""
 if [ $TEST_RESULT -eq 0 ]; then

@@ -1,0 +1,325 @@
+%% Sequence Diagram: Premium Subscription Flow
+%% Purpose: Shows the complete flow from trial start to premium upgrade
+%% Author: Discord Bot Team
+%% Last Updated: 2025-11-03
+
+sequenceDiagram
+    autonumber
+
+    actor Admin as 👨‍💼 Server Admin
+    participant Discord as Discord API
+    participant Gateway as Gateway Service
+    participant API as API Service
+    participant DB as PostgreSQL
+    participant Redis as Redis Cache
+    participant Stripe as Stripe API
+    participant Audio as Audio Service
+
+    Note over Admin,Audio: Phase 1: Start Free Trial
+
+    %% Trial Initiation
+    Admin->>Discord: /premium trial
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE event
+    activate Gateway
+
+    Gateway->>Discord: POST /interactions/{id}/callback<br/>(ephemeral: "Checking eligibility...")
+    Discord->>Admin: Show processing message
+    deactivate Discord
+
+    %% Check Eligibility
+    Gateway->>DB: SELECT * FROM subscriptions<br/>WHERE guildId = ? AND tier = 'TRIAL'
+    activate DB
+    DB-->>Gateway: No previous trial found
+    deactivate DB
+
+    alt Has previous trial
+        Gateway->>Discord: Update message<br/>"❌ Trial already used"
+        activate Discord
+        Discord->>Admin: Trial not available
+        deactivate Discord
+        Note over Gateway: End flow
+    else No previous trial
+        Note over Gateway: Eligible for trial
+    end
+
+    %% Create Trial Subscription
+    Gateway->>DB: INSERT INTO subscriptions<br/>(guildId, tier: 'TRIAL', status: 'ACTIVE',<br/>currentPeriodEnd: now() + 14 days, ...)
+    activate DB
+    DB-->>Gateway: Subscription created
+    deactivate DB
+
+    %% Cache Trial Features
+    Gateway->>Redis: HMSET features:{guildId}<br/>basic_playback=true queue_management=true<br/>search=true effects=false premium_quality=false
+    activate Redis
+    Redis-->>Gateway: OK
+    deactivate Redis
+
+    Gateway->>Redis: EXPIRE features:{guildId} 86400
+    activate Redis
+    Redis-->>Gateway: OK
+    deactivate Redis
+
+    %% Notify User
+    Gateway->>Discord: Update message<br/>"✅ 14-day trial activated!"
+    activate Discord
+    Discord->>Admin: Trial activated successfully
+    deactivate Discord
+
+    deactivate Gateway
+
+    Note over Admin,Audio: Admin uses bot with trial features for 5 days
+
+    Note over Admin,Audio: Phase 2: Upgrade to Premium
+
+    %% Upgrade Initiation
+    Admin->>Discord: /premium upgrade
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE event
+    activate Gateway
+
+    Gateway->>Discord: POST /interactions/{id}/callback<br/>(ephemeral: "Generating checkout...")
+    Discord->>Admin: Show processing message
+    deactivate Discord
+
+    %% Get Current Subscription
+    Gateway->>DB: SELECT * FROM subscriptions<br/>WHERE guildId = ? AND status = 'ACTIVE'
+    activate DB
+    DB-->>Gateway: Trial subscription (9 days remaining)
+    deactivate DB
+
+    %% Create Stripe Checkout
+    Gateway->>API: POST /api/v1/premium/checkout<br/>{ guildId, userId, planId: 'premium_monthly' }
+    activate API
+
+    API->>Stripe: POST /v1/checkout/sessions<br/>{ customer_email, line_items: [{ price: price_premium }],<br/>metadata: { guildId, userId }, ... }
+    activate Stripe
+    Stripe-->>API: { id: 'cs_123', url: 'https://checkout.stripe.com/...' }
+    deactivate Stripe
+
+    API-->>Gateway: { checkoutUrl: '...' }
+    deactivate API
+
+    %% Send Checkout URL
+    Gateway->>Discord: Update message<br/>"💳 Click here to upgrade: [Checkout Link]"
+    activate Discord
+    Discord->>Admin: Checkout link sent
+    deactivate Discord
+
+    deactivate Gateway
+
+    %% Admin Completes Payment
+    Admin->>Stripe: Navigate to checkout
+    activate Stripe
+    Admin->>Stripe: Enter payment details
+    Stripe->>Admin: Payment successful
+    deactivate Stripe
+
+    Note over Stripe: Stripe processes payment
+
+    %% Webhook: Checkout Completed
+    Stripe->>API: POST /api/v1/webhooks/stripe<br/>Event: checkout.session.completed
+    activate API
+
+    Note over API: Verify webhook signature
+
+    API->>API: Parse event data<br/>Extract guildId, userId, customerId
+
+    API->>Stripe: GET /v1/customers/{customerId}/subscriptions
+    activate Stripe
+    Stripe-->>API: { id: 'sub_123', status: 'active',<br/>current_period_end: timestamp, ... }
+    deactivate Stripe
+
+    %% Update Subscription
+    API->>DB: UPDATE subscriptions<br/>SET tier = 'PREMIUM', status = 'ACTIVE',<br/>stripeCustomerId = ?, stripeSubscriptionId = ?,<br/>currentPeriodEnd = ? WHERE guildId = ?
+    activate DB
+    DB-->>API: Subscription updated
+    deactivate DB
+
+    %% Update Features Cache
+    API->>Redis: HMSET features:{guildId}<br/>basic_playback=true queue_management=true<br/>search=true effects=true premium_quality=true<br/>ai_recommendations=true unlimited_queue=true
+    activate Redis
+    Redis-->>API: OK
+    deactivate Redis
+
+    API->>Redis: EXPIRE features:{guildId} 86400
+    activate Redis
+    Redis-->>API: OK
+    deactivate Redis
+
+    %% Invalidate Old Cache
+    API->>Redis: DEL subscription:{guildId}
+    activate Redis
+    Redis-->>API: OK
+    deactivate Redis
+
+    %% Notify Services
+    API->>Redis: PUBLISH discord-bot:events<br/>{ type: 'subscriptionUpgraded', guildId, tier: 'PREMIUM' }
+    activate Redis
+    Redis->>Gateway: Subscription upgraded event
+    Redis->>Audio: Subscription upgraded event
+    deactivate Redis
+
+    %% Send Success Response
+    API-->>Stripe: 200 OK
+    deactivate API
+
+    %% Notify Admin
+    activate Gateway
+    Gateway->>DB: SELECT * FROM guild_settings<br/>WHERE guildId = ?
+    activate DB
+    DB-->>Gateway: { notificationChannelId }
+    deactivate DB
+
+    Gateway->>Discord: POST /channels/{notificationChannelId}/messages<br/>{ embeds: [{ title: "🎉 Premium Activated!",<br/>description: "All premium features unlocked", ... }] }
+    activate Discord
+    Discord->>Admin: Premium activation notification
+    deactivate Discord
+
+    deactivate Gateway
+
+    Note over Admin,Audio: Admin now has access to premium features
+
+    %% Premium Feature Usage
+    Admin->>Discord: /play with AI recommendations enabled
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE event
+    activate Gateway
+
+    Gateway->>Redis: HGET features:{guildId} ai_recommendations
+    activate Redis
+    Redis-->>Gateway: "true"
+    deactivate Redis
+
+    Note over Gateway: Feature check passed<br/>AI recommendations allowed
+
+    Gateway->>Redis: PUBLISH discord-bot:commands<br/>{ type: 'play', aiRecommendations: true, ... }
+    activate Redis
+    Redis->>Audio: Command with AI flag
+    deactivate Redis
+
+    activate Audio
+    Note over Audio: Use AI recommendation engine<br/>(premium feature)
+
+    Audio->>Audio: Generate personalized<br/>recommendations based on<br/>listening history
+
+    Note over Audio: Enhanced playback with<br/>premium quality enabled
+    deactivate Audio
+
+    deactivate Gateway
+    deactivate Discord
+
+    Note over Admin,Audio: Phase 3: Monthly Renewal (30 days later)
+
+    Note over Stripe: 30 days pass, renewal date arrives
+
+    %% Automatic Renewal
+    Stripe->>Stripe: Process subscription renewal
+    Stripe->>Admin: Charge payment method
+    Note over Stripe: Payment successful
+
+    Stripe->>API: POST /api/v1/webhooks/stripe<br/>Event: invoice.payment_succeeded
+    activate API
+
+    Note over API: Verify webhook signature
+
+    API->>DB: UPDATE subscriptions<br/>SET currentPeriodStart = currentPeriodEnd,<br/>currentPeriodEnd = currentPeriodEnd + 30 days<br/>WHERE stripeSubscriptionId = ?
+    activate DB
+    DB-->>API: Subscription renewed
+    deactivate DB
+
+    %% Log Event
+    API->>DB: INSERT INTO subscription_events<br/>(guildId, type: 'RENEWED', metadata: {...})
+    activate DB
+    DB-->>API: Event logged
+    deactivate DB
+
+    API-->>Stripe: 200 OK
+    deactivate API
+
+    Note over Admin,Audio: Subscription continues seamlessly
+
+    Note over Admin,Audio: Phase 4: Cancellation Flow (Optional)
+
+    %% Admin Cancels
+    Admin->>Discord: /premium cancel
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE event
+    activate Gateway
+
+    Gateway->>Discord: POST /interactions/{id}/callback<br/>"Are you sure? [Yes] [No]"
+    Discord->>Admin: Confirmation prompt
+    deactivate Discord
+
+    Admin->>Discord: Click [Yes]
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE (button: yes)
+
+    Gateway->>Discord: Update message: "Processing cancellation..."
+    deactivate Discord
+
+    %% Process Cancellation
+    Gateway->>DB: SELECT * FROM subscriptions<br/>WHERE guildId = ?
+    activate DB
+    DB-->>Gateway: { stripeSubscriptionId: 'sub_123', ... }
+    deactivate DB
+
+    Gateway->>API: POST /api/v1/premium/cancel<br/>{ guildId, cancelAtPeriodEnd: true }
+    activate API
+
+    API->>Stripe: POST /v1/subscriptions/{sub_123}<br/>{ cancel_at_period_end: true }
+    activate Stripe
+    Stripe-->>API: { cancel_at_period_end: true, current_period_end: ... }
+    deactivate Stripe
+
+    API->>DB: UPDATE subscriptions<br/>SET cancelAtPeriodEnd = true, canceledAt = now()<br/>WHERE guildId = ?
+    activate DB
+    DB-->>API: Subscription updated
+    deactivate DB
+
+    API-->>Gateway: { success: true, expiresAt: '...' }
+    deactivate API
+
+    Gateway->>Discord: Update message<br/>"✅ Subscription will cancel on {date}<br/>You'll keep premium until then"
+    activate Discord
+    Discord->>Admin: Cancellation confirmed
+    deactivate Discord
+
+    deactivate Gateway
+
+    Note over Admin,Audio: Premium features remain until period end
+
+    Note over Admin,Audio: On period end date...
+
+    %% Period End - Downgrade
+    Stripe->>API: POST /api/v1/webhooks/stripe<br/>Event: customer.subscription.deleted
+    activate API
+
+    API->>DB: UPDATE subscriptions<br/>SET status = 'CANCELLED', tier = 'FREE'<br/>WHERE stripeSubscriptionId = ?
+    activate DB
+    DB-->>API: Subscription cancelled
+    deactivate DB
+
+    %% Remove Premium Features
+    API->>Redis: HMSET features:{guildId}<br/>basic_playback=true effects=false<br/>premium_quality=false ai_recommendations=false
+    activate Redis
+    Redis-->>API: OK
+    deactivate Redis
+
+    API->>Redis: PUBLISH discord-bot:events<br/>{ type: 'subscriptionCancelled', guildId }
+    activate Redis
+    Redis->>Gateway: Subscription cancelled event
+    Redis->>Audio: Subscription cancelled event
+    deactivate Redis
+
+    API-->>Stripe: 200 OK
+    deactivate API
+
+    activate Gateway
+    Gateway->>Discord: POST /channels/{notificationChannelId}/messages<br/>"Premium subscription ended. Thank you!"
+    activate Discord
+    Discord->>Admin: Cancellation notice
+    deactivate Discord
+    deactivate Gateway
+
+    Note over Admin,Audio: Downgraded to free tier

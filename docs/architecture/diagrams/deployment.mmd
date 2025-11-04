@@ -1,0 +1,180 @@
+%% Deployment Diagram (C4 Model - Level 3)
+%% Purpose: Shows the physical deployment of the Discord Music Bot on Kubernetes
+%% Author: Discord Bot Team
+%% Last Updated: 2025-11-03
+
+graph TB
+    %% External Systems
+    Internet["🌐 Internet"]
+    DiscordAPI["Discord API<br/>discord.com"]
+    MusicAPIs["Music APIs<br/>YouTube, Spotify"]
+
+    %% Kubernetes Cluster
+    subgraph K8s["Kubernetes Cluster"]
+
+        %% Ingress
+        Ingress["NGINX Ingress<br/>[Load Balancer]<br/><br/>• TLS Termination<br/>• Rate Limiting<br/>• Security Headers"]
+
+        %% Application Tier
+        subgraph AppTier["Application Tier [Namespace: discord-bot]"]
+
+            %% Gateway Pods
+            subgraph GatewayDeploy["Gateway Deployment"]
+                Gateway1["Gateway Pod 1<br/>[Container]<br/>256Mi-512Mi RAM<br/>250m-500m CPU"]
+                Gateway2["Gateway Pod 2<br/>[Container]"]
+                Gateway3["Gateway Pod 3<br/>[Container]"]
+            end
+
+            %% Audio Pods
+            subgraph AudioDeploy["Audio Deployment"]
+                Audio1["Audio Pod 1<br/>[Container]<br/>512Mi-1Gi RAM<br/>1000m-2000m CPU"]
+                Audio2["Audio Pod 2<br/>[Container]"]
+                Audio3["Audio Pod 3<br/>[Container]"]
+                Audio4["Audio Pod 4<br/>[Container]"]
+                Audio5["Audio Pod 5<br/>[Container]"]
+            end
+
+            %% API Pods
+            subgraph APIDeploy["API Deployment"]
+                API1["API Pod 1<br/>[Container]<br/>128Mi-256Mi RAM<br/>250m-500m CPU"]
+                API2["API Pod 2<br/>[Container]"]
+            end
+
+            %% Worker Pods
+            subgraph WorkerDeploy["Worker Deployment"]
+                Worker1["Worker Pod 1<br/>[Container]<br/>128Mi-256Mi RAM<br/>250m-500m CPU"]
+                Worker2["Worker Pod 2<br/>[Container]"]
+            end
+
+            %% Lavalink Pods
+            subgraph LavalinkDeploy["Lavalink Deployment"]
+                Lavalink1["Lavalink Pod 1<br/>[Container]<br/>2Gi-3Gi RAM<br/>1000m-2000m CPU"]
+                Lavalink2["Lavalink Pod 2<br/>[Container]"]
+                Lavalink3["Lavalink Pod 3<br/>[Container]"]
+            end
+        end
+
+        %% Data Tier
+        subgraph DataTier["Data Tier [Namespace: discord-bot]"]
+
+            %% PostgreSQL StatefulSet
+            subgraph PostgresStateful["PostgreSQL StatefulSet"]
+                Postgres["PostgreSQL Pod 0<br/>[StatefulSet]<br/>512Mi-2Gi RAM<br/>500m-2000m CPU<br/><br/>PVC: 10Gi"]
+            end
+
+            %% Redis StatefulSet
+            subgraph RedisStateful["Redis StatefulSet"]
+                Redis["Redis Pod 0<br/>[StatefulSet]<br/>256Mi-512Mi RAM<br/>250m-500m CPU<br/><br/>PVC: 5Gi"]
+            end
+        end
+
+        %% Persistent Storage
+        subgraph Storage["Persistent Storage"]
+            PVC1["PVC: postgres-data<br/>[PersistentVolume]<br/>10Gi - ReadWriteOnce"]
+            PVC2["PVC: redis-data<br/>[PersistentVolume]<br/>5Gi - ReadWriteOnce"]
+        end
+
+        %% Auto-Scaling
+        subgraph HPA["Horizontal Pod Autoscalers"]
+            HPA1["Gateway HPA<br/>Min: 3, Max: 10<br/>Target: 70% CPU"]
+            HPA2["Audio HPA<br/>Min: 5, Max: 20<br/>Target: 70% CPU"]
+            HPA3["API HPA<br/>Min: 2, Max: 8<br/>Target: 70% CPU"]
+            HPA4["Worker HPA<br/>Min: 2, Max: 6<br/>Target: 75% CPU"]
+            HPA5["Lavalink HPA<br/>Min: 3, Max: 10<br/>Target: 70% CPU"]
+        end
+
+        %% Monitoring
+        subgraph Monitoring["Monitoring [Namespace: monitoring]"]
+            Prometheus["Prometheus<br/>[Metrics Collection]"]
+            Grafana["Grafana<br/>[Dashboards]"]
+        end
+    end
+
+    %% External Connections
+    Internet -->|"HTTPS Traffic<br/>Port 443"| Ingress
+    Ingress -->|"HTTP<br/>Port 3000"| API1
+    Ingress -->|"HTTP<br/>Port 3000"| API2
+
+    %% Internal Connections
+    Gateway1 -->|"WebSocket"| DiscordAPI
+    Gateway2 -->|"WebSocket"| DiscordAPI
+    Gateway3 -->|"WebSocket"| DiscordAPI
+
+    Gateway1 -.->|"Pub/Sub"| Redis
+    Gateway2 -.->|"Pub/Sub"| Redis
+    Gateway3 -.->|"Pub/Sub"| Redis
+
+    Audio1 -.->|"Pub/Sub"| Redis
+    Audio2 -.->|"Pub/Sub"| Redis
+    Audio3 -.->|"Pub/Sub"| Redis
+    Audio4 -.->|"Pub/Sub"| Redis
+    Audio5 -.->|"Pub/Sub"| Redis
+
+    Audio1 -->|"WebSocket"| Lavalink1
+    Audio2 -->|"WebSocket"| Lavalink2
+    Audio3 -->|"WebSocket"| Lavalink3
+
+    Lavalink1 -->|"UDP Audio"| DiscordAPI
+    Lavalink2 -->|"UDP Audio"| DiscordAPI
+    Lavalink3 -->|"UDP Audio"| DiscordAPI
+
+    Lavalink1 -->|"HTTPS"| MusicAPIs
+    Lavalink2 -->|"HTTPS"| MusicAPIs
+    Lavalink3 -->|"HTTPS"| MusicAPIs
+
+    Gateway1 -->|"SQL"| Postgres
+    Gateway2 -->|"SQL"| Postgres
+    Gateway3 -->|"SQL"| Postgres
+
+    Audio1 -->|"SQL"| Postgres
+    Audio2 -->|"SQL"| Postgres
+    Audio3 -->|"SQL"| Postgres
+
+    API1 -->|"SQL"| Postgres
+    API2 -->|"SQL"| Postgres
+
+    Worker1 -->|"SQL"| Postgres
+    Worker2 -->|"SQL"| Postgres
+
+    API1 -.->|"Cache"| Redis
+    API2 -.->|"Cache"| Redis
+
+    Worker1 -.->|"Pub/Sub"| Redis
+    Worker2 -.->|"Pub/Sub"| Redis
+
+    %% Storage Connections
+    Postgres -.->|"Mounts"| PVC1
+    Redis -.->|"Mounts"| PVC2
+
+    %% Auto-Scaling Connections
+    HPA1 -.->|"Scales"| GatewayDeploy
+    HPA2 -.->|"Scales"| AudioDeploy
+    HPA3 -.->|"Scales"| APIDeploy
+    HPA4 -.->|"Scales"| WorkerDeploy
+    HPA5 -.->|"Scales"| LavalinkDeploy
+
+    %% Monitoring Connections
+    Prometheus -.->|"Scrapes /metrics"| Gateway1
+    Prometheus -.->|"Scrapes /metrics"| Audio1
+    Prometheus -.->|"Scrapes /metrics"| API1
+    Prometheus -.->|"Scrapes /metrics"| Worker1
+    Prometheus -.->|"Scrapes /metrics"| Lavalink1
+
+    Grafana -.->|"Queries metrics"| Prometheus
+
+    %% Styling
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+    classDef ingress fill:#f39c12,stroke:#d68910,color:#fff
+    classDef app fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef data fill:#2b7a2b,stroke:#1a5c1a,color:#fff
+    classDef storage fill:#8e44ad,stroke:#6c3483,color:#fff
+    classDef hpa fill:#e74c3c,stroke:#c0392b,color:#fff
+    classDef monitoring fill:#16a085,stroke:#138d75,color:#fff
+
+    class Internet,DiscordAPI,MusicAPIs external
+    class Ingress ingress
+    class Gateway1,Gateway2,Gateway3,Audio1,Audio2,Audio3,Audio4,Audio5,API1,API2,Worker1,Worker2,Lavalink1,Lavalink2,Lavalink3 app
+    class Postgres,Redis data
+    class PVC1,PVC2 storage
+    class HPA1,HPA2,HPA3,HPA4,HPA5 hpa
+    class Prometheus,Grafana monitoring

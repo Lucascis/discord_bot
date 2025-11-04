@@ -21,6 +21,16 @@ interface FallbackCacheEntry {
   lastAccessed: number;
 }
 
+/**
+ * Message buffer entry for failed publish operations
+ * Stores channel/message pairs with timestamp for FIFO replay
+ */
+interface BufferedMessage {
+  channel: string;
+  message: string;
+  timestamp: number;
+}
+
 export class RedisCircuitBreaker {
   private circuitBreaker: CircuitBreaker;
   private redis: Redis;
@@ -29,6 +39,20 @@ export class RedisCircuitBreaker {
   private readonly fallbackCacheMaxSize: number;
   private readonly cleanupIntervalMs: number;
   private cleanupTimer?: NodeJS.Timeout;
+
+  // Message buffering for failed PUBLISH operations
+  private messageBuffer: BufferedMessage[] = [];
+  private readonly maxBufferSize = 100;
+  private readonly bufferMessageTTL = 300000; // 5 minutes
+  private readonly bufferCleanupIntervalMs = 60000; // 1 minute
+  private bufferCleanupTimer?: NodeJS.Timeout;
+
+  // Metrics for message buffering
+  private metrics = {
+    messagesBuffered: 0,
+    messagesReplayed: 0,
+    messagesDropped: 0
+  };
 
   constructor(
     private readonly name: string,
@@ -62,8 +86,9 @@ export class RedisCircuitBreaker {
       logger.warn({ circuit: this.name }, 'Redis reconnecting');
     });
 
-    // Setup periodic cleanup for fallback cache
+    // Setup periodic cleanup for fallback cache and message buffer
     this.setupPeriodicCleanup();
+    this.setupBufferCleanup();
   }
 
   async get(key: string): Promise<string | null> {
@@ -109,15 +134,24 @@ export class RedisCircuitBreaker {
   async publish(channel: string, message: string): Promise<number> {
     return this.circuitBreaker.execute(
       async () => {
-        return await this.redis.publish(channel, message);
+        const result = await this.redis.publish(channel, message);
+        // If message was successfully published and buffer has items, attempt replay
+        if (result > 0 && this.messageBuffer.length > 0) {
+          await this.replayBufferedMessages();
+        }
+        return result;
       },
       () => {
+        // Buffer the failed message instead of dropping it
+        this.bufferMessage(channel, message);
         logger.warn({
           circuit: this.name,
           channel,
-          messageLength: message.length
-        }, 'Redis publish failed, message dropped (no fallback available)');
-        return 0;
+          messageLength: message.length,
+          bufferSize: this.messageBuffer.length,
+          maxBufferSize: this.maxBufferSize
+        }, 'Redis publish failed, message buffered');
+        return 0; // Still return 0 as message wasn't delivered immediately
       }
     );
   }
@@ -277,6 +311,147 @@ export class RedisCircuitBreaker {
     }
   }
 
+  /**
+   * Buffer a failed publish message for later replay
+   * Uses FIFO eviction when buffer is full (max 100 messages)
+   */
+  private bufferMessage(channel: string, message: string): void {
+    const bufferedMessage: BufferedMessage = {
+      channel,
+      message,
+      timestamp: Date.now()
+    };
+
+    // Check if we need to evict oldest message (FIFO)
+    if (this.messageBuffer.length >= this.maxBufferSize) {
+      const evicted = this.messageBuffer.shift();
+      this.metrics.messagesDropped++;
+      logger.warn({
+        circuit: this.name,
+        channel: evicted?.channel,
+        operation: 'fifo-eviction',
+        bufferSize: this.messageBuffer.length,
+        totalMessagesDropped: this.metrics.messagesDropped
+      }, 'Message buffer full, evicting oldest message (FIFO)');
+    }
+
+    // Add message to buffer
+    this.messageBuffer.push(bufferedMessage);
+    this.metrics.messagesBuffered++;
+
+    logger.debug({
+      circuit: this.name,
+      channel,
+      bufferSize: this.messageBuffer.length,
+      totalMessagesBuffered: this.metrics.messagesBuffered
+    }, 'Message added to buffer');
+  }
+
+  /**
+   * Replay all buffered messages in order (FIFO)
+   * Stops on first error and logs failure
+   */
+  private async replayBufferedMessages(): Promise<void> {
+    if (this.messageBuffer.length === 0) return;
+
+    const messages = [...this.messageBuffer]; // Copy to avoid modification during iteration
+    let replayed = 0;
+
+    for (const bufferedMessage of messages) {
+      try {
+        const result = await this.redis.publish(
+          bufferedMessage.channel,
+          bufferedMessage.message
+        );
+
+        if (result > 0) {
+          // Message was successfully published, remove from buffer
+          this.messageBuffer.shift();
+          replayed++;
+          this.metrics.messagesReplayed++;
+
+          logger.debug({
+            circuit: this.name,
+            channel: bufferedMessage.channel,
+            operation: 'message-replayed',
+            bufferSize: this.messageBuffer.length,
+            totalMessagesReplayed: this.metrics.messagesReplayed
+          }, 'Buffered message replayed');
+        } else {
+          // Redis returned 0 subscribers, stop replay attempt
+          logger.debug({
+            circuit: this.name,
+            channel: bufferedMessage.channel,
+            reason: 'no-subscribers'
+          }, 'Buffered message not delivered (no subscribers)');
+          break;
+        }
+      } catch (error) {
+        // Error during replay, stop attempt and keep remaining messages in buffer
+        logger.warn({
+          circuit: this.name,
+          channel: bufferedMessage.channel,
+          error: error instanceof Error ? error.message : String(error),
+          remainingInBuffer: this.messageBuffer.length - replayed,
+          operation: 'replay-failure'
+        }, 'Error replaying buffered message, stopping replay');
+        break;
+      }
+    }
+
+    if (replayed > 0) {
+      logger.info({
+        circuit: this.name,
+        messagesReplayed: replayed,
+        remainingInBuffer: this.messageBuffer.length,
+        totalReplayed: this.metrics.messagesReplayed
+      }, 'Batch replay of buffered messages completed');
+    }
+  }
+
+  /**
+   * Periodically clean up expired messages from buffer (TTL: 5 minutes)
+   */
+  private setupBufferCleanup(): void {
+    this.bufferCleanupTimer = setInterval(() => {
+      this.cleanupExpiredMessages();
+    }, this.bufferCleanupIntervalMs);
+
+    logger.debug({
+      circuit: this.name,
+      intervalMs: this.bufferCleanupIntervalMs,
+      messageTTL: this.bufferMessageTTL
+    }, 'Setup periodic message buffer cleanup');
+  }
+
+  /**
+   * Remove expired messages from buffer based on TTL
+   */
+  private cleanupExpiredMessages(): void {
+    const now = Date.now();
+    let removed = 0;
+    const initialSize = this.messageBuffer.length;
+
+    // Remove messages older than 5 minutes
+    this.messageBuffer = this.messageBuffer.filter((msg) => {
+      if (now - msg.timestamp > this.bufferMessageTTL) {
+        removed++;
+        return false;
+      }
+      return true;
+    });
+
+    if (removed > 0) {
+      logger.info({
+        circuit: this.name,
+        removed,
+        initialSize,
+        remaining: this.messageBuffer.length,
+        operation: 'message-buffer-ttl-cleanup'
+      }, 'Cleaned up expired messages from buffer');
+    }
+  }
+
   getMetrics() {
     return {
       ...this.circuitBreaker.getMetrics(),
@@ -285,25 +460,43 @@ export class RedisCircuitBreaker {
         maxSize: this.fallbackCacheMaxSize,
         utilizationPercent: (this.fallbackCache.size / this.fallbackCacheMaxSize) * 100
       },
+      messageBuffer: {
+        currentSize: this.messageBuffer.length,
+        maxSize: this.maxBufferSize,
+        utilizationPercent: (this.messageBuffer.length / this.maxBufferSize) * 100,
+        metrics: {
+          messagesBuffered: this.metrics.messagesBuffered,
+          messagesReplayed: this.metrics.messagesReplayed,
+          messagesDropped: this.metrics.messagesDropped
+        }
+      },
       redisStatus: this.redis.status
     };
   }
 
   async disconnect(): Promise<void> {
-    // Clear cleanup timer
+    // Clear cleanup timers
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
+    }
+    if (this.bufferCleanupTimer) {
+      clearInterval(this.bufferCleanupTimer);
+      this.bufferCleanupTimer = undefined;
     }
 
     await this.redis.disconnect();
 
     const cacheSize = this.fallbackCache.size;
+    const bufferSize = this.messageBuffer.length;
     this.fallbackCache.clear();
+    this.messageBuffer = [];
 
     logger.info({
       circuit: this.name,
-      clearedCacheEntries: cacheSize
+      clearedCacheEntries: cacheSize,
+      clearedBufferedMessages: bufferSize,
+      bufferMetrics: this.metrics
     }, 'Redis circuit breaker disconnected');
   }
 }

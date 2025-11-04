@@ -288,7 +288,7 @@ export class PredictiveCacheManager {
       if (globalPeakHours.includes(currentHour)) {
         // Warm cache for most active guilds
         const sortedGuilds = Array.from(this.guildPatterns.entries())
-          .sort(([,a]: [string, any], [,b]: [string, any]) => b.searchVolume - a.searchVolume)
+          .sort(([, a], [, b]) => b.searchVolume - a.searchVolume)
           .slice(0, 5); // Top 5 most active guilds
 
         for (const [guildId] of sortedGuilds) {
@@ -320,8 +320,8 @@ export class PredictiveCacheManager {
   private async updateGuildPattern(
     guildId: string,
     query: string,
-    resultCount: number,
-    responseTime: number
+    _resultCount: number,
+    _responseTime: number
   ): Promise<void> {
     let pattern = this.guildPatterns.get(guildId);
 
@@ -518,29 +518,28 @@ export class PredictiveCacheManager {
   private async analyzeGuildMusicPreferences(): Promise<void> {
     for (const [guildId, pattern] of this.guildPatterns.entries()) {
       const genres = pattern.popularGenres;
-      let preferenceScore = {
+      const preferenceScore = {
         mainstream: 0,
         electronic: 0,
         niche: 0
       };
 
       // Score preferences based on genre popularity and diversity
-      const totalCount = Object.values(genres).reduce((sum: number, count: any) => sum + (count as number), 0);
+      const totalCount = Object.values(genres).reduce((sum, count) => sum + count, 0);
       const uniqueGenres = Object.keys(genres).length;
 
       Object.entries(genres).forEach(([genre, count]) => {
-        const countNum = count as number;
         // Check for mainstream genres
         if (['pop', 'hip-hop', 'rock'].includes(genre)) {
-          preferenceScore.mainstream += countNum;
+          preferenceScore.mainstream += count;
         }
         // Check for electronic music
         else if (['electronic', 'house', 'techno', 'dubstep', 'trance'].includes(genre)) {
-          preferenceScore.electronic += countNum;
+          preferenceScore.electronic += count;
         }
         // Everything else is considered niche
         else {
-          preferenceScore.niche += countNum;
+          preferenceScore.niche += count;
         }
       });
 
@@ -580,7 +579,7 @@ export class PredictiveCacheManager {
     }
 
     // Cache seasonal predictions globally
-    for (const [guildId] of this.guildPatterns.entries()) {
+    for (const [_guildId] of this.guildPatterns.entries()) {
       for (const query of seasonalQueries) {
         await audioCacheManager.search.cacheSearchResult(query, [], 'seasonal', 'system');
       }

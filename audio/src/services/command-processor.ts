@@ -13,7 +13,7 @@ export interface CommandProcessorOptions {
 export class CommandProcessor {
   private consumerName = `audio-${process.pid}-${Date.now()}`;
   private isInitialized = false;
-  private commandHandlers = new Map<string, (data: StreamCommandData) => Promise<any>>();
+  private commandHandlers = new Map<string, (data: StreamCommandData) => Promise<unknown>>();
 
   constructor(private options: CommandProcessorOptions = {}) {
     // Bind methods to preserve context
@@ -50,7 +50,7 @@ export class CommandProcessor {
   /**
    * Register a command handler
    */
-  registerHandler(commandType: string, handler: (data: StreamCommandData) => Promise<any>): void {
+  registerHandler(commandType: string, handler: (data: StreamCommandData) => Promise<unknown>): void {
     this.commandHandlers.set(commandType, handler);
     logger.debug({ commandType }, 'Registered command handler');
   }
@@ -154,7 +154,7 @@ export class CommandProcessor {
   /**
    * Send successful response back to Gateway
    */
-  private async sendResponse(requestId: string, data: any): Promise<void> {
+  private async sendResponse(requestId: string, data: unknown): Promise<void> {
     try {
       const responseData: StreamResponseData = {
         requestId,

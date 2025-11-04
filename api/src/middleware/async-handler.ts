@@ -43,7 +43,7 @@ export function asyncHandler(fn: AsyncRequestHandler): RequestHandler {
  * This ensures that all async operations in route handlers are properly
  * wrapped and errors are forwarded to the error handling middleware
  */
-export function wrapAsync<T extends AsyncRequestHandler>(handler: T): RequestHandler {
+export function wrapAsync(handler: AsyncRequestHandler): RequestHandler {
   return asyncHandler(handler);
 }
 
@@ -53,7 +53,7 @@ export function wrapAsync<T extends AsyncRequestHandler>(handler: T): RequestHan
  * Useful for operations that acquire resources and need cleanup
  * even if an error occurs
  */
-export function asyncWithCleanup<T>(
+export function asyncWithCleanup(
   handler: AsyncRequestHandler,
   cleanup?: () => Promise<void> | void
 ): RequestHandler {
@@ -89,14 +89,8 @@ export function withTimeout(
       }, timeoutMs);
     });
 
-    const handlerPromise = handler(req, res, next);
+    const handlerResult = handler(req, res, next);
 
-    // Race between the handler and timeout
-    if (handlerPromise instanceof Promise) {
-      await Promise.race([handlerPromise, timeoutPromise]);
-    } else {
-      // If handler is synchronous, just execute it
-      handlerPromise;
-    }
+    await Promise.race([Promise.resolve(handlerResult), timeoutPromise]);
   });
 }

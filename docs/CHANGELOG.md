@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.0.2] - Premium QA Sandbox & Filter UI Hardening - 2025-11-03
+
+### 🎯 Enterprise QA Enhancements
+
+- ✅ **Premium test guild validation**: `packages/config/src/index.ts` now filters out malformed `PREMIUM_TEST_GUILD_IDS` and logs actionable warnings so QA guild bootstrapping no longer fails silently.
+- ✅ **Skip logic restored**: The main music control deck again enables `Skip` during active playback even if the queue is empty, matching expected moderator tooling.
+- ✅ **Filter session polish**: Updated the Now Playing embed to surface active audio filter metadata and ensured the filter control stays disabled until playback starts.
+
+### 🧪 Test Coverage
+
+- 🧪 Added comprehensive unit coverage for the new `MusicUIBuilder` controls, filter panel, and embed rendering logic (`gateway/test/ui.test.ts`).
+- 🔄 Test doubles simulate the Discord component API to keep Vitest execution fast and deterministic.
+
+### 📦 Housekeeping
+
+- 🔁 Replaced the legacy `gateway/src/ui.ts` helpers with a thin re-export of `MusicUIBuilder` and the shared `resolveTextChannel` utility to keep tests aligned with production code.
+- 📝 Documented the changes here to keep the enterprise changelog in sync with the premium QA flow.
+
+---
+
 ## [3.0.1] - Critical Voice Connection & Lavalink Unification - 2025-09-24
 
 ### 🚀 **PRODUCTION-READY AUDIO SYSTEM**

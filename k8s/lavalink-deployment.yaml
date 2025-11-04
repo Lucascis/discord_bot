@@ -1,0 +1,317 @@
+# Lavalink Deployment
+# Purpose: Provides high-performance audio processing for Discord Bot
+# Architecture: Deployment with multiple replicas for load distribution
+# High Availability: Multiple replicas with anti-affinity for node distribution
+# Version: Lavalink 4.1.1 with advanced plugins (YouTube, SponsorBlock, LavaSrc, LavaSearch)
+# Author: Discord Bot Team
+# Last Updated: 2025-11-03
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: lavalink
+  namespace: discord-bot
+  labels:
+    app: lavalink
+    tier: audio-processing
+spec:
+  type: ClusterIP
+  selector:
+    app: lavalink
+  ports:
+  - name: http
+    port: 2333
+    targetPort: 2333
+    protocol: TCP
+  - name: metrics
+    port: 9091
+    targetPort: 9091
+    protocol: TCP
+  sessionAffinity: ClientIP  # Maintain session for audio connections
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lavalink
+  namespace: discord-bot
+  labels:
+    app: lavalink
+    tier: audio-processing
+spec:
+  replicas: 3  # Multiple replicas for high availability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Ensure zero-downtime during updates
+  selector:
+    matchLabels:
+      app: lavalink
+  template:
+    metadata:
+      labels:
+        app: lavalink
+        tier: audio-processing
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: discord-bot
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      # Anti-affinity to spread pods across different nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - lavalink
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: lavalink
+        image: ghcr.io/lavalink-devs/lavalink:4.1.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 2333
+          protocol: TCP
+        - name: metrics
+          containerPort: 9091
+          protocol: TCP
+        env:
+        - name: SERVER_PORT
+          value: "2333"
+        - name: LAVALINK_SERVER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: discord-bot-secrets
+              key: LAVALINK_PASSWORD
+        - name: JAVA_OPTS
+          value: >-
+            -Xmx2G
+            -Xms2G
+            -XX:+UseG1GC
+            -XX:MaxGCPauseMillis=200
+            -XX:ParallelGCThreads=4
+            -XX:ConcGCThreads=2
+            -XX:+UseStringDeduplication
+            -Dlavalink.server.youtubeConfig.enabled=true
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "3Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: lavalink-config
+          mountPath: /opt/Lavalink/application.yml
+          subPath: application.yml
+          readOnly: true
+        - name: lavalink-plugins
+          mountPath: /opt/Lavalink/plugins
+        livenessProbe:
+          httpGet:
+            path: /version
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /version
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: lavalink-config
+        configMap:
+          name: lavalink-config
+      - name: lavalink-plugins
+        emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# Lavalink Configuration
+# Optimized for production with high-quality audio and advanced plugins
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lavalink-config
+  namespace: discord-bot
+  labels:
+    app: lavalink
+data:
+  application.yml: |
+    server:
+      port: 2333
+      address: 0.0.0.0
+      undertow:
+        threads:
+          io: 32
+          worker: 256
+
+    lavalink:
+      plugins:
+        - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.5"
+          repository: "https://maven.lavalink.dev/releases"
+        - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
+          repository: "https://maven.lavalink.dev/releases"
+        - dependency: "com.github.topi314.sponsorblock:sponsorblock-plugin:3.0.1"
+          repository: "https://maven.lavalink.dev/releases"
+        - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
+          repository: "https://maven.lavalink.dev/releases"
+
+      server:
+        password: "${LAVALINK_SERVER_PASSWORD}"
+        sources:
+          youtube: true
+          bandcamp: true
+          soundcloud: true
+          twitch: true
+          vimeo: true
+          http: true
+          local: false
+
+        filters:
+          volume: true
+          equalizer: true
+          karaoke: true
+          timescale: true
+          tremolo: true
+          vibrato: true
+          distortion: true
+          rotation: true
+          channelMix: true
+          lowPass: true
+
+        bufferDurationMs: 400
+        frameBufferDurationMs: 5000
+        opusEncodingQuality: 10
+        resamplingQuality: HIGH
+        trackStuckThresholdMs: 10000
+        useSeekGhosting: true
+        youtubePlaylistLoadLimit: 100
+        playerUpdateInterval: 5
+        youtubeSearchEnabled: true
+        soundcloudSearchEnabled: true
+        gc-warnings: true
+
+        ratelimit:
+          ipBlocks:
+            - "0.0.0.0/0"
+          excludedIps: []
+          strategy: "RotateOnBan"
+          searchTriggersFail: true
+          retryLimit: -1
+
+        youtubeConfig:
+          enabled: true
+          clients:
+            - MUSIC
+            - ANDROID_VR
+            - WEB
+            - WEB_EMBEDDED
+
+    metrics:
+      prometheus:
+        enabled: true
+        endpoint: /metrics
+
+    sentry:
+      dsn: ""
+      environment: "production"
+
+    logging:
+      file:
+        path: ./logs/
+      level:
+        root: INFO
+        lavalink: INFO
+
+    plugins:
+      lavasrc:
+        providers:
+          - "ytsearch:\"%ISRC%\""
+          - "ytsearch:%QUERY%"
+        sources:
+          spotify: true
+          applemusic: false
+          deezer: false
+          yandexmusic: false
+          youtube: true
+
+        spotify:
+          clientId: "${SPOTIFY_CLIENT_ID:-}"
+          clientSecret: "${SPOTIFY_CLIENT_SECRET:-}"
+          countryCode: "US"
+          playlistLoadLimit: 100
+          albumLoadLimit: 100
+
+      sponsorblock:
+        enabled: true
+        categories:
+          - sponsor
+          - selfpromo
+        apiUrl: "https://sponsor.ajay.app"
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lavalink-hpa
+  namespace: discord-bot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lavalink
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max

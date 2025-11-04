@@ -170,7 +170,7 @@ export const processAuditLogsCleanup = withErrorHandling(
       const deleteResult = await prisma.auditLog.deleteMany({
         where: {
           id: {
-            in: oldLogs.map(log => log.id)
+            in: oldLogs.map((log: { id: string }) => log.id)
           }
         }
       });

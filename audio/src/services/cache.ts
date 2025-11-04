@@ -4,8 +4,9 @@ import {
   SearchCache as BaseSearchCache,
   UserCache,
   QueueCache as BaseQueueCache,
-  RedisCircuitBreaker
+  RedisCircuitBreaker,
 } from '@discord-bot/cache';
+import type { CacheLayerStats, CircuitBreakerMetrics } from '@discord-bot/cache';
 import { env } from '@discord-bot/config';
 
 /**
@@ -280,6 +281,49 @@ export class FeatureFlagCache extends MultiLayerCache<boolean> {
  * Central management for all cache instances with comprehensive
  * monitoring, statistics, and maintenance operations.
  */
+interface CacheLayerReport {
+  l1: CacheLayerStats;
+  l2: CacheLayerStats;
+  overall: {
+    totalHits: number;
+    totalMisses: number;
+    hitRate: number;
+    l1HitRate: number;
+    l2HitRate: number;
+  };
+}
+
+interface RedisCacheMetrics extends CircuitBreakerMetrics {
+  fallbackCache: {
+    size: number;
+    maxSize: number;
+    utilizationPercent: number;
+  };
+  messageBuffer: {
+    currentSize: number;
+    maxSize: number;
+    utilizationPercent: number;
+    metrics: {
+      messagesBuffered: number;
+      messagesReplayed: number;
+      messagesDropped: number;
+    };
+  };
+  redisStatus: string;
+}
+
+export interface AudioCacheStats {
+  search: CacheLayerReport;
+  queue: CacheLayerReport;
+  user: CacheLayerReport;
+  featureFlags: CacheLayerReport;
+  redis: RedisCacheMetrics;
+  overall: {
+    totalCaches: number;
+    healthScore: number;
+  };
+}
+
 export class AudioCacheManager {
   public readonly search: AudioSearchCache;
   public readonly queue: AudioQueueCache;
@@ -300,23 +344,13 @@ export class AudioCacheManager {
   }
 
   // Get comprehensive cache statistics
-  getCacheStats(): {
-    search: Record<string, unknown>;
-    queue: Record<string, unknown>;
-    user: Record<string, unknown>;
-    featureFlags: Record<string, unknown>;
-    redis: Record<string, unknown>;
-    overall: {
-      totalCaches: number;
-      healthScore: number;
-    };
-  } {
-    const stats = {
+  getCacheStats(): AudioCacheStats {
+    const stats: AudioCacheStats = {
       search: this.search.getStats(),
       queue: this.queue.getStats(),
       user: this.user.getStats(),
       featureFlags: this.featureFlags.getStats(),
-      redis: cacheRedis.getMetrics(),
+      redis: cacheRedis.getMetrics() as RedisCacheMetrics,
       overall: {
         totalCaches: 4,
         healthScore: this.calculateHealthScore(),

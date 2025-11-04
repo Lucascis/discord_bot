@@ -1,0 +1,265 @@
+# Role-Based Access Control (RBAC)
+# Purpose: Provides fine-grained security permissions for Discord Bot services
+# Architecture: ServiceAccount with minimal required permissions (principle of least privilege)
+# Security: Restricts pod access to only necessary Kubernetes resources
+# Version: rbac.authorization.k8s.io/v1
+# Author: Discord Bot Team
+# Last Updated: 2025-11-03
+
+# ServiceAccount for all Discord Bot pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: discord-bot
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+automountServiceAccountToken: true
+
+---
+# Role: Defines permissions within the discord-bot namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: discord-bot-role
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+rules:
+# ConfigMaps - Read access for configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# Secrets - Read access for credentials (limited to specific secrets)
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["discord-bot-secrets", "discord-bot-tls"]
+  verbs: ["get"]
+
+# Pods - Read access for service discovery and health checks
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+# Services - Read access for inter-service communication
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch"]
+
+# Endpoints - Read access for service discovery
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# Events - Create for logging important events
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+# PersistentVolumeClaims - Read access for storage information
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding: Binds the Role to the ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: discord-bot-rolebinding
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+subjects:
+- kind: ServiceAccount
+  name: discord-bot
+  namespace: discord-bot
+roleRef:
+  kind: Role
+  name: discord-bot-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole: For cluster-wide resources (if needed)
+# Currently empty - add permissions here if services need cluster-wide access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: discord-bot-cluster-role
+  labels:
+    app: discord-bot
+    tier: security
+rules:
+# Node metrics - Read access for monitoring (optional)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+
+# Custom Resource Definitions - Read access for operators (optional)
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding: Binds ClusterRole to ServiceAccount (optional)
+# Uncomment if cluster-wide permissions are needed
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: discord-bot-cluster-rolebinding
+  labels:
+    app: discord-bot
+    tier: security
+subjects:
+- kind: ServiceAccount
+  name: discord-bot
+  namespace: discord-bot
+roleRef:
+  kind: ClusterRole
+  name: discord-bot-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ServiceAccount for monitoring (Prometheus, Grafana)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: discord-bot-monitoring
+  namespace: discord-bot
+  labels:
+    app: discord-bot-monitoring
+    tier: monitoring
+automountServiceAccountToken: true
+
+---
+# Role for monitoring - Read-only access to metrics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: discord-bot-monitoring-role
+  namespace: discord-bot
+  labels:
+    app: discord-bot-monitoring
+    tier: monitoring
+rules:
+# Pods - Read access for scraping metrics
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# Metrics - Read access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# RoleBinding for monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: discord-bot-monitoring-rolebinding
+  namespace: discord-bot
+  labels:
+    app: discord-bot-monitoring
+    tier: monitoring
+subjects:
+- kind: ServiceAccount
+  name: discord-bot-monitoring
+  namespace: discord-bot
+roleRef:
+  kind: Role
+  name: discord-bot-monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# NetworkPolicy for RBAC enforcement at network level
+# Complements RBAC by restricting network access between pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-bot-rbac-network-policy
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      tier: application
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Allow traffic from other discord-bot pods and ingress
+  ingress:
+  # Allow from other application tier pods
+  - from:
+    - podSelector:
+        matchLabels:
+          tier: application
+    - podSelector:
+        matchLabels:
+          tier: audio-processing
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000  # API
+    - protocol: TCP
+      port: 3001  # Gateway
+    - protocol: TCP
+      port: 3002  # Audio
+    - protocol: TCP
+      port: 3003  # Worker
+
+  # Egress: Allow traffic to databases, cache, and external APIs
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # Allow to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # Allow to Lavalink
+  - to:
+    - podSelector:
+        matchLabels:
+          app: lavalink
+    ports:
+    - protocol: TCP
+      port: 2333
+
+  # Allow to external APIs (Discord, Spotify, YouTube, etc.)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS
+    - protocol: TCP
+      port: 80   # HTTP

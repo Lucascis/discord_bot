@@ -5,10 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
   },
   "dependencies": {
     "@discord-bot/logger": "workspace:*",
@@ -27,8 +26,8 @@
     "prom-client": "^15.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.10.5",
-    "typescript": "^5.3.3",
-    "vitest": "^1.1.0"
+    "@types/node": "^20.11.16",
+    "typescript": "^5.8.4",
+    "vitest": "^3.2.4"
   }
 }

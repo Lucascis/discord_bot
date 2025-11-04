@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { logger } from '@discord-bot/logger';
-import { PlaylistCollaboration, Playlist, Track } from './types.js';
+import { PlaylistCollaboration, Track } from './types.js';
 
 export interface CollaborationInvite {
   id: string;
@@ -23,7 +23,7 @@ export interface CollaborationActivity {
   playlistId: string;
   userId: string;
   action: 'track_added' | 'track_removed' | 'track_moved' | 'metadata_updated' | 'user_joined' | 'user_left';
-  details: any;
+  details: Record<string, unknown>;
   timestamp: Date;
 }
 
@@ -285,7 +285,7 @@ export class CollaborationManager extends EventEmitter {
     playlistId: string,
     userId: string,
     action: string,
-    data: any
+    data: Record<string, unknown>
   ): void {
     const activeUsers = this.getActiveCollaborators(playlistId);
 
@@ -435,7 +435,7 @@ export class CollaborationManager extends EventEmitter {
     playlistId: string,
     userId: string,
     action: CollaborationActivity['action'],
-    details: any
+    details: Record<string, unknown>
   ): void {
     const activity: CollaborationActivity = {
       id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,

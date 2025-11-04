@@ -5,10 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest"
   },
   "dependencies": {
     "@discord-bot/event-store": "workspace:*",
@@ -17,7 +16,7 @@
   },
   "devDependencies": {
     "@types/uuid": "^9.0.7",
-    "typescript": "^5.3.3",
-    "vitest": "^1.1.0"
+    "typescript": "^5.8.4",
+    "vitest": "^3.2.4"
   }
 }

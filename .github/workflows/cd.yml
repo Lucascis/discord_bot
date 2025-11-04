@@ -57,7 +57,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./gateway/Dockerfile
+          file: ./Dockerfile
+          target: production
           push: true
           tags: ${{ steps.meta-gateway.outputs.tags }}
           labels: ${{ steps.meta-gateway.outputs.labels }}
@@ -83,7 +84,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./audio/Dockerfile
+          file: ./Dockerfile
+          target: production
           push: true
           tags: ${{ steps.meta-audio.outputs.tags }}
           labels: ${{ steps.meta-audio.outputs.labels }}
@@ -109,7 +111,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./api/Dockerfile
+          file: ./Dockerfile
+          target: production
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}

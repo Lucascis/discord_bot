@@ -292,3 +292,284 @@ model WebhookSubscription {
   @@index([guildId])
   @@index([isActive])
 }
+
+// ========================================
+// SUBSCRIPTION SYSTEM MODELS
+// ========================================
+
+model Subscription {
+  id        String   @id @default(cuid())
+  guildId   String   @unique
+
+  // Subscription details
+  tier      SubscriptionTier @default(FREE)
+  status    SubscriptionStatus @default(ACTIVE)
+
+  // Billing cycle
+  billingCycle BillingCycle? // null for FREE tier
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  // Payment integration
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  stripeProductId       String?
+  stripePriceId         String?
+
+  // Trial management
+  trialStart   DateTime?
+  trialEnd     DateTime?
+  isTrialing   Boolean  @default(false)
+
+  // Cancellation
+  cancelAtPeriodEnd Boolean  @default(false)
+  canceledAt        DateTime?
+  cancellationReason String?
+
+  // Metadata
+  metadata  String?  // JSON for additional data
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  invoices      Invoice[]
+  usageLimits   UsageLimit[]
+  usageTracking UsageTracking?
+
+  @@index([guildId])
+  @@index([tier])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+  @@index([currentPeriodEnd])
+}
+
+model Invoice {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // Invoice details
+  invoiceNumber  String   @unique
+  status         InvoiceStatus @default(PENDING)
+
+  // Amounts (in cents)
+  amountDue      Int
+  amountPaid     Int      @default(0)
+  currency       String   @default("usd")
+
+  // Billing period
+  periodStart    DateTime
+  periodEnd      DateTime
+
+  // Payment details
+  stripeInvoiceId    String?  @unique
+  paymentIntentId    String?
+  paymentMethod      String?  // stripe, paypal, crypto
+
+  // Dates
+  dueDate        DateTime?
+  paidAt         DateTime?
+
+  // Metadata
+  description    String?
+  metadata       String?  // JSON
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([stripeInvoiceId])
+  @@index([periodStart, periodEnd])
+}
+
+model Feature {
+  id          String   @id @default(cuid())
+
+  // Feature identification
+  key         String   @unique  // e.g., "concurrent_playbacks", "audio_quality"
+  name        String
+  description String
+  category    FeatureCategory
+
+  // Feature type
+  type        FeatureType  // boolean, numeric, string
+
+  // Tier availability
+  availableInFree      Boolean @default(false)
+  availableInBasic     Boolean @default(false)
+  availableInPremium   Boolean @default(false)
+  availableInEnterprise Boolean @default(true)
+
+  // Default values per tier (JSON)
+  freeValue       String?
+  basicValue      String?
+  premiumValue    String?
+  enterpriseValue String?
+
+  // Metadata
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+  @@index([category])
+  @@index([isActive])
+}
+
+model UsageLimit {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // Limit identification
+  limitType      String   // e.g., "concurrent_playbacks", "monthly_tracks", "queue_size"
+
+  // Limit values
+  maxValue       Int      // Maximum allowed
+  currentValue   Int      @default(0)
+
+  // Reset period
+  resetPeriod    ResetPeriod? // null for non-resetting limits
+  lastReset      DateTime?
+  nextReset      DateTime?
+
+  // Metadata
+  metadata       String?  // JSON
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([subscriptionId, limitType])
+  @@index([subscriptionId])
+  @@index([limitType])
+  @@index([nextReset])
+}
+
+model UsageTracking {
+  id             String   @id @default(cuid())
+  subscriptionId String   @unique
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // Current billing period usage
+  tracksPlayed       Int @default(0)
+  playbackMinutes    Int @default(0)
+  apiRequests        Int @default(0)
+  activeGuilds       Int @default(0)
+
+  // All-time usage
+  totalTracksPlayed    Int @default(0)
+  totalPlaybackMinutes Int @default(0)
+  totalApiRequests     Int @default(0)
+
+  // Period tracking
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime
+
+  // Last activity
+  lastActivity       DateTime @default(now())
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([subscriptionId])
+  @@index([currentPeriodEnd])
+}
+
+model SubscriptionEvent {
+  id             String   @id @default(cuid())
+  guildId        String
+
+  // Event details
+  eventType      SubscriptionEventType
+  tier           SubscriptionTier?
+  previousTier   SubscriptionTier?
+
+  // Event data
+  description    String?
+  metadata       String?  // JSON
+
+  // User who triggered (if applicable)
+  userId         String?
+
+  createdAt      DateTime @default(now())
+
+  @@index([guildId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ========================================
+// ENUMS FOR SUBSCRIPTION SYSTEM
+// ========================================
+
+enum SubscriptionTier {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  UNPAID
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+  CUSTOM
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELED
+  REFUNDED
+}
+
+enum FeatureCategory {
+  PLAYBACK
+  AUDIO_QUALITY
+  COMMANDS
+  SUPPORT
+  ANALYTICS
+  CUSTOMIZATION
+  LIMITS
+}
+
+enum FeatureType {
+  BOOLEAN
+  NUMERIC
+  STRING
+}
+
+enum ResetPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionEventType {
+  CREATED
+  UPGRADED
+  DOWNGRADED
+  RENEWED
+  CANCELED
+  EXPIRED
+  PAYMENT_FAILED
+  PAYMENT_SUCCEEDED
+  TRIAL_STARTED
+  TRIAL_ENDED
+}

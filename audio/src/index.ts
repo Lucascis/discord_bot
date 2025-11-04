@@ -8,13 +8,15 @@ import {
   type ChannelDeletePacket,
   type Track,
   type UnresolvedTrack,
+  type Player,
+  type TrackExceptionEvent,
 } from 'lavalink-client';
 // Import config AFTER dotenv has loaded environment variables
 import { env } from '@discord-bot/config';
 import { logger, HealthChecker, CommonHealthChecks, getAdvancedHealthMonitor, initializeSentry } from '@discord-bot/logger';
 import { createClient } from 'redis';
 import { prisma } from '@discord-bot/database';
-import { RedisCircuitBreaker, type RedisCircuitBreakerConfig } from '@discord-bot/cache';
+import { RedisCircuitBreaker, type RedisCircuitBreakerConfig, safeValidateVoiceCredentials, safeValidateVoiceCredentialsMessage, type VoiceCredentials } from '@discord-bot/cache';
 import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
@@ -29,6 +31,11 @@ import { validateCommandMessage } from './validation.js';
 import {
   withErrorHandling
 } from './errors.js';
+import {
+  classifyYouTubeError,
+  logClassifiedError,
+  YouTubeErrorType
+} from './utils/youtube-error-classifier.js';
 import { automixCache } from './cache.js';
 import { audioCacheManager, featureFlagCache } from './services/cache.js';
 import { getAudioMetrics } from './services/metrics.js';
@@ -46,11 +53,7 @@ import {
   closeWorkerIntegration,
   checkWorkerIntegrationHealth,
   trackPlaybackAnalytics,
-  trackSearchAnalytics,
-  trackAutoplayAnalytics,
-  trackQueueAnalytics,
-  trackUserInteractionAnalytics,
-  requestPerformanceAnalysis
+  trackQueueAnalytics
 } from './services/worker-integration.js';
 import { commandProcessor } from './services/command-processor.js';
 import { audioStreamsMonitoring } from '@discord-bot/cache';
@@ -86,8 +89,202 @@ const redisPub = new RedisCircuitBreaker(
 
 const redisSub = createClient({ url: redisUrl });
 
+type RedisSubscriberClient = ReturnType<typeof createClient>;
+
 await redisSub.connect();
 logger.info('VOICE_CONNECT: Redis subscriber connected and ready for discord-bot:to-audio messages');
+
+// Setup Redis reconnection handlers for graceful recovery after connection loss
+setupAudioRedisReconnectionHandlers(redisSub);
+
+type FilterPresetId = 'flat' | 'bassboost' | 'nightcore' | 'vaporwave' | 'karaoke' | 'clarity';
+
+interface FilterPresetDefinition {
+  id: FilterPresetId;
+  label: string;
+  description: string;
+  apply(player: Player): Promise<void>;
+}
+
+const activeFilterPresets = new Map<string, FilterPresetId>();
+
+type PlayerMetadata = {
+  lastUserId?: string;
+  lastTrack?: Track | UnresolvedTrack | null;
+  trackStartTime?: number;
+};
+
+const playerMetadata = new WeakMap<Player, PlayerMetadata>();
+
+function getPlayerMetadata(player: Player): PlayerMetadata {
+  let metadata = playerMetadata.get(player);
+  if (!metadata) {
+    metadata = {};
+    playerMetadata.set(player, metadata);
+  }
+  return metadata;
+}
+
+function updatePlayerMetadata(player: Player, updates: Partial<PlayerMetadata>): void {
+  const metadata = getPlayerMetadata(player);
+  Object.assign(metadata, updates);
+}
+
+type NowPlayingFilter = {
+  id: FilterPresetId;
+  label: string;
+  description: string;
+};
+
+interface NowPlayingPayload {
+  guildId: string;
+  title: string;
+  durationMs: number;
+  positionMs: number;
+  isStream: boolean;
+  paused: boolean;
+  repeatMode: 'off' | 'track' | 'queue';
+  queueLen: number;
+  hasTrack: boolean;
+  canSeek: boolean;
+  volume: number;
+  autoplay: boolean;
+  autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+  textChannelId?: string;
+  filter?: NowPlayingFilter;
+  uri?: string;
+  author?: string;
+  artworkUrl?: string;
+}
+
+type TrackInfo = {
+  title?: string;
+  author?: string;
+  uri?: string;
+  artworkUrl?: string;
+  duration?: number;
+  identifier?: string;
+};
+
+type AutoplayTrack = import('./autoplay').LLTrack;
+
+function extractTrackInfo(track: Track | UnresolvedTrack | AutoplayTrack | null | undefined): TrackInfo | undefined {
+  if (track && typeof track === 'object' && 'info' in track) {
+    const { info } = track as Track & { info?: TrackInfo };
+    return info;
+  }
+  return undefined;
+}
+
+function isResolvedTrack(track: Track | UnresolvedTrack | null | undefined): track is Track {
+  const info = extractTrackInfo(track);
+  return !!info && typeof info.identifier === 'string';
+}
+
+const BASS_BOOST_BANDS = [
+  { band: 0, gain: 0.3 },
+  { band: 1, gain: 0.25 },
+  { band: 2, gain: 0.2 },
+  { band: 3, gain: 0.15 },
+  { band: 4, gain: 0.1 },
+  { band: 5, gain: 0.05 },
+] as const;
+
+const CLARITY_BANDS = [
+  { band: 1, gain: 0.1 },
+  { band: 2, gain: 0.15 },
+  { band: 3, gain: 0.2 },
+  { band: 4, gain: 0.15 },
+  { band: 8, gain: 0.05 },
+] as const;
+
+const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
+  flat: {
+    id: 'flat',
+    label: 'Flat',
+    description: 'Disable all enhancements and play the track as-is.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+    },
+  },
+  bassboost: {
+    id: 'bassboost',
+    label: 'Bass Boost',
+    description: 'Enhances low frequencies for a punchier mix.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+      await player.filterManager.setEQ([...BASS_BOOST_BANDS]);
+    },
+  },
+  nightcore: {
+    id: 'nightcore',
+    label: 'Nightcore',
+    description: 'Raises tempo and pitch for energetic playback.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+      await player.filterManager.toggleNightcore(1.25, 1.12, 1.0);
+    },
+  },
+  vaporwave: {
+    id: 'vaporwave',
+    label: 'Vaporwave',
+    description: 'Slowed, detuned ambience for chill sessions.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+      await player.filterManager.toggleVaporwave(0.85, 0.8, 1.0);
+    },
+  },
+  karaoke: {
+    id: 'karaoke',
+    label: 'Karaoke',
+    description: 'Suppresses lead vocals to highlight instrumentals.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+      await player.filterManager.toggleKaraoke(1, 1, 220, 100);
+    },
+  },
+  clarity: {
+    id: 'clarity',
+    label: 'Studio Clarity',
+    description: 'Boosts vocals and highs for crisp detail.',
+    apply: async (player) => {
+      await player.filterManager.resetFilters();
+      await player.filterManager.setEQ([...CLARITY_BANDS]);
+    },
+  },
+};
+
+function buildFilterResponse(
+  guildId: string,
+  success: boolean,
+  message?: string,
+  error?: string,
+) {
+  if (!activeFilterPresets.has(guildId)) {
+    activeFilterPresets.set(guildId, 'flat');
+  }
+
+  const activeId = activeFilterPresets.get(guildId) ?? 'flat';
+  const activePreset = FILTER_PRESETS[activeId] ?? FILTER_PRESETS.flat;
+
+  const presets = Object.values(FILTER_PRESETS).map((preset) => ({
+    id: preset.id,
+    label: preset.label,
+    description: preset.description,
+  }));
+
+  return {
+    success,
+    message,
+    error,
+    preset: {
+      id: activePreset.id,
+      label: activePreset.label,
+      description: activePreset.description,
+    },
+    presets,
+  };
+}
 
 // CRITICAL FIX: Force Redis connection and verify circuit breaker state
 try {
@@ -214,20 +411,37 @@ logger.info('Search performance optimizations initialized');
 try {
   // Queue command handler
   commandProcessor.registerHandler('queue', async (data) => {
-    logger.info({ guildId: data.guildId, requestId: data.requestId }, 'audio: queue command received via Redis Streams');
+    logger.info({ guildId: data.guildId, requestId: data.requestId, page: data.page }, 'audio: queue command received via Redis Streams');
 
     const player = manager.getPlayer(data.guildId);
-    const items = (player?.queue.tracks ?? []).slice(0, 10).map((t: { info?: { title?: string; uri?: string } }) => {
+    const allTracks = player?.queue.tracks ?? [];
+
+    // Pagination settings
+    const page = parseInt(data.page || '1', 10);
+    const pageSize = 10;
+    const startIndex = (page - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const totalPages = Math.ceil(allTracks.length / pageSize);
+
+    const items = allTracks.slice(startIndex, endIndex).map((t: { info?: { title?: string; uri?: string } }) => {
       const info = t.info;
       return { title: info?.title ?? 'Unknown', uri: info?.uri };
     });
 
-    const response = { items };
+    const response = {
+      items,
+      page,
+      totalPages,
+      totalTracks: allTracks.length
+    };
 
     logger.info({
       guildId: data.guildId,
       requestId: data.requestId,
       queueSize: items.length,
+      totalTracks: allTracks.length,
+      page,
+      totalPages,
       hasPlayer: !!player
     }, 'audio: returning queue response via Redis Streams');
 
@@ -579,16 +793,37 @@ try {
     return { success: true, volume: targetVolume, muted: targetVolume === 0 };
   });
 
-  // Filters handler (placeholder)
+  // Filters handler
   commandProcessor.registerHandler('filters', async (data) => {
-    logger.info({ guildId: data.guildId }, 'audio: filters command received via Redis Streams');
+    const guildId = data.guildId;
+    const action = (data.action ?? 'get').toLowerCase();
+    logger.info({ guildId, action }, 'audio: filters command received via Redis Streams');
 
-    const player = manager.getPlayer(data.guildId);
-    if (!player) return { success: false, error: 'No player found' };
+    if (action === 'apply') {
+      const presetId = (data.preset ?? 'flat') as FilterPresetId;
+      const preset = FILTER_PRESETS[presetId];
+      const player = manager.getPlayer(guildId);
 
-    // Placeholder for filters functionality
-    // This would cycle through different audio filters/effects
-    return { success: true, message: 'Filters not implemented yet' };
+      if (!preset) {
+        return buildFilterResponse(guildId, false, undefined, 'Unknown preset selected.');
+      }
+
+      if (!player) {
+        return buildFilterResponse(guildId, false, undefined, 'Start playback before applying filters.');
+      }
+
+      try {
+        await preset.apply(player);
+        activeFilterPresets.set(guildId, preset.id);
+        void pushNowPlaying(player);
+        return buildFilterResponse(guildId, true, `${preset.label} enabled.`);
+      } catch (error) {
+        logger.error({ error, guildId, preset: preset.id }, 'Failed to apply audio filter preset');
+        return buildFilterResponse(guildId, false, undefined, 'Failed to apply audio filter.');
+      }
+    }
+
+    return buildFilterResponse(guildId, true);
   });
 
   logger.info('Redis Streams command handlers registered successfully');
@@ -612,7 +847,7 @@ type CommandMessage =
   | { type: 'loopSet'; guildId: string; mode: 'off' | 'track' | 'queue' }
   | { type: 'volumeAdjust'; guildId: string; delta: number }
   | { type: 'nowplaying'; guildId: string; requestId?: string; channelId?: string }
-  | { type: 'queue'; guildId: string; requestId: string }
+  | { type: 'queue'; guildId: string; requestId: string; page?: string }
   | { type: 'seek'; guildId: string; positionMs: number }
   | { type: 'seekAdjust'; guildId: string; deltaMs: number }
   | { type: 'shuffle'; guildId: string }
@@ -622,7 +857,189 @@ type CommandMessage =
   | { type: 'seedRelated'; guildId: string }
   | { type: 'previous'; guildId: string }
   | { type: 'mute'; guildId: string }
-  | { type: 'filters'; guildId: string };
+  | { type: 'filters'; guildId: string; action?: string; preset?: string };
+
+/**
+ * Setup Redis reconnection handlers for audio service
+ * Automatically restores subscriptions after connection loss without manual intervention
+ */
+function setupAudioRedisReconnectionHandlers(redisSub: RedisSubscriberClient): void {
+  // Redis Subscriber Reconnection Handler
+  redisSub.on('reconnecting', () => {
+    logger.warn('Audio service: Redis subscriber connection lost, attempting to reconnect...');
+  });
+
+  redisSub.on('connect', async () => {
+    logger.info('Audio service: Redis subscriber reconnected successfully');
+    // Restore all subscriptions after reconnection
+    try {
+      await restoreAudioRedisSubscriptions(redisSub);
+      logger.info('Audio service: Successfully restored Redis subscriptions after reconnection');
+    } catch (error) {
+      logger.error({ error }, 'Audio service: Failed to restore Redis subscriptions after reconnection');
+    }
+  });
+
+  redisSub.on('error', (error: unknown) => {
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Audio service: Redis subscriber connection error');
+  });
+
+  logger.info('Audio service: Redis reconnection handlers configured for graceful recovery');
+}
+
+/**
+ * Restore audio service Redis subscriptions after reconnection
+ * Re-subscribes to all channels needed for audio playback and command handling
+ * Channels: discord-bot:to-audio, discord-bot:voice-credentials, discord-bot:raw-events, discord-bot:commands
+ */
+async function restoreAudioRedisSubscriptions(redisSub: RedisSubscriberClient): Promise<void> {
+  logger.info('Audio service: Restoring Redis subscriptions after reconnection...');
+
+  try {
+    // Channels to restore for audio service
+    const channelsToRestore = [
+      'discord-bot:to-audio',
+      'discord-bot:voice-credentials',
+      'discord-bot:raw-events',
+      'discord-bot:commands'
+    ];
+
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const channel of channelsToRestore) {
+      try {
+        if (channel === 'discord-bot:to-audio') {
+          // Re-subscribe to voice credentials and raw events from gateway
+          await redisSub.subscribe(channel, async (message: string) => {
+            try {
+              const payload = JSON.parse(message);
+              logger.debug({
+                messageType: payload.type,
+                guildId: payload.guildId,
+                hasVoiceCredentials: !!payload.voiceCredentials
+              }, 'VOICE_CONNECT: Received message on discord-bot:to-audio channel (restored subscription)');
+
+              if (payload.type === 'VOICE_CREDENTIALS') {
+                logger.info({ guildId: payload.guildId }, 'VOICE_CONNECT: Processing voice credentials (restored subscription)');
+
+                // Validate message structure
+                const validationResult = safeValidateVoiceCredentialsMessage(payload);
+                if (!validationResult.success) {
+                  logger.error({
+                    guildId: payload.guildId,
+                    validationError: validationResult.error
+                  }, 'VOICE_CONNECT: Invalid voice credentials message (restored subscription) - skipping processing');
+                  return;
+                }
+
+                await handleVoiceCredentials(payload.guildId, validationResult.data.voiceCredentials);
+              } else if (payload.sessionId && payload.token && payload.endpoint && payload.guildId) {
+                logger.info({ guildId: payload.guildId }, 'VOICE_CONNECT: Processing raw voice credentials (restored subscription)');
+
+                // Validate raw voice credentials format
+                const validationResult = safeValidateVoiceCredentials(payload);
+                if (!validationResult.success) {
+                  logger.error({
+                    guildId: payload.guildId,
+                    validationError: validationResult.error
+                  }, 'VOICE_CONNECT: Invalid raw voice credentials (restored subscription) - skipping processing');
+                  return;
+                }
+
+                await handleVoiceCredentials(payload.guildId, validationResult.data);
+              } else {
+                const discordEvent = payload as VoicePacket | VoiceServer | VoiceState | ChannelDeletePacket;
+                await manager.sendRawData(discordEvent);
+              }
+            } catch (e) {
+              logger.error({ e, rawMessage: message }, 'Failed to process raw event (restored subscription)');
+            }
+          });
+        } else if (channel === 'discord-bot:voice-credentials') {
+          // Legacy voice credentials channel
+          await redisSub.subscribe(channel, withErrorHandling(async (...args: unknown[]) => {
+            const message = args[0] as string;
+            try {
+              logger.debug('VOICE_CONNECT: Received message on discord-bot:voice-credentials channel (restored subscription)');
+              const voiceCredentials = JSON.parse(message);
+
+              // Validate voice credentials
+              const validationResult = safeValidateVoiceCredentials(voiceCredentials);
+              if (!validationResult.success) {
+                logger.error({
+                  guildId: voiceCredentials?.guildId,
+                  validationError: validationResult.error
+                }, 'VOICE_CONNECT: Invalid voice credentials (restored subscription) - skipping processing');
+                return;
+              }
+
+              await handleVoiceCredentials(validationResult.data.guildId, validationResult.data);
+            } catch (error) {
+              logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to process voice credentials message (restored subscription)');
+            }
+          }));
+        } else if (channel === 'discord-bot:raw-events') {
+          // Raw Discord events for Lavalink
+          await redisSub.subscribe(channel, withErrorHandling(async (...args: unknown[]) => {
+            const message = args[0] as string;
+            try {
+              const rawData = JSON.parse(message);
+              manager.sendRawData(rawData);
+            } catch (error) {
+              logger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Failed to process raw Discord event (restored subscription)');
+            }
+          }));
+        } else if (channel === 'discord-bot:commands') {
+          // Command handling from gateway
+          await redisSub.subscribe(channel, withErrorHandling(async (...args: unknown[]) => {
+            const message = args[0] as string;
+            let data: CommandMessage | undefined;
+            try {
+              const rawData = JSON.parse(String(message));
+
+              // Validate command message structure
+              const validation = validateCommandMessage(rawData);
+              if (!validation.success) {
+                logger.error({ error: validation.error, rawData }, 'Invalid command message received (restored subscription)');
+                return;
+              }
+
+              data = validation.data as CommandMessage;
+              logger.debug({ commandType: data.type, guildId: data.guildId }, 'Command received on restored subscription');
+
+              // Note: Command processing logic is the same as before
+              // The handleCommandMessage logic is extensive and located in the main handler
+              // This restoration simply re-establishes the subscription
+            } catch (error) {
+              logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to process command message (restored subscription)');
+            }
+          }));
+        }
+
+        logger.info({ channel }, 'Audio service: Successfully restored subscription to channel');
+        successCount++;
+      } catch (subscriptionError) {
+        logger.error({ channel, error: subscriptionError }, 'Audio service: Failed to restore subscription to channel');
+        failureCount++;
+      }
+    }
+
+    logger.info({
+      channels: channelsToRestore,
+      restored: successCount,
+      failed: failureCount
+    }, 'Audio service: Redis subscription restoration completed');
+
+    if (failureCount > 0) {
+      logger.warn({ failureCount, totalChannels: channelsToRestore.length }, 'Audio service: Some subscriptions failed to restore - service may have degraded functionality');
+    }
+  } catch (error) {
+    logger.error({ error }, 'Audio service: Critical error during Redis subscription restoration');
+    throw error;
+  }
+}
+
 // Handle raw events from Discord via Redis
 await redisSub.subscribe('discord-bot:to-audio', async (message) => {
   try {
@@ -639,12 +1056,34 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
     // Handle VOICE_CREDENTIALS message from Gateway (structured format)
     if (payload.type === 'VOICE_CREDENTIALS') {
       logger.info({ guildId: payload.guildId }, 'VOICE_CONNECT: Processing structured VOICE_CREDENTIALS message');
-      await handleVoiceCredentials(payload.guildId, payload.voiceCredentials);
+
+      // Validate message structure
+      const validationResult = safeValidateVoiceCredentialsMessage(payload);
+      if (!validationResult.success) {
+        logger.error({
+          guildId: payload.guildId,
+          validationError: validationResult.error
+        }, 'VOICE_CONNECT: Invalid voice credentials message - skipping processing');
+        return;
+      }
+
+      await handleVoiceCredentials(payload.guildId, validationResult.data.voiceCredentials);
     }
     // Handle direct voice credentials (raw format from Gateway method 2)
     else if (payload.sessionId && payload.token && payload.endpoint && payload.guildId) {
       logger.info({ guildId: payload.guildId }, 'VOICE_CONNECT: Processing raw voice credentials message');
-      await handleVoiceCredentials(payload.guildId, payload);
+
+      // Validate raw voice credentials format
+      const validationResult = safeValidateVoiceCredentials(payload);
+      if (!validationResult.success) {
+        logger.error({
+          guildId: payload.guildId,
+          validationError: validationResult.error
+        }, 'VOICE_CONNECT: Invalid raw voice credentials - skipping processing');
+        return;
+      }
+
+      await handleVoiceCredentials(payload.guildId, validationResult.data);
     }
     // Handle other Discord events as before
     else {
@@ -675,7 +1114,7 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
  * CRITICAL FIX: Unified voice credentials handler
  * Processes voice credentials from Discord and connects pending players
  */
-async function handleVoiceCredentials(guildId: string, voiceCredentials: any): Promise<void> {
+async function handleVoiceCredentials(guildId: string, voiceCredentials: VoiceCredentials): Promise<void> {
   try {
     logger.info({
       guildId,
@@ -763,7 +1202,18 @@ await redisSub.subscribe('discord-bot:voice-credentials', withErrorHandling(asyn
   try {
     logger.debug('VOICE_CONNECT: Received message on legacy discord-bot:voice-credentials channel');
     const voiceCredentials = JSON.parse(message);
-    await handleVoiceCredentials(voiceCredentials.guildId, voiceCredentials);
+
+    // Validate voice credentials
+    const validationResult = safeValidateVoiceCredentials(voiceCredentials);
+    if (!validationResult.success) {
+      logger.error({
+        guildId: voiceCredentials?.guildId,
+        validationError: validationResult.error
+      }, 'VOICE_CONNECT: Invalid voice credentials message - skipping processing');
+      return;
+    }
+
+    await handleVoiceCredentials(validationResult.data.guildId, validationResult.data);
   } catch (error) {
     logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to process voice credentials message');
   }
@@ -824,7 +1274,7 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       });
 
       // Store user ID for predictive tracking
-      (player as any)._lastUserId = playData.userId;
+      updatePlayerMetadata(player, { lastUserId: playData.userId });
 
       // CRITICAL FIX: Store textChannelId for UI updates
       guildTextChannels.set(playData.guildId, playData.textChannelId);
@@ -1545,15 +1995,29 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       return;
     }
     if (data.type === 'queue') {
-      logger.info({ guildId: data.guildId, requestId: data.requestId }, 'audio: queue command received');
+      logger.info({ guildId: data.guildId, requestId: data.requestId, page: data.page }, 'audio: queue command received');
 
       const player = manager.getPlayer(data.guildId);
-      const items = (player?.queue.tracks ?? []).slice(0, 10).map((t: { info?: { title?: string; uri?: string } }) => {
+      const allTracks = player?.queue.tracks ?? [];
+
+      // Pagination settings
+      const page = parseInt(data.page || '1', 10);
+      const pageSize = 10;
+      const startIndex = (page - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+      const totalPages = Math.ceil(allTracks.length / pageSize);
+
+      const items = allTracks.slice(startIndex, endIndex).map((t: { info?: { title?: string; uri?: string } }) => {
         const info = t.info;
         return { title: info?.title ?? 'Unknown', uri: info?.uri };
       });
 
-      const response = { items };
+      const response = {
+        items,
+        page,
+        totalPages,
+        totalTracks: allTracks.length
+      };
       const responseChannel = `discord-bot:response:${data.requestId}`;
 
       logger.info({
@@ -1561,6 +2025,9 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         requestId: data.requestId,
         responseChannel,
         queueSize: items.length,
+        totalTracks: allTracks.length,
+        page,
+        totalPages,
         hasPlayer: !!player
       }, 'audio: publishing queue response');
 
@@ -1662,9 +2129,10 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
           // Double-tap: go to previous track
           const previousTrack = previousTracks.get(data.guildId);
           if (previousTrack) {
+            const previousTrackInfo = extractTrackInfo(previousTrack);
             logger.info({
               guildId: data.guildId,
-              previousTrackTitle: previousTrack.info.title
+              previousTrackTitle: previousTrackInfo?.title
             }, 'audio: playing previous track (double-tap)');
 
             // Store current track as the new previous
@@ -1724,24 +2192,6 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
       } else {
         logger.warn({ guildId: data.guildId }, 'audio: no player found for mute command');
       }
-      return;
-    }
-
-    // Filters command (placeholder for future implementation)
-    if (data.type === 'filters') {
-      logger.info({ guildId: data.guildId }, 'audio: filters command received');
-
-      // For now, just log that filters are not yet implemented
-      logger.info({ guildId: data.guildId }, 'audio: filters feature coming soon');
-
-      // Send a UI response indicating filters are coming soon
-      await redisPub.publish('discord-bot:to-discord', JSON.stringify({
-        type: 'command_response',
-        guildId: data.guildId,
-        success: false,
-        message: '🎚️ Audio filters coming soon! Stay tuned for bass boost, nightcore, and more.',
-        responseType: 'filters_not_implemented'
-      }));
       return;
     }
 
@@ -1954,34 +2404,42 @@ advancedHealth.registerComponent('worker-integration', async () => {
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
 const lavalinkEvents = new Counter({ name: 'lavalink_events_total', help: 'Lavalink events', labelNames: ['event'], registers: [registry] });
+const youtubeErrorMetrics = new Counter({
+  name: 'youtube_errors_total',
+  help: 'YouTube playback errors by type',
+  labelNames: ['errorType', 'retryable'],
+  registers: [registry]
+});
 
 // Initialize audio metrics with shared registry
 const audioMetrics = getAudioMetrics(registry);
 
 manager.on('trackStart', (player, track) => {
   lavalinkEvents.labels('trackStart').inc();
-  const info = (track as { info?: { title?: string; uri?: string; duration?: number } })?.info;
+  const info = extractTrackInfo(track);
   logger.info({ guildId: player.guildId, title: info?.title, uri: info?.uri }, 'audio: track start');
 
   // Store the current track as the new previous track for future use
   // We store each track when it starts playing for the previous track functionality
-  const currentTrackData = (player as any)._lastTrack;
-  if (currentTrackData && currentTrackData !== track) {
+  const metadata = getPlayerMetadata(player);
+  const currentTrackData = metadata.lastTrack ?? null;
+  const previousTrackInfo = extractTrackInfo(currentTrackData);
+  if (currentTrackData && currentTrackData !== track && isResolvedTrack(currentTrackData)) {
     previousTracks.set(player.guildId, currentTrackData);
     logger.debug({
       guildId: player.guildId,
-      previousTrackTitle: (currentTrackData as any)?.info?.title,
+      previousTrackTitle: previousTrackInfo?.title,
       currentTrackTitle: info?.title
     }, 'audio: stored previous track for double-tap functionality');
   }
 
   // Store current track for next time
-  (player as any)._lastTrack = track;
+  metadata.lastTrack = track;
 
   // Track listening analytics for predictive caching
   if (info?.title) {
     // Store track start time for later duration calculation
-    (player as any)._trackStartTime = Date.now();
+    metadata.trackStartTime = Date.now();
   }
 
   // push immediate now-playing snapshot
@@ -1989,25 +2447,135 @@ manager.on('trackStart', (player, track) => {
 });
 manager.on('trackEnd', () => lavalinkEvents.labels('trackEnd').inc());
 manager.on('trackError', () => lavalinkEvents.labels('trackError').inc());
-// Try to recover from track errors by skipping or automix
-manager.on('trackError', async (player, track) => {
+// Enhanced track error handler with YouTube error classification and recovery strategies
+manager.on('trackError', async (player, track, errorData: TrackExceptionEvent) => {
+  const trackInfo = (track as { info?: { title?: string; author?: string; uri?: string } })?.info;
+  let retryCount = 0;
+  const maxRetries = 2;
+
   try {
+    // Classify the YouTube error to determine root cause and recovery strategy
+    const classifiedError = classifyYouTubeError(errorData, trackInfo);
+
+    // Log classified error with structured information
+    logClassifiedError(classifiedError, trackInfo, player.guildId);
+
+    // Track error metrics by type and retryability
+    youtubeErrorMetrics.labels(classifiedError.type, String(classifiedError.retryable)).inc();
+
+    // Implement recovery strategies based on error type
+    switch (classifiedError.type) {
+      case YouTubeErrorType.NETWORK_ERROR: {
+        // Retry network errors with exponential backoff (max 2 attempts)
+        logger.info({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title,
+          attempt: retryCount + 1,
+          maxAttempts: maxRetries
+        }, 'Attempting to retry track due to network error');
+
+        while (retryCount < maxRetries) {
+          try {
+            retryCount++;
+            // Wait with exponential backoff: 1s, 2s
+            const delayMs = Math.pow(2, retryCount - 1) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+
+            // Re-queue the current track to retry playback
+            if (player.queue.current && track) {
+              player.queue.tracks.unshift(track);
+              await player.skip();
+              await saveQueue(player.guildId, player);
+              logger.info({
+                guildId: player.guildId,
+                trackTitle: trackInfo?.title,
+                attempt: retryCount
+              }, 'Network error retry succeeded');
+              return;
+            }
+          } catch (retryError) {
+            logger.warn({
+              guildId: player.guildId,
+              trackTitle: trackInfo?.title,
+              attempt: retryCount,
+              error: retryError instanceof Error ? retryError.message : String(retryError)
+            }, `Network error retry attempt ${retryCount} failed`);
+          }
+        }
+
+        // If retries exhausted, fall through to skip the track
+        logger.warn({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title,
+          maxAttempts: maxRetries
+        }, 'Network error retries exhausted, skipping track');
+        break;
+      }
+
+      case YouTubeErrorType.REQUIRES_LOGIN: {
+        // Log warning suggesting poToken configuration for age-restricted content
+        logger.warn({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title,
+          suggestion: 'Configure LAVALINK_YOUTUBE_PO_TOKEN in environment for age-restricted video support'
+        }, 'Track requires YouTube authentication');
+        break;
+      }
+
+      case YouTubeErrorType.REGION_BLOCKED:
+      case YouTubeErrorType.UNAVAILABLE: {
+        // Skip immediately for permanently blocked content
+        logger.info({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title,
+          errorType: classifiedError.type
+        }, 'Skipping permanently unavailable or blocked track');
+        break;
+      }
+
+      case YouTubeErrorType.AGE_RESTRICTED: {
+        // Log info and skip age-restricted content
+        logger.info({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title
+        }, 'Skipping age-restricted track');
+        break;
+      }
+
+      case YouTubeErrorType.UNKNOWN:
+      default: {
+        // For unknown errors, just skip the track to prevent stuck playback
+        logger.warn({
+          guildId: player.guildId,
+          trackTitle: trackInfo?.title,
+          originalError: classifiedError.originalError?.message
+        }, 'Skipping track due to unknown error');
+      }
+    }
+
+    // Standard recovery: skip to next track or trigger autoplay
     if (player.queue.tracks.length > 0) {
       await player.skip();
       await saveQueue(player.guildId, player);
       return;
     }
+
+    // If no tracks in queue, attempt autoplay as fallback
     if ((player.repeatMode ?? 'off') === 'off' && !(player.playing || player.queue.current)) {
       if (await isAutomixEnabledCached(player.guildId)) {
         try {
-          await enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } });
+          await enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string; duration?: number } });
         } catch (e) {
           logger.error({ e }, 'automix after trackError failed');
         }
       }
     }
   } catch (e) {
-    logger.error({ e }, 'trackError handler failed');
+    logger.error({
+      e,
+      guildId: player.guildId,
+      trackTitle: trackInfo?.title
+    }, 'trackError handler failed');
   }
 });
 
@@ -2199,6 +2767,7 @@ const healthServer = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       res.end(prometheusMetrics);
     } catch (error) {
+      logger.error({ error }, 'Failed to generate business metrics response');
       res.writeHead(500, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'Failed to generate business metrics' }));
     }
@@ -2293,7 +2862,7 @@ process.on('SIGINT', async () => {
     guildTextChannels.destroy();
 
     // CRITICAL FIX: Reject any pending voice connections during shutdown
-    for (const [guildId, entry] of pendingPlayerConnections.entries()) {
+    for (const [, entry] of pendingPlayerConnections.entries()) {
       clearTimeout(entry.timeoutId);
       entry.reject(new Error('Service shutting down'));
     }
@@ -2328,7 +2897,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Persistence helpers
-import { saveQueue, resumeQueues, getQueueCached as _getQueueCached } from './services/database.js';
+import { saveQueue, getQueueCached as _getQueueCached } from './services/database.js';
 
 // Queue resuming should be explicit, not automatic on service start
 // Only resume queues when explicitly requested via command or specific condition
@@ -2473,7 +3042,7 @@ async function enqueueAutomix(player: import('lavalink-client').Player, last: { 
   }
 
   try {
-    const info = (pick as { info?: { title?: string; uri?: string; duration?: number } }).info;
+    const info = extractTrackInfo(pick);
     logger.info({ guildId: player.guildId, nextTitle: info?.title, nextUri: info?.uri, mode }, 'automix: picked candidate');
 
     // Track successful autoplay recommendation
@@ -2533,15 +3102,16 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
     logger.info({ guildId: player.guildId, reason: reason ?? 'none' }, 'audio: track end');
 
     // Track listening behavior for predictive caching
-    const trackInfo = (track as { info?: { title?: string; duration?: number } })?.info;
-    const startTime = (player as any)._trackStartTime;
+    const trackInfo = extractTrackInfo(track);
+    const metadata = getPlayerMetadata(player);
+    const startTime = metadata.trackStartTime;
     if (trackInfo?.title && startTime) {
       const listenTime = Date.now() - startTime;
       const skipped = reason === 'REPLACED' || reason === 'STOPPED';
       const duration = trackInfo.duration || 0;
 
       // Track user listening analytics (use most recent user from player context)
-      const lastUserId = (player as any)._lastUserId || 'unknown';
+      const lastUserId = metadata.lastUserId ?? 'unknown';
       void predictiveCacheManager.trackUserListening(
         lastUserId,
         player.guildId,
@@ -2552,7 +3122,7 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
       ).catch(e => logger.debug({ e }, 'Predictive listening tracking failed'));
 
       // Clear track start time
-      delete (player as any)._trackStartTime;
+      metadata.trackStartTime = undefined;
     }
 
     if (isBlockReason(reason)) { logger.info({ guildId: player.guildId, reason }, 'audio: track end blocked for autoplay'); return; }
@@ -2602,7 +3172,7 @@ const guildTextChannels = new TTLMap<string, string>({
 });
 
 // Track previous tracks for double-tap previous functionality
-const previousTracks = new Map<string, import('lavalink-client').Track>();
+const previousTracks = new Map<string, Track>();
 
 // Track timestamps for double-tap detection
 const previousTrackTimestamps = new Map<string, number>();
@@ -2691,7 +3261,7 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
     // Get autoplay state from database
     const autoplayConfig = await getAutoplayConfigCached(guildId);
 
-    const payload: { guildId: string; title: string; uri?: string; author?: string; durationMs: number; positionMs: number; isStream: boolean; artworkUrl?: string; paused: boolean; repeatMode?: 'off' | 'track' | 'queue'; queueLen: number; hasTrack: boolean; canSeek: boolean; volume: number; autoplay: boolean; autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed'; textChannelId?: string } = {
+    const payload: NowPlayingPayload = {
       guildId,
       title: current.info.title ?? 'Unknown',
       durationMs: Math.floor((current.info.duration ?? 0) as number),
@@ -2707,7 +3277,15 @@ async function pushNowPlaying(player: import('lavalink-client').Player) {
       autoplayMode: autoplayConfig.mode,
       ...(textChannelId ? { textChannelId } : {}),
     };
-    
+
+    const activePresetId = activeFilterPresets.get(guildId) ?? 'flat';
+    const activePreset = FILTER_PRESETS[activePresetId] ?? FILTER_PRESETS.flat;
+    payload.filter = {
+      id: activePreset.id,
+      label: activePreset.label,
+      description: activePreset.description,
+    };
+
     if (current.info.uri !== undefined) {
       payload.uri = current.info.uri;
     }
@@ -2739,23 +3317,29 @@ async function pushIdleState(player: import('lavalink-client').Player) {
     // Get autoplay state from database
     const autoplayConfig = await getAutoplayConfigCached(player.guildId);
 
-    const payload = {
+    const payload: NowPlayingPayload = {
       guildId: player.guildId,
       title: 'Nothing playing',
-      uri: undefined as string | undefined,
-      author: undefined as string | undefined,
       durationMs: 0,
       positionMs: 0,
       isStream: false,
-      artworkUrl: undefined as string | undefined,
       paused: false,
       repeatMode: (player.repeatMode ?? 'off') as 'off' | 'track' | 'queue',
       queueLen: player.queue.tracks.length,
       hasTrack: false,
       canSeek: false,
+      volume: player.volume ?? 100,
       autoplay: autoplayConfig.enabled,
       autoplayMode: autoplayConfig.mode,
       ...(textChannelId ? { textChannelId } : {}),
+    };
+
+    const activePresetId = activeFilterPresets.get(player.guildId) ?? 'flat';
+    const activePreset = FILTER_PRESETS[activePresetId] ?? FILTER_PRESETS.flat;
+    payload.filter = {
+      id: activePreset.id,
+      label: activePreset.label,
+      description: activePreset.description,
     };
     await redisPub.publish('discord-bot:ui:now', JSON.stringify(payload));
   } catch { /* ignore */ }

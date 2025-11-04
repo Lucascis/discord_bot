@@ -1,0 +1,217 @@
+%% Sequence Diagram: Play Command Flow
+%% Purpose: Shows the complete flow when a user executes /play command
+%% Author: Discord Bot Team
+%% Last Updated: 2025-11-03
+
+sequenceDiagram
+    autonumber
+
+    actor User as 👤 Discord User
+    participant Discord as Discord API
+    participant Gateway as Gateway Service
+    participant Redis as Redis Pub/Sub
+    participant Audio as Audio Service
+    participant DB as PostgreSQL
+    participant Lavalink as Lavalink
+    participant YouTube as YouTube API
+
+    Note over User,YouTube: User wants to play a song in voice channel
+
+    %% Command Initiation
+    User->>Discord: /play query: "never gonna give you up"
+    activate Discord
+    Discord->>Gateway: INTERACTION_CREATE event
+    activate Gateway
+
+    Note over Gateway: Validate interaction<br/>Check permissions
+
+    Gateway->>Discord: POST /interactions/{id}/callback<br/>(ephemeral: "🎵 Processing...")
+    Discord->>User: Show processing message
+    deactivate Discord
+
+    %% Command Processing
+    Gateway->>DB: SELECT * FROM guild_settings<br/>WHERE guildId = ?
+    activate DB
+    DB-->>Gateway: Guild settings (if exists)
+    deactivate DB
+
+    Gateway->>Redis: PUBLISH discord-bot:commands<br/>{ type: 'play', query: '...', guildId, ... }
+    activate Redis
+    Note over Redis: Message queued in pub/sub
+
+    Redis->>Audio: Message delivered
+    deactivate Redis
+    activate Audio
+
+    %% Audio Service Processing
+    Note over Audio: Extract query and guild info
+
+    Audio->>DB: SELECT * FROM queue<br/>WHERE guildId = ?
+    activate DB
+    DB-->>Audio: Current queue (if exists)
+    deactivate DB
+
+    %% Search for Track
+    alt Query is YouTube URL
+        Note over Audio: Parse YouTube URL<br/>Extract video ID
+    else Query is search term
+        Audio->>Lavalink: GET /loadtracks?identifier=ytsearch:{query}
+        activate Lavalink
+        Lavalink->>YouTube: Search API request
+        activate YouTube
+        YouTube-->>Lavalink: Search results
+        deactivate YouTube
+        Lavalink-->>Audio: Track results (top 5)
+        deactivate Lavalink
+        Note over Audio: Select first result
+    end
+
+    %% Cache Search Results
+    Audio->>Redis: SETEX search:{query} 300 {results}
+    activate Redis
+    Redis-->>Audio: OK
+    deactivate Redis
+
+    %% Add to Queue
+    alt Queue is empty
+        Note over Audio: This will be the first track
+        Audio->>DB: INSERT INTO queue<br/>(guildId, title, url, position, ...)
+        activate DB
+        DB-->>Audio: Queue entry created (position: 0)
+        deactivate DB
+
+        %% Start Playback
+        Audio->>Lavalink: POST /sessions/{sessionId}/players/{guildId}<br/>{ encodedTrack, voice: {...} }
+        activate Lavalink
+
+        Note over Lavalink: Create player<br/>Connect to voice channel
+
+        Lavalink->>Discord: Voice connection (UDP)
+        activate Discord
+        Discord-->>Lavalink: Voice connection established
+        deactivate Discord
+
+        Lavalink->>YouTube: Stream audio data
+        activate YouTube
+        Note over Lavalink: Download and encode audio
+        YouTube-->>Lavalink: Audio stream
+        deactivate YouTube
+
+        Lavalink->>Discord: Send opus packets (UDP)
+        activate Discord
+        Discord->>User: 🎵 Audio playback in voice channel
+        deactivate Discord
+
+        Lavalink-->>Audio: Player updated event
+        deactivate Lavalink
+
+    else Queue has tracks
+        Note over Audio: Add to end of queue
+        Audio->>DB: SELECT MAX(position) FROM queue<br/>WHERE guildId = ?
+        activate DB
+        DB-->>Audio: maxPosition
+        deactivate DB
+
+        Audio->>DB: INSERT INTO queue<br/>(guildId, title, url, position: maxPosition + 1, ...)
+        activate DB
+        DB-->>Audio: Queue entry created
+        deactivate DB
+    end
+
+    %% Update Cache
+    Audio->>Redis: SET queue:{guildId} {...}<br/>EX 3600
+    activate Redis
+    Redis-->>Audio: OK
+    deactivate Redis
+
+    %% Send UI Update
+    alt First track (now playing)
+        Audio->>Redis: PUBLISH discord-bot:ui:now<br/>{ type: 'nowPlaying', track: {...}, ... }
+        activate Redis
+        Redis->>Gateway: UI update message
+        deactivate Redis
+
+        Gateway->>Discord: POST /channels/{id}/messages<br/>{ embeds: [nowPlayingEmbed], components: [...] }
+        activate Discord
+        Discord->>User: 🎵 Now Playing: Song Title<br/>[Controls: ⏯️ ⏭️ 🔊 🔁 ...]
+        deactivate Discord
+
+        Gateway->>Discord: DELETE /webhooks/{id}/messages/@original<br/>(Remove "Processing..." message)
+        activate Discord
+        deactivate Discord
+
+    else Added to queue
+        Gateway->>Discord: POST /webhooks/{id}/messages/@original<br/>{ content: "✅ Added to queue (position: X)", ephemeral: true }
+        activate Discord
+        Discord->>User: ✅ Added to queue (position: 5)
+        deactivate Discord
+    end
+
+    deactivate Gateway
+    deactivate Audio
+
+    Note over User,YouTube: User hears music playing in voice channel
+
+    %% Track Events
+    loop Every 5 seconds
+        Lavalink->>Audio: PlayerUpdate event<br/>{ position, connected: true }
+        activate Audio
+
+        Audio->>Redis: PUBLISH discord-bot:to-discord<br/>{ type: 'playerUpdate', position, ... }
+        activate Redis
+        Redis->>Gateway: Player update event
+        deactivate Redis
+
+        Note over Gateway: Update UI if needed<br/>(progress bar, time)
+        deactivate Audio
+    end
+
+    %% Track End
+    Note over Lavalink,Audio: Track finishes playing
+
+    Lavalink->>Audio: TrackEnd event<br/>{ reason: 'finished' }
+    activate Audio
+
+    Audio->>DB: DELETE FROM queue<br/>WHERE guildId = ? AND position = 0
+    activate DB
+    DB-->>Audio: Deleted
+    deactivate DB
+
+    Audio->>DB: UPDATE queue SET position = position - 1<br/>WHERE guildId = ?
+    activate DB
+    DB-->>Audio: Queue reindexed
+    deactivate DB
+
+    alt More tracks in queue
+        Audio->>DB: SELECT * FROM queue<br/>WHERE guildId = ? AND position = 0
+        activate DB
+        DB-->>Audio: Next track
+        deactivate DB
+
+        Note over Audio: Play next track<br/>(repeat playback flow)
+
+    else Queue empty and autoplay enabled
+        Note over Audio: Generate autoplay recommendation
+        Audio->>Audio: Get similar tracks<br/>based on last played
+        Note over Audio: Add to queue and play
+
+    else Queue empty and autoplay disabled
+        Audio->>Lavalink: DELETE /sessions/{sessionId}/players/{guildId}
+        activate Lavalink
+        Lavalink-->>Audio: Player destroyed
+        deactivate Lavalink
+
+        Audio->>Redis: PUBLISH discord-bot:ui:now<br/>{ type: 'queueEmpty' }
+        activate Redis
+        Redis->>Gateway: Queue empty event
+        deactivate Redis
+
+        Gateway->>Discord: PATCH /channels/{id}/messages/{id}<br/>{ content: "Queue finished", components: [] }
+        activate Discord
+        Discord->>User: Queue finished (no controls)
+        deactivate Discord
+    end
+
+    deactivate Audio
+
+    Note over User,YouTube: Flow complete

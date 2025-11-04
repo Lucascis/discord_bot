@@ -1,0 +1,26 @@
+{
+  "name": "@discord-bot/cluster",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@discord-bot/config": "workspace:*",
+    "@discord-bot/logger": "workspace:*",
+    "ioredis": "^5.4.1",
+    "redlock": "^5.0.0-beta.2",
+    "prom-client": "^15.1.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "typescript": "^5.8.4"
+  }
+}

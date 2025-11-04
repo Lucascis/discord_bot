@@ -1,0 +1,28 @@
+{
+  "name": "@discord-bot/subscription",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@discord-bot/config": "workspace:*",
+    "@discord-bot/database": "workspace:*",
+    "@discord-bot/logger": "workspace:*",
+    "@prisma/client": "^6.16.0",
+    "stripe": "^14.25.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.8.4",
+    "vitest": "^3.2.4"
+  }
+}

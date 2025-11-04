@@ -4,7 +4,6 @@ import './env-loader.js';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import { Registry, collectDefaultMetrics } from 'prom-client';
 import { HealthChecker, CommonHealthChecks, logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
@@ -13,6 +12,12 @@ import metricsRouter from './routes/metrics.js';
 import { errorHandler, notFoundHandler, UnauthorizedError } from './middleware/error-handler.js';
 import { apiKeySchema } from './middleware/validation.js';
 import v1Router from './routes/v1/index.js';
+import {
+  createRateLimitStore,
+  DynamicRateLimiter,
+  InMemoryRateLimitStore,
+  RATE_LIMIT_UNLIMITED,
+} from './middleware/dynamic-rate-limit.js';
 
 export const app: Express = express();
 
@@ -38,35 +43,48 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Rate limiting configuration
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // limit each IP to 100 requests per windowMs
-  message: {
-    error: 'Too many requests',
-    message: 'Too many requests from this IP, please try again later.',
-    retryAfter: Math.ceil(900000 / 1000) // in seconds
+// Rate limiting configuration (subscription-aware)
+const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10);
+const strictRateLimitWindowMs = parseInt(
+  process.env.RATE_LIMIT_STRICT_WINDOW_MS || process.env.RATE_LIMIT_WINDOW_MS || '900000',
+  10
+);
+const strictRateLimitMax = parseInt(process.env.RATE_LIMIT_STRICT_MAX || '20', 10);
+const shouldUseInMemoryRateLimit =
+  process.env.NODE_ENV === 'test' ||
+  process.env.API_RATE_LIMIT_IN_MEMORY === 'true' ||
+  !env.REDIS_URL;
+const sharedRateLimitStore = shouldUseInMemoryRateLimit
+  ? new InMemoryRateLimitStore()
+  : createRateLimitStore(env.REDIS_URL);
+const strictPaths = ['/metrics', '/security/info'];
+
+const dynamicRateLimiter = new DynamicRateLimiter({
+  store: sharedRateLimitStore,
+  windowMs: rateLimitWindowMs,
+  skip: (req) =>
+    req.path === '/health' ||
+    req.path === '/ready' ||
+    strictPaths.some((path) => req.path.startsWith(path)),
+});
+
+const dynamicRateLimitMiddleware = dynamicRateLimiter.middleware();
+app.use(dynamicRateLimitMiddleware);
+
+const strictRateLimiter = new DynamicRateLimiter({
+  store: sharedRateLimitStore,
+  windowMs: strictRateLimitWindowMs,
+  keyPrefix: 'ratelimit:strict:',
+  skip: (req) => req.path === '/health' || req.path === '/ready',
+  limitResolver: (tier) => {
+    const baseLimit = dynamicRateLimiter.resolveLimit(tier);
+    if (baseLimit === RATE_LIMIT_UNLIMITED) {
+      return strictRateLimitMax;
+    }
+    return Math.min(baseLimit, strictRateLimitMax);
   },
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health' || req.path === '/ready';
-  }
 });
-
-// Apply rate limiting to all requests
-app.use(limiter);
-
-// Stricter rate limiting for sensitive endpoints
-const strictLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_STRICT_MAX || '20'), // 20 requests per window
-  message: {
-    error: 'Too many requests to sensitive endpoint',
-    message: 'Rate limit exceeded for sensitive operations.',
-  }
-});
+const strictRateLimitMiddleware = strictRateLimiter.middleware();
 
 // CORS configuration - restrictive by default
 const corsOptions = {
@@ -194,10 +212,10 @@ app.use('/api/v1', v1Router);
 // Metrics routes (protected with API key and strict rate limiting)
 const registry = new Registry();
 collectDefaultMetrics({ register: registry });
-app.use('/metrics', strictLimiter, apiKeyAuth, metricsRouter);
+app.use('/metrics', strictRateLimitMiddleware, apiKeyAuth, metricsRouter);
 
 // Security info endpoint (protected)
-app.get('/security/info', strictLimiter, apiKeyAuth, (_req, res) => {
+app.get('/security/info', strictRateLimitMiddleware, apiKeyAuth, (_req, res) => {
   try {
     const securityInfo = {
       environment: env.NODE_ENV,

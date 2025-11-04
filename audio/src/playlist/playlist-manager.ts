@@ -17,8 +17,7 @@ import {
   PlaylistImportRequest,
   PlaylistExportFormat,
   PlaylistSearchFilter,
-  PlaylistEvent,
-  PlaylistQueueContext
+  PlaylistEvent
 } from './types.js';
 
 export class PlaylistManager extends EventEmitter {
@@ -586,7 +585,7 @@ export class PlaylistManager extends EventEmitter {
     }
   }
 
-  private logEvent(playlistId: string, type: PlaylistEvent['type'], userId: string, data: any): void {
+  private logEvent(playlistId: string, type: PlaylistEvent['type'], userId: string, data: Record<string, unknown>): void {
     const event: PlaylistEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       playlistId,
@@ -634,7 +633,7 @@ export class PlaylistManager extends EventEmitter {
   }
 
   // Placeholder methods for external integrations
-  private async generateSmartPlaylistTracks(guildId: string, criteria: SmartPlaylistCriteria): Promise<Track[]> {
+  private async generateSmartPlaylistTracks(_guildId: string, _criteria: SmartPlaylistCriteria): Promise<Track[]> {
     // Implementation would integrate with music database and AI recommendations
     return [];
   }
@@ -647,12 +646,12 @@ export class PlaylistManager extends EventEmitter {
     return parts.join(', ') || 'Various criteria';
   }
 
-  private async generateRecommendations(guildId: string, userId: string, basedOn?: string): Promise<PlaylistRecommendation[]> {
+  private async generateRecommendations(_guildId: string, _userId: string, _basedOn?: string): Promise<PlaylistRecommendation[]> {
     // Implementation would use ML recommendations
     return [];
   }
 
-  private async extractTracksFromSource(request: PlaylistImportRequest): Promise<Track[]> {
+  private async extractTracksFromSource(_request: PlaylistImportRequest): Promise<Track[]> {
     // Implementation would handle various import sources
     return [];
   }
@@ -669,7 +668,7 @@ export class PlaylistManager extends EventEmitter {
     return Array.from(genres);
   }
 
-  private exportToM3U8(playlist: Playlist, format: PlaylistExportFormat): string {
+  private exportToM3U8(playlist: Playlist, _format: PlaylistExportFormat): string {
     let m3u8 = '#EXTM3U\n';
     playlist.tracks.forEach(track => {
       m3u8 += `#EXTINF:${Math.floor(track.duration / 1000)},${track.artist} - ${track.title}\n`;

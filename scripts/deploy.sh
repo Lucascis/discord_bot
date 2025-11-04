@@ -103,13 +103,19 @@ validate_prerequisites() {
     info "Validating prerequisites..."
 
     # Check required tools
-    local required_tools=("docker" "docker-compose" "node" "pnpm")
+    local required_tools=("docker" "node" "pnpm")
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
             error "Required tool '$tool' is not installed"
             exit 1
         fi
     done
+
+    # Check Docker Compose (v2)
+    if ! docker compose version &> /dev/null; then
+        error "Docker Compose v2 is not available. Please update Docker Desktop."
+        exit 1
+    fi
 
     # Validate environment
     if [[ "$ENVIRONMENT" != "staging" && "$ENVIRONMENT" != "production" ]]; then
@@ -196,15 +202,15 @@ deploy_services() {
 
     # Pull latest images
     info "Pulling latest Docker images..."
-    docker-compose -f "$compose_file" --env-file "$env_file" pull
+    docker compose -f "$compose_file" --env-file "$env_file" pull
 
     # Stop existing services
     info "Stopping existing services..."
-    docker-compose -f "$compose_file" --env-file "$env_file" down
+    docker compose -f "$compose_file" --env-file "$env_file" down
 
     # Start services
     info "Starting services..."
-    docker-compose -f "$compose_file" --env-file "$env_file" up -d
+    docker compose -f "$compose_file" --env-file "$env_file" up -d
 
     # Wait for services to be healthy
     wait_for_health "$compose_file" "$env_file"
@@ -228,11 +234,11 @@ wait_for_health() {
         while IFS= read -r service; do
             if [[ -n "$service" ]]; then
                 total_services=$((total_services + 1))
-                if docker-compose -f "$compose_file" --env-file "$env_file" ps "$service" | grep -q "healthy\|Up"; then
+                if docker compose -f "$compose_file" --env-file "$env_file" ps "$service" | grep -q "healthy\|Up"; then
                     healthy_services=$((healthy_services + 1))
                 fi
             fi
-        done < <(docker-compose -f "$compose_file" --env-file "$env_file" config --services)
+        done < <(docker compose -f "$compose_file" --env-file "$env_file" config --services)
 
         if [[ $healthy_services -eq $total_services ]] && [[ $total_services -gt 0 ]]; then
             success "All services are healthy"
@@ -248,7 +254,7 @@ wait_for_health() {
 
     # Show logs for debugging
     info "Showing service logs for debugging..."
-    docker-compose -f "$compose_file" --env-file "$env_file" logs --tail=50
+    docker compose -f "$compose_file" --env-file "$env_file" logs --tail=50
 
     return 1
 }

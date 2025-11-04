@@ -20,10 +20,10 @@ print_warning() {
 print_status "Stopping Discord Bot Services..."
 
 # Stop all services
-docker-compose -f docker-compose.production.yml down
+docker compose -f docker-compose.production.yml down
 
 # Optional: Remove volumes (uncomment if needed)
 # print_warning "Removing data volumes..."
-# docker-compose -f docker-compose.production.yml down -v
+# docker compose -f docker-compose.production.yml down -v
 
 print_status "All services stopped successfully!"

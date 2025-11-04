@@ -1,6 +1,17 @@
 import { logger, getBusinessMetrics } from '@discord-bot/logger';
 import { Registry } from 'prom-client';
 import { audioCacheManager } from './cache.js';
+import type { AudioCacheStats } from './cache.js';
+
+type CacheLayerReport = AudioCacheStats['search'];
+
+const extractHitRate = (report: CacheLayerReport): number => report.overall.hitRate;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const getNumber = (value: unknown): number => (typeof value === 'number' ? value : 0);
+
 
 /**
  * Audio Service Business Metrics
@@ -343,21 +354,26 @@ export class AudioMetricsCollector {
       const insights = this.businessMetrics.getBusinessInsights();
       const cacheStats = audioCacheManager.getCacheStats();
 
+      const cachePerformance = {
+        searchHitRate: extractHitRate(cacheStats.search),
+        queueHitRate: extractHitRate(cacheStats.queue),
+        userHitRate: extractHitRate(cacheStats.user),
+        flagsHitRate: extractHitRate(cacheStats.featureFlags),
+        overallHealthScore: cacheStats.overall.healthScore,
+      };
+
+      const redisDetails = {
+        status: cacheStats.redis.redisStatus,
+        circuitState: cacheStats.redis.state,
+        fallbackCacheSize: cacheStats.redis.fallbackCache.size,
+        messageBufferSize: cacheStats.redis.messageBuffer.currentSize,
+      };
+
       return {
         ...insights,
         technical: {
-          cachePerformance: {
-            searchHitRate: (cacheStats.search as any)?.overall?.hitRate || 0,
-            queueHitRate: (cacheStats.queue as any)?.overall?.hitRate || 0,
-            userHitRate: (cacheStats.user as any)?.overall?.hitRate || 0,
-            flagsHitRate: (cacheStats.featureFlags as any)?.overall?.hitRate || 0,
-            overallHealthScore: cacheStats.overall.healthScore,
-          },
-          redis: {
-            status: (cacheStats.redis as Record<string, unknown>)?.redisStatus || 'unknown',
-            circuitState: (cacheStats.redis as Record<string, unknown>)?.state || 'unknown',
-            fallbackCacheSize: ((cacheStats.redis as Record<string, unknown>)?.fallbackCache as Record<string, unknown>)?.size || 0,
-          },
+          cachePerformance,
+          redis: redisDetails,
         },
         timestamp: new Date().toISOString(),
       };
@@ -397,10 +413,10 @@ export class AudioMetricsCollector {
         this.businessMetrics.trackFeatureUsage('cache_flags', 'system');
 
         logger.debug({
-          searchHitRate: (cacheStats.search as any)?.overall?.hitRate || 0,
-          queueHitRate: (cacheStats.queue as any)?.overall?.hitRate || 0,
-          userHitRate: (cacheStats.user as any)?.overall?.hitRate || 0,
-          flagsHitRate: (cacheStats.featureFlags as any)?.overall?.hitRate || 0,
+          searchHitRate: extractHitRate(cacheStats.search),
+          queueHitRate: extractHitRate(cacheStats.queue),
+          userHitRate: extractHitRate(cacheStats.user),
+          flagsHitRate: extractHitRate(cacheStats.featureFlags),
           healthScore: cacheStats.overall.healthScore,
         }, 'Cache performance metrics collected');
       } catch (error) {
@@ -412,11 +428,18 @@ export class AudioMetricsCollector {
     setInterval(() => {
       try {
         const insights = this.getBusinessInsights();
+        const engagement = isRecord(insights.engagement) ? insights.engagement : {};
+        const usage = isRecord(insights.usage) ? insights.usage : {};
+        const technical = isRecord(insights.technical) ? insights.technical : {};
+        const cachePerformance = isRecord(technical.cachePerformance)
+          ? technical.cachePerformance
+          : {};
+
         logger.info({
-          dau: (insights as any)?.engagement?.dau || 0,
-          mau: (insights as any)?.engagement?.mau || 0,
-          totalSongs: (insights as any)?.usage?.totalSongsPlayed || 0,
-          cacheHealth: (insights as any)?.technical?.cachePerformance?.overallHealthScore || 0,
+          dau: getNumber(engagement.dau),
+          mau: getNumber(engagement.mau),
+          totalSongs: getNumber(usage.totalSongsPlayed),
+          cacheHealth: getNumber(cachePerformance.overallHealthScore),
         }, 'Hourly business metrics summary');
       } catch (error) {
         logger.error({ error }, 'Failed to log business insights');

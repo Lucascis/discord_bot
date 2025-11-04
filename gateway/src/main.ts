@@ -1,7 +1,17 @@
 // Load environment variables FIRST, before any other imports
 import './env-loader.js';
 
-import { Client, GatewayIntentBits, Events, MessageFlags, LimitedCollection, Collection, GatewayDispatchEvents } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  Events,
+  MessageFlags,
+  LimitedCollection,
+  Collection,
+  GatewayDispatchEvents,
+  ButtonInteraction,
+  StringSelectMenuInteraction,
+} from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
@@ -17,6 +27,15 @@ import { DiscordPermissionService } from './infrastructure/discord/discord-permi
 // Cache system imports
 import { RedisCircuitBreaker } from '@discord-bot/cache';
 import { SearchCache, UserCache, QueueCache, SettingsCache } from '@discord-bot/cache';
+// Message validation imports
+import {
+  safeValidateVoiceCredentialsMessage,
+  safeValidateVoiceCredentials,
+  safeValidateCommand,
+  safeValidateTrackQueued,
+  type CommandMessage,
+  type VoiceCredentialsMessage,
+} from '@discord-bot/cache';
 
 // Redis Streams services
 import { AudioCommandService } from './services/audio-command-service.js';
@@ -30,8 +49,9 @@ import { ControlMusicUseCase } from './application/use-cases/control-music-use-c
 
 // Presentation Layer
 import { MusicController } from './presentation/controllers/music-controller.js';
-import { MusicUIBuilder } from './presentation/ui/music-ui-builder.js';
+import { MusicUIBuilder, FilterPanelState } from './presentation/ui/music-ui-builder.js';
 import { InteractionResponseHandler } from './presentation/ui/interaction-response-handler.js';
+import { PremiumController } from './presentation/controllers/premium-controller.js';
 
 // Settings Service
 import { SettingsService } from './services/settings-service.js';
@@ -67,6 +87,7 @@ class GatewayApplication {
   private uiBuilder!: MusicUIBuilder;
   private permissionService!: DiscordPermissionService;
   private voteSkipService!: VoteSkipService;
+  private premiumController!: PremiumController;
 
   // UI Message Tracking System (Rule 1: Only one UI PRINCIPAL per channel)
   private activeInteractions: Map<string, {
@@ -110,6 +131,9 @@ class GatewayApplication {
 
     // Initialize AudioCommandService for Redis Streams
     await this.audioCommandService.initialize();
+
+    // Ensure demo guilds start on enterprise tier for QA
+    await this.premiumController.initializeTestGuilds();
 
     // Setup Redis subscriptions for Audio service communication
     this.setupRedisSubscriptions();
@@ -223,12 +247,137 @@ class GatewayApplication {
     await this.redisSubscriber.connect();
     await this.audioRedisClient.connect();
     logger.info('Redis client, subscriber and audio client connected');
+
+    // Setup Redis reconnection handlers for graceful recovery
+    this.setupRedisReconnectionHandlers();
+  }
+
+  /**
+   * Setup Redis reconnection handlers to restore subscriptions after connection loss
+   * Implements automatic recovery for Redis pub/sub channels without manual intervention
+   */
+  private setupRedisReconnectionHandlers(): void {
+    // Redis Subscriber Reconnection Handler
+    this.redisSubscriber.on('reconnecting', () => {
+      logger.warn('Redis subscriber connection lost, attempting to reconnect...');
+    });
+
+    this.redisSubscriber.on('connect', async () => {
+      logger.info('Redis subscriber reconnected successfully');
+      // Restore all subscriptions after reconnection
+      try {
+        await this.restoreRedisSubscriptions();
+        logger.info('Successfully restored Redis subscriptions after reconnection');
+      } catch (error) {
+        logger.error({ error }, 'Failed to restore Redis subscriptions after reconnection');
+      }
+    });
+
+    this.redisSubscriber.on('error', (error) => {
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis subscriber connection error');
+    });
+
+    // Audio Redis Client Reconnection Handler
+    this.audioRedisClient.on('reconnecting', () => {
+      logger.warn('Audio Redis client connection lost, attempting to reconnect...');
+    });
+
+    this.audioRedisClient.on('connect', () => {
+      logger.info('Audio Redis client reconnected successfully');
+      // Note: audioRedisClient is only used for publishing raw events, subscriptions not needed
+    });
+
+    this.audioRedisClient.on('error', (error) => {
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Audio Redis client connection error');
+    });
+
+    // Main Redis Client Error Handler (for operations)
+    this.redisClient.on('error', (error) => {
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis client connection error');
+    });
+
+    logger.info('Redis reconnection handlers configured for graceful recovery');
+  }
+
+  /**
+   * Restore Redis subscriptions after reconnection
+   * Re-subscribes to all channels that were lost during disconnection
+   * Uses the same handlers as initial setupRedisSubscriptions for consistency
+   */
+  private async restoreRedisSubscriptions(): Promise<void> {
+    logger.info('Restoring Redis subscriptions after reconnection...');
+
+    try {
+      // Channels to restore: discord-bot:to-discord, discord-bot:ui:now
+      const channelsToRestore = [
+        'discord-bot:to-discord',
+        'discord-bot:ui:now'
+      ];
+
+      let successCount = 0;
+      let failureCount = 0;
+
+      for (const channel of channelsToRestore) {
+        try {
+          if (channel === 'discord-bot:to-discord') {
+            await this.redisSubscriber.subscribe(channel, (message: string) => {
+              try {
+                const data = JSON.parse(message);
+                logger.debug({ data }, 'Received message from Audio service on discord-bot:to-discord (restored subscription)');
+                this.handleAudioServiceMessage(data).catch(error => {
+                  logger.error({ error, channel }, 'Error handling audio service message after reconnection');
+                });
+              } catch (error) {
+                logger.error({ error, message }, 'Failed to parse message from discord-bot:to-discord (restored subscription)');
+              }
+            });
+          } else if (channel === 'discord-bot:ui:now') {
+            await this.redisSubscriber.subscribe(channel, (message: string) => {
+              try {
+                const data = JSON.parse(message);
+                logger.debug({ data }, 'Received UI update from Audio service (restored subscription)');
+                this.handleUIUpdate(data).catch(error => {
+                  logger.error({ error, channel }, 'Error handling UI update after reconnection');
+                });
+              } catch (error) {
+                logger.error({ error, message }, 'Failed to parse UI update message (restored subscription)');
+              }
+            });
+          }
+
+          logger.info({ channel }, 'Successfully restored subscription to channel after reconnection');
+          successCount++;
+        } catch (subscriptionError) {
+          logger.error({ channel, error: subscriptionError }, 'Failed to restore subscription to channel after reconnection');
+          failureCount++;
+        }
+      }
+
+      logger.info({
+        channels: channelsToRestore,
+        restored: successCount,
+        failed: failureCount
+      }, 'Redis subscription restoration completed');
+
+      if (failureCount > 0) {
+        logger.warn({ failureCount, totalChannels: channelsToRestore.length }, 'Some subscriptions failed to restore - service may have degraded functionality');
+      }
+    } catch (error) {
+      logger.error({ error }, 'Critical error during Redis subscription restoration');
+      throw error;
+    }
   }
 
   private async initializeCacheSystem(): Promise<void> {
     logger.info('Initializing enterprise multi-layer cache system...');
 
     // Initialize Redis Circuit Breaker with enterprise configuration
+    // Parse REDIS_URL to extract host and port for backwards compatibility
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const redisUrlParsed = new URL(redisUrl);
+    const redisHost = redisUrlParsed.hostname;
+    const redisPort = parseInt(redisUrlParsed.port || '6379');
+
     const redisCircuitBreaker = new RedisCircuitBreaker('gateway-cache', {
       failureThreshold: 5,
       timeout: 5000,
@@ -241,8 +390,8 @@ class GatewayApplication {
         lazyConnect: true
       }
     }, {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379')
+      host: redisHost,
+      port: redisPort
     });
 
     // Initialize specialized caches with enterprise-grade configuration
@@ -426,6 +575,11 @@ class GatewayApplication {
 
     // Initialize AudioCommandService for Redis Streams
     this.audioCommandService = new AudioCommandService();
+
+    // Initialize Premium Controller
+    this.premiumController = new PremiumController({
+      testGuildIds: env.PREMIUM_TEST_GUILD_IDS_LIST,
+    });
 
     logger.info('Clean Architecture dependencies wired up successfully');
   }
@@ -625,6 +779,121 @@ class GatewayApplication {
     }
   }
 
+  /**
+   * Publish message to Redis with automatic retry logic
+   * Retries with exponential backoff when publishResult === 0 (no subscribers)
+   * Max 3 attempts with delays: 1000ms, 2000ms, 3000ms
+   *
+   * CRITICAL: This prevents message loss when Audio service is temporarily unavailable
+   * by automatically retrying delivery until subscribers are available
+   */
+  private async publishWithRetry(
+    channel: string,
+    message: any,
+    guildId: string,
+    maxAttempts: number = 3
+  ): Promise<boolean> {
+    // Validate message before publishing
+    let validationResult;
+    try {
+      if (channel === 'discord-bot:to-audio' && message.type === 'VOICE_CREDENTIALS' && message.voiceCredentials) {
+        validationResult = safeValidateVoiceCredentialsMessage(message);
+      } else if (channel === 'discord-bot:to-audio' && message.sessionId && message.guildId) {
+        // Direct voice credentials format (raw)
+        validationResult = safeValidateVoiceCredentials(message);
+      } else if (channel === 'discord-bot:commands') {
+        validationResult = safeValidateCommand(message);
+      } else if (message.type === 'track_queued') {
+        validationResult = safeValidateTrackQueued(message);
+      }
+
+      if (validationResult && !validationResult.success) {
+        logger.error({
+          guildId,
+          channel,
+          validationError: validationResult.error,
+          messageType: message.type
+        }, 'Message validation failed - not sending invalid message');
+        return false;
+      }
+    } catch (validationError) {
+      logger.warn({
+        guildId,
+        channel,
+        error: validationError instanceof Error ? validationError.message : String(validationError)
+      }, 'Message validation check encountered an error, proceeding with caution');
+    }
+
+    const messageJson = typeof message === 'string' ? message : JSON.stringify(message);
+    const delays = [1000, 2000, 3000]; // Exponential backoff delays in milliseconds
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const publishResult = await this.redisClient.publish(channel, messageJson);
+
+        if (publishResult > 0) {
+          // Success: message received by at least one subscriber
+          logger.info({
+            guildId,
+            channel,
+            publishResult,
+            attempt
+          }, 'VOICE_CONNECT: Message published successfully to Redis channel');
+          return true;
+        }
+
+        // publishResult === 0: No subscribers received the message
+        if (attempt < maxAttempts) {
+          const delayMs = delays[attempt - 1];
+          logger.warn({
+            guildId,
+            channel,
+            attempt,
+            maxAttempts,
+            delayMs,
+            reason: 'No subscribers received message'
+          }, 'VOICE_CONNECT: Redis publish returned 0 subscribers, retrying after delay...');
+
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        } else {
+          // All retries exhausted
+          logger.error({
+            guildId,
+            channel,
+            attempt,
+            maxAttempts,
+            reason: 'No subscribers received message (all retries failed)'
+          }, 'VOICE_CONNECT: CRITICAL - Failed to publish voice credentials after 3 retry attempts (Audio service not listening)');
+          return false;
+        }
+      } catch (error) {
+        logger.error({
+          guildId,
+          channel,
+          attempt,
+          error: error instanceof Error ? error.message : String(error)
+        }, 'VOICE_CONNECT: Error during Redis publish');
+
+        if (attempt < maxAttempts) {
+          const delayMs = delays[attempt - 1];
+          logger.warn({
+            guildId,
+            attempt,
+            maxAttempts,
+            delayMs
+          }, 'VOICE_CONNECT: Retrying after error...');
+
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return false;
+  }
+
   private async handleVoiceStateUpdate(data: any): Promise<void> {
     // CRITICAL: This function sends Discord voice credentials to Lavalink
     // When Audio service requests voice connection, Gateway must provide Discord credentials
@@ -689,23 +958,26 @@ class GatewayApplication {
         hasToken: !!credentialMessage.voiceCredentials?.token,
         hasEndpoint: !!credentialMessage.voiceCredentials?.endpoint,
         channel: 'discord-bot:to-audio'
-      }, 'VOICE_CONNECT: About to publish voice credentials to Redis');
+      }, 'VOICE_CONNECT: About to publish voice credentials to Redis with automatic retry logic');
 
-      const publishResult = await this.redisClient.publish('discord-bot:to-audio', JSON.stringify(credentialMessage));
+      // Publish with automatic retry logic (max 3 attempts with exponential backoff)
+      const success = await this.publishWithRetry(
+        'discord-bot:to-audio',
+        credentialMessage,
+        data.guildId,
+        3 // Max 3 attempts
+      );
 
-      if (publishResult === 0) {
-        logger.error({
-          guildId: data.guildId,
-          publishResult,
-          subscriberCount: publishResult,
-          channel: 'discord-bot:to-audio'
-        }, 'VOICE_CONNECT: CRITICAL - No subscribers received voice credentials (Audio service not listening)');
-      } else {
+      if (success) {
         logger.info({
           guildId: data.guildId,
-          publishResult,
-          subscriberCount: publishResult
-        }, 'VOICE_CONNECT: Discord credentials sent to Audio service successfully');
+          channel: 'discord-bot:to-audio'
+        }, 'VOICE_CONNECT: Discord credentials successfully delivered to Audio service');
+      } else {
+        logger.error({
+          guildId: data.guildId,
+          channel: 'discord-bot:to-audio'
+        }, 'VOICE_CONNECT: Failed to deliver voice credentials to Audio service after all retries');
       }
 
     } catch (error) {
@@ -754,6 +1026,7 @@ class GatewayApplication {
 
   /**
    * Send voice credentials to Audio service via Redis
+   * Implements automatic retry logic when no subscribers are available
    */
   private async sendVoiceCredentials(guildId: string, sessionId: string, token: string, endpoint: string): Promise<void> {
     try {
@@ -771,22 +1044,34 @@ class GatewayApplication {
         hasEndpoint: !!endpoint
       }, 'VOICE_CONNECT: Sending Discord credentials to Audio service');
 
-      // Send via Redis pub/sub to Audio service (consolidated channel)
+      // Send via Redis pub/sub to Audio service with automatic retry logic
       logger.info({
         guildId,
         hasSessionId: !!voiceCredentials.sessionId,
         hasToken: !!voiceCredentials.token,
         hasEndpoint: !!voiceCredentials.endpoint,
         channel: 'discord-bot:to-audio'
-      }, 'VOICE_CONNECT: About to publish voice credentials to Redis (method 2)');
+      }, 'VOICE_CONNECT: About to publish voice credentials to Redis with retry logic');
 
-      const publishResult = await this.redisClient.publish('discord-bot:to-audio', JSON.stringify(voiceCredentials));
-
-      logger.info({
+      // Use retry-enabled publish method (max 3 attempts with exponential backoff)
+      const success = await this.publishWithRetry(
+        'discord-bot:to-audio',
+        voiceCredentials,
         guildId,
-        publishResult,
-        subscriberCount: publishResult
-      }, 'VOICE_CONNECT: Discord credentials sent to Audio service successfully');
+        3 // Max 3 attempts
+      );
+
+      if (success) {
+        logger.info({
+          guildId,
+          channel: 'discord-bot:to-audio'
+        }, 'VOICE_CONNECT: Discord credentials successfully delivered to Audio service');
+      } else {
+        logger.error({
+          guildId,
+          channel: 'discord-bot:to-audio'
+        }, 'VOICE_CONNECT: Failed to deliver voice credentials to Audio service after all retries');
+      }
 
     } catch (error) {
       logger.error({
@@ -1018,7 +1303,14 @@ class GatewayApplication {
         queueLength: data.queueLen || 0,
         isPaused: data.paused,
         artworkUrl: data.artworkUrl,
-        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off'
+        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off',
+        filter: data.filter
+          ? {
+              id: data.filter.id,
+              label: data.filter.label,
+              description: data.filter.description,
+            }
+          : undefined,
       });
 
       const components = this.uiBuilder.buildMusicControlButtons({
@@ -1030,7 +1322,9 @@ class GatewayApplication {
         volume: data.volume || 100,
         loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue',
         isMuted: (data.volume || 0) === 0,
-        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off'
+        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off',
+        activeFilterId: data.filter?.id,
+        activeFilterLabel: data.filter?.label,
       });
 
       const messageContent = {
@@ -1378,6 +1672,227 @@ class GatewayApplication {
     }
   }
 
+  /**
+   * Apply optimistic UI updates for instant button feedback
+   * Extracts current state from message, predicts new state based on command, and updates UI immediately
+   */
+  private async applyOptimisticUIUpdate(interaction: any, commandType: string, additionalData: any): Promise<void> {
+    try {
+      // Get the current UI message from the interaction
+      const message = interaction.message;
+      if (!message || !message.embeds || message.embeds.length === 0) {
+        logger.debug({ commandType }, 'No embed found in message for optimistic update');
+        return;
+      }
+
+      // Extract current state from the embed fields
+      const embed = message.embeds[0];
+      const currentState = this.extractStateFromEmbed(embed);
+
+      // Predict the new state based on the command
+      const newState = this.predictNewState(currentState, commandType, additionalData);
+
+      // Rebuild the UI with the predicted state
+      const newEmbed = this.uiBuilder.buildNowPlayingEmbed({
+        trackTitle: currentState.trackTitle,
+        artist: currentState.artist,
+        duration: currentState.duration,
+        position: currentState.position,
+        volume: newState.volume,
+        loopMode: newState.loopMode,
+        queueLength: currentState.queueLength,
+        isPaused: newState.isPaused,
+        artworkUrl: currentState.artworkUrl,
+        autoplayMode: newState.autoplayMode
+      });
+
+      const newComponents = this.uiBuilder.buildMusicControlButtons({
+        isPlaying: !newState.isPaused && (currentState.isPlaying || currentState.isPaused),
+        isPaused: newState.isPaused,
+        hasQueue: currentState.hasQueue,
+        queueLength: currentState.queueLength,
+        volume: newState.volume,
+        loopMode: newState.loopMode,
+        isMuted: newState.volume === 0,
+        autoplayMode: newState.autoplayMode
+      });
+
+      // Update the message immediately
+      await message.edit({
+        embeds: [newEmbed],
+        components: newComponents
+      });
+
+      logger.info({ commandType, guildId: interaction.guildId }, 'Optimistic UI update applied successfully');
+    } catch (error) {
+      // Log but don't throw - optimistic update failure shouldn't block the command
+      logger.warn({ error, commandType }, 'Failed to apply optimistic UI update');
+    }
+  }
+
+  /**
+   * Extract current state from the Now Playing embed
+   */
+  private extractStateFromEmbed(embed: any): any {
+    const title = embed.title || '';
+    const description = embed.description || '';
+
+    // Extract track title and artist from description
+    const descriptionLines = description.split('\n');
+    const trackTitle = descriptionLines[0]?.replace(/\*\*/g, '') || 'Unknown Track';
+    const artist = descriptionLines[1]?.replace(/\*by\s*/i, '').trim() || undefined;
+
+    // Extract state from fields
+    const fields = embed.fields || [];
+    const volumeField = fields.find((f: any) => f.name === '🔊 Volume');
+    const loopField = fields.find((f: any) => f.name === '🔁 Loop Mode');
+    const statusField = fields.find((f: any) => f.name === '⚡ Status');
+    const queueField = fields.find((f: any) => f.name === '📋 Queue');
+    const autoplayField = fields.find((f: any) => f.name === '▶️ Autoplay');
+    const progressField = fields.find((f: any) => f.name === '⏱️ Progress');
+
+    // Parse volume from field value (format: "▓▓▓▓░░░░ **100%**")
+    let volume = 100;
+    if (volumeField) {
+      const volumeMatch = volumeField.value.match(/\*\*(\d+)%\*\*/);
+      if (volumeMatch) {
+        volume = parseInt(volumeMatch[1], 10);
+      }
+    }
+
+    // Parse loop mode from field value
+    let loopMode: 'off' | 'track' | 'queue' = 'off';
+    if (loopField) {
+      const loopValue = loopField.value.toLowerCase();
+      if (loopValue.includes('current track')) {
+        loopMode = 'track';
+      } else if (loopValue.includes('entire queue')) {
+        loopMode = 'queue';
+      }
+    }
+
+    // Parse status (playing/paused)
+    const isPaused = title.includes('⏸️') || title.includes('Paused') || statusField?.value.includes('Paused');
+    const isPlaying = title.includes('✨') || title.includes('Now Playing') || statusField?.value.includes('Playing');
+
+    // Parse queue length
+    let queueLength = 0;
+    if (queueField) {
+      const queueMatch = queueField.value.match(/\*\*(\d+) tracks\*\*/);
+      if (queueMatch) {
+        queueLength = parseInt(queueMatch[1], 10);
+      }
+    }
+
+    // Parse autoplay mode
+    let autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed' = 'off';
+    if (autoplayField) {
+      const autoplayValue = autoplayField.value.toLowerCase();
+      if (autoplayValue.includes('similar')) {
+        autoplayMode = 'similar';
+      } else if (autoplayValue.includes('same artist')) {
+        autoplayMode = 'artist';
+      } else if (autoplayValue.includes('same genre')) {
+        autoplayMode = 'genre';
+      } else if (autoplayValue.includes('mixed')) {
+        autoplayMode = 'mixed';
+      }
+    }
+
+    // Extract artwork URL from thumbnail
+    const artworkUrl = embed.thumbnail?.url;
+
+    // Extract duration and position from progress field
+    let duration = undefined;
+    let position = undefined;
+    if (progressField) {
+      // Format is like: "**1:23** ▓▓▓▓▓░░░░░░░░ **5:00**"
+      const timeMatches = progressField.value.match(/\*\*(\d+):(\d+)\*\*/g);
+      if (timeMatches && timeMatches.length >= 2) {
+        // First match is position, last match is duration
+        const posMatch = timeMatches[0].match(/(\d+):(\d+)/);
+        const durMatch = timeMatches[timeMatches.length - 1].match(/(\d+):(\d+)/);
+        if (posMatch) {
+          position = (parseInt(posMatch[1]) * 60 + parseInt(posMatch[2])) * 1000;
+        }
+        if (durMatch) {
+          duration = (parseInt(durMatch[1]) * 60 + parseInt(durMatch[2])) * 1000;
+        }
+      }
+    }
+
+    return {
+      trackTitle,
+      artist,
+      volume,
+      loopMode,
+      isPaused,
+      isPlaying,
+      queueLength,
+      hasQueue: queueLength > 0,
+      autoplayMode,
+      artworkUrl,
+      duration,
+      position
+    };
+  }
+
+  /**
+   * Predict the new state based on the command and current state
+   */
+  private predictNewState(currentState: any, commandType: string, additionalData: any): any {
+    const newState = { ...currentState };
+
+    switch (commandType) {
+      case 'toggle':
+        // Toggle play/pause
+        newState.isPaused = !currentState.isPaused;
+        break;
+
+      case 'volumeAdjust':
+        // Adjust volume by delta
+        const delta = parseInt(additionalData.delta || '0', 10);
+        newState.volume = Math.max(0, Math.min(200, currentState.volume + delta));
+        break;
+
+      case 'loop':
+        // Cycle through loop modes: off → track → queue → off
+        if (currentState.loopMode === 'off') {
+          newState.loopMode = 'track';
+        } else if (currentState.loopMode === 'track') {
+          newState.loopMode = 'queue';
+        } else {
+          newState.loopMode = 'off';
+        }
+        break;
+
+      case 'mute':
+        // Toggle mute (0 volume or restore to last volume, assume 100)
+        newState.volume = currentState.volume === 0 ? 100 : 0;
+        break;
+
+      case 'autoplay':
+        // Cycle through autoplay modes: off → similar → artist → genre → mixed → off
+        const modes: Array<'off' | 'similar' | 'artist' | 'genre' | 'mixed'> = ['off', 'similar', 'artist', 'genre', 'mixed'];
+        const currentIndex = modes.indexOf(currentState.autoplayMode);
+        const nextIndex = (currentIndex + 1) % modes.length;
+        newState.autoplayMode = modes[nextIndex];
+        break;
+
+      // Commands that don't change visual state immediately
+      case 'skip':
+      case 'stop':
+      case 'shuffle':
+      case 'clear':
+      case 'seekAdjust':
+      case 'previous':
+        // These will be updated by the audio service's UI update
+        break;
+    }
+
+    return newState;
+  }
+
   private async checkButtonDJPermissions(interaction: any): Promise<boolean> {
     try {
       const guildId = interaction.guildId!;
@@ -1428,7 +1943,7 @@ class GatewayApplication {
     }
   }
 
-  private async handleButtonInteraction(interaction: any): Promise<void> {
+  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
     // Handle music control button interactions
     if (!interaction.guildId) {
       await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
@@ -1439,6 +1954,26 @@ class GatewayApplication {
     logger.info({ customId, guildId: interaction.guildId, userId: interaction.user.id }, 'Processing button interaction');
 
     try {
+      if (customId.startsWith('premium_plan:')) {
+        await this.premiumController.handlePlanButton(interaction);
+        return;
+      }
+
+      if (customId === 'filters_reset') {
+        const hasPermission = await this.checkButtonDJPermissions(interaction);
+        if (!hasPermission) {
+          return;
+        }
+        await this.handleFilterPresetChange(interaction, 'flat');
+        return;
+      }
+
+      if (customId === 'filters_close') {
+        await interaction.deferUpdate();
+        await interaction.deleteReply();
+        return;
+      }
+
       // Map button interactions to corresponding commands
       let commandType: string;
       let additionalData: any = {};
@@ -1499,10 +2034,27 @@ class GatewayApplication {
         case 'music_mute':
           commandType = 'mute';
           break;
-        case 'music_filters':
-          commandType = 'filters';
-          break;
+        case 'music_filters': {
+          const hasPermission = await this.checkButtonDJPermissions(interaction);
+          if (!hasPermission) {
+            return;
+          }
+          await this.openFiltersPanel(interaction);
+          return;
+        }
         default:
+          // Handle pagination buttons (music_queue_prev:page and music_queue_next:page)
+          if (customId.startsWith('music_queue_prev:') || customId.startsWith('music_queue_next:')) {
+            const parts = customId.split(':');
+            const currentPage = parseInt(parts[1] || '1', 10);
+            const newPage = customId.startsWith('music_queue_prev:') ? currentPage - 1 : currentPage + 1;
+
+            commandType = 'queue';
+            additionalData.requestId = `queue_${Date.now()}`;
+            additionalData.page = newPage;
+            break;
+          }
+
           logger.warn({ customId }, 'Unknown button interaction');
           const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
           if (showFeedback) {
@@ -1546,10 +2098,19 @@ class GatewayApplication {
                 })),
                 currentTrack: undefined,
                 totalDuration: undefined,
-                page: 1,
-                totalPages: 1
+                page: response.page || 1,
+                totalPages: response.totalPages || 1
               });
-              await interaction.editReply({ embeds: [queueEmbed] });
+
+              const navigationButtons = this.uiBuilder.buildQueueNavigationButtons(
+                response.page || 1,
+                response.totalPages || 1
+              );
+
+              await interaction.editReply({
+                embeds: [queueEmbed],
+                components: navigationButtons
+              });
             } else {
               await interaction.editReply({ content: '📭 Queue is empty' });
             }
@@ -1578,11 +2139,19 @@ class GatewayApplication {
               })),
               currentTrack: undefined,
               totalDuration: undefined,
-              page: 1,
-              totalPages: 1
+              page: response.page || 1,
+              totalPages: response.totalPages || 1
             });
 
-            await interaction.editReply({ embeds: [queueEmbed] });
+            const navigationButtons = this.uiBuilder.buildQueueNavigationButtons(
+              response.page || 1,
+              response.totalPages || 1
+            );
+
+            await interaction.editReply({
+              embeds: [queueEmbed],
+              components: navigationButtons
+            });
           } else {
             await interaction.editReply({ content: '📭 Queue is empty' });
           }
@@ -1600,6 +2169,14 @@ class GatewayApplication {
       // For other commands - provide immediate feedback and send command
       const showButtonFeedback = await this.shouldUseEphemeral(interaction.guildId);
 
+      // OPTIMISTIC UI UPDATE: Update button states immediately before sending command
+      // This provides instant visual feedback while the audio service processes the command
+      try {
+        await this.applyOptimisticUIUpdate(interaction, commandType, additionalData);
+      } catch (optimisticError) {
+        logger.warn({ error: optimisticError, commandType }, 'Optimistic UI update failed, continuing with command');
+      }
+
       // All button interactions MUST be acknowledged within 3 seconds
       if (showButtonFeedback) {
         // Show feedback with deferReply (displays "Bot is thinking..." then custom message)
@@ -1614,7 +2191,9 @@ class GatewayApplication {
           'shuffle': '🔀 Shuffling queue...',
           'clear': '🧹 Clearing queue...',
           'seedRelated': '▶️ Adding autoplay tracks...',
-          'seekAdjust': '⏩ Seeking...'
+          'seekAdjust': '⏩ Seeking...',
+          'autoplay': '▶️ Cycling autoplay mode...',
+          'mute': '🔇 Toggling mute...'
         };
 
         const feedbackMessage = actionLabels[commandType] || `🎵 ${commandType}...`;
@@ -1692,6 +2271,12 @@ class GatewayApplication {
           return;
         }
 
+        if (interaction.isStringSelectMenu()) {
+          logger.info({ customId: interaction.customId, user: interaction.user.username }, 'Processing select menu interaction');
+          await this.handleSelectMenuInteraction(interaction);
+          return;
+        }
+
         if (!interaction.isChatInputCommand()) {
           logger.info({ interactionType: interaction.type }, 'Not a chat input command or button, ignoring');
           return;
@@ -1758,13 +2343,8 @@ class GatewayApplication {
           case 'settings':
             await this.musicController.handleSettingsCommand(interaction);
             break;
-          case 'subscription':
-            // TODO: Implement subscription management
-            await interaction.reply({ content: 'Subscription management coming soon!', flags: MessageFlags.Ephemeral });
-            break;
-          case 'upgrade':
-            // TODO: Implement upgrade system
-            await interaction.reply({ content: 'Upgrade system coming soon!', flags: MessageFlags.Ephemeral });
+          case 'premium':
+            await this.premiumController.handleCommand(interaction);
             break;
           default:
             logger.warn(`Unknown command: ${interaction.commandName}`);
@@ -1829,6 +2409,135 @@ class GatewayApplication {
         logger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Failed to forward raw Discord event to Audio service');
       }
     });
+  }
+
+  private async handleSelectMenuInteraction(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (!interaction.guildId) {
+      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    switch (interaction.customId) {
+      case 'filters_select': {
+        const selected = interaction.values?.[0];
+        if (!selected) {
+          await interaction.reply({ content: '❌ Please choose a filter preset.', ephemeral: true });
+          return;
+        }
+
+        const hasPermission = await this.checkButtonDJPermissions(interaction);
+        if (!hasPermission) {
+          return;
+        }
+
+        await this.handleFilterPresetChange(interaction, selected);
+        return;
+      }
+      default:
+        logger.warn({ customId: interaction.customId }, 'Unknown select menu interaction');
+        await interaction.reply({ content: '❌ Unknown selection', ephemeral: true });
+    }
+  }
+
+  private async openFiltersPanel(interaction: ButtonInteraction): Promise<void> {
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const state = await this.fetchFilterState(guildId);
+    const view = this.uiBuilder.buildFilterPanel(state);
+
+    await interaction.editReply(view);
+
+    if (!state.success && state.error) {
+      await interaction.followUp({ content: `❌ ${state.error}`, ephemeral: true });
+    }
+  }
+
+  private async handleFilterPresetChange(
+    interaction: ButtonInteraction | StringSelectMenuInteraction,
+    presetId: string,
+  ): Promise<void> {
+    if (!interaction.guildId) {
+      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
+      return;
+    }
+
+    await interaction.deferUpdate();
+
+    const state = await this.applyFilterPreset(interaction.guildId, presetId);
+    const view = this.uiBuilder.buildFilterPanel(state);
+
+    await interaction.editReply(view);
+
+    if (!state.success && state.error) {
+      await interaction.followUp({ content: `❌ ${state.error}`, ephemeral: true });
+    } else if (state.message) {
+      await interaction.followUp({ content: state.message, ephemeral: true });
+    }
+  }
+
+  private async fetchFilterState(guildId: string): Promise<FilterPanelState> {
+    try {
+      const response = await this.audioCommandService.sendCommand('filters', guildId, {
+        action: 'get',
+      });
+      return this.normalizeFilterState(response);
+    } catch (error) {
+      logger.error({ error, guildId }, 'Failed to fetch filter state');
+      return {
+        success: false,
+        presets: [],
+        error: 'Failed to load filter presets. Please try again shortly.',
+      };
+    }
+  }
+
+  private async applyFilterPreset(guildId: string, presetId: string): Promise<FilterPanelState> {
+    try {
+      const response = await this.audioCommandService.sendCommand('filters', guildId, {
+        action: 'apply',
+        preset: presetId,
+      });
+      return this.normalizeFilterState(response);
+    } catch (error) {
+      logger.error({ error, guildId, presetId }, 'Failed to apply filter preset');
+      return {
+        success: false,
+        presets: [],
+        error: 'Failed to apply audio filter. Please try again.',
+      };
+    }
+  }
+
+  private normalizeFilterState(response: any): FilterPanelState {
+    const presets: FilterPanelState['presets'] = Array.isArray(response?.presets)
+      ? response.presets.map((preset: any) => ({
+          id: String(preset.id ?? preset.value ?? preset.name ?? 'flat'),
+          label: String(preset.label ?? preset.name ?? preset.id ?? 'Flat'),
+          description: preset.description ?? preset.details ?? undefined,
+        }))
+      : [];
+
+    if (presets.length === 0) {
+      presets.push({ id: 'flat', label: 'Flat', description: 'All enhancements disabled' });
+    }
+
+    const activePresetRaw = response?.preset;
+    const activePresetId = activePresetRaw?.id ?? activePresetRaw?.value ?? activePresetRaw?.name ?? presets[0].id;
+    const activePreset = presets.find((preset) => preset.id === activePresetId) ?? presets[0];
+
+    return {
+      success: response?.success !== false,
+      preset: activePreset,
+      presets,
+      message: response?.message,
+      error: response?.error,
+    };
   }
 
 
@@ -1928,19 +2637,22 @@ class GatewayApplication {
   private async executeQueueRequest(guildId: string, additionalData: any): Promise<any> {
     logger.info({
       guildId,
-      requestId: additionalData.requestId
+      requestId: additionalData.requestId,
+      page: additionalData.page
     }, 'gateway: sending queue command to audio service via Redis Streams');
 
     try {
       // Use Redis Streams AudioCommandService instead of pub/sub
       const response = await this.audioCommandService.sendQueueCommand(guildId, {
         timeout: 10000, // 10 seconds timeout
-        retries: 2
+        retries: 2,
+        page: additionalData.page || 1
       });
 
       logger.info({
         guildId,
         requestId: additionalData.requestId,
+        page: additionalData.page,
         response
       }, 'gateway: received queue response via Redis Streams');
 
@@ -1949,7 +2661,8 @@ class GatewayApplication {
       logger.error({
         error,
         guildId,
-        requestId: additionalData.requestId
+        requestId: additionalData.requestId,
+        page: additionalData.page
       }, 'gateway: failed to get queue response via Redis Streams');
       throw error;
     }

@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' src/index.ts"
@@ -21,7 +22,8 @@
     "@opentelemetry/sdk-node": "^0.203.0",
     "@opentelemetry/auto-instrumentations-node": "^0.62.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.203.0",
-    "@discord-bot/database": "workspace:*"
+    "@discord-bot/database": "workspace:*",
+    "dotenv": "^16.4.7"
   },
   "optionalDependencies": {
     "@opentelemetry/resources": "^1.23.0",

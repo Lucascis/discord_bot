@@ -7,7 +7,7 @@ export interface AudioEffect {
   name: string;
   enabled: boolean;
   parameters: Record<string, number>;
-  apply(audioData: AudioBuffer): AudioBuffer;
+  apply(audioData: Float32Array): Float32Array;
 }
 
 export interface CrossfadeSettings {

@@ -1,6 +1,6 @@
-import { Router } from 'express';
+import { Router, type Router as ExpressRouter } from 'express';
 import { asyncHandler } from '../../middleware/async-handler.js';
-import { validate, validateJSONContentType } from '../../middleware/validation.js';
+import { validateJSONContentType } from '../../middleware/validation.js';
 import type { APIResponse, APIVersion } from '../../types/api.js';
 import { logger } from '@discord-bot/logger';
 
@@ -11,7 +11,7 @@ import { logger } from '@discord-bot/logger';
  * Following REST API best practices and Express.js patterns
  */
 
-const router = Router();
+const router: ExpressRouter = Router();
 
 /**
  * GET /api/v1/

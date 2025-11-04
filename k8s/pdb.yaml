@@ -1,0 +1,188 @@
+# PodDisruptionBudget (PDB) Configuration
+# Purpose: Ensures high availability during voluntary disruptions (node maintenance, upgrades)
+# Architecture: Guarantees minimum number of pods remain available during disruptions
+# High Availability: Prevents service outages during planned maintenance
+# Version: policy/v1
+# Author: Discord Bot Team
+# Last Updated: 2025-11-03
+
+# Gateway Service PDB
+# Ensures at least 2 gateway pods are always available
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-gateway-pdb
+  namespace: discord-bot
+  labels:
+    app: discord-gateway
+    tier: application
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: discord-gateway
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# Audio Service PDB
+# Ensures at least 3 audio pods are always available (critical for music playback)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-audio-pdb
+  namespace: discord-bot
+  labels:
+    app: discord-audio
+    tier: application
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: discord-audio
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# API Service PDB
+# Ensures at least 1 API pod is always available
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-api-pdb
+  namespace: discord-bot
+  labels:
+    app: discord-api
+    tier: application
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: discord-api
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# Worker Service PDB
+# Ensures at least 1 worker pod is always available
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: discord-worker-pdb
+  namespace: discord-bot
+  labels:
+    app: discord-worker
+    tier: application
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: discord-worker
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# Lavalink Service PDB
+# Ensures at least 2 lavalink pods are always available (critical for audio processing)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: lavalink-pdb
+  namespace: discord-bot
+  labels:
+    app: lavalink
+    tier: audio-processing
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: lavalink
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# PostgreSQL PDB
+# Ensures database remains available during disruptions
+# Note: With single replica, we use maxUnavailable: 0 to prevent any disruption
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: discord-bot
+  labels:
+    app: postgres
+    tier: database
+spec:
+  maxUnavailable: 0  # No disruptions allowed for single-instance database
+  selector:
+    matchLabels:
+      app: postgres
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+---
+# Redis PDB
+# Ensures cache remains available during disruptions
+# Note: With single replica, we use maxUnavailable: 0 to prevent any disruption
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: discord-bot
+  labels:
+    app: redis
+    tier: cache
+spec:
+  maxUnavailable: 0  # No disruptions allowed for single-instance cache
+  selector:
+    matchLabels:
+      app: redis
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+---
+# Notes on PodDisruptionBudgets:
+#
+# 1. minAvailable: Minimum number of pods that must remain available
+#    - Used for services with multiple replicas
+#    - Example: minAvailable: 2 means at least 2 pods must be running
+#
+# 2. maxUnavailable: Maximum number of pods that can be unavailable
+#    - Alternative to minAvailable
+#    - Example: maxUnavailable: 0 means no pods can be taken down
+#    - Useful for single-instance services (PostgreSQL, Redis)
+#
+# 3. unhealthyPodEvictionPolicy:
+#    - AlwaysAllow: Unhealthy pods can be evicted even if budget is violated
+#      (recommended for stateless services)
+#    - IfHealthyBudget: Unhealthy pods can only be evicted if budget allows
+#      (recommended for stateful services like databases)
+#
+# 4. Voluntary vs Involuntary Disruptions:
+#    - PDBs only protect against VOLUNTARY disruptions:
+#      - Node drain for maintenance
+#      - Cluster upgrades
+#      - Manual pod deletion
+#    - PDBs do NOT protect against INVOLUNTARY disruptions:
+#      - Hardware failures
+#      - Kernel panics
+#      - Node crashes
+#    - For involuntary disruptions, rely on:
+#      - Multiple replicas
+#      - Anti-affinity rules
+#      - Persistent volumes for data
+#
+# 5. Best Practices:
+#    - Stateless services: Use minAvailable with multiple replicas
+#    - Stateful services: Use maxUnavailable: 0 for single instance
+#    - Set minAvailable < total replicas to allow disruptions
+#    - Monitor PDB status: kubectl get pdb -n discord-bot
+#
+# 6. Production Scaling:
+#    - When scaling to 3+ PostgreSQL replicas (primary + replicas):
+#      Change postgres-pdb to: minAvailable: 1
+#    - When scaling to Redis cluster (3+ nodes):
+#      Change redis-pdb to: minAvailable: 2
+#
+# 7. Testing PDBs:
+#    # Check PDB status
+#    kubectl get pdb -n discord-bot
+#
+#    # Try to drain a node (should respect PDBs)
+#    kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+#
+#    # Check if PDB is blocking evictions
+#    kubectl describe pdb discord-gateway-pdb -n discord-bot

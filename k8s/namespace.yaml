@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: discord-bot
+  labels:
+    name: discord-bot
+    environment: production

@@ -1,4 +1,28 @@
-import { EmbedBuilder, User, ButtonBuilder, ActionRowBuilder, ButtonStyle } from 'discord.js';
+import {
+  EmbedBuilder,
+  User,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+} from 'discord.js';
+
+export interface FilterPanelState {
+  success: boolean;
+  preset?: {
+    id: string;
+    label: string;
+    description?: string;
+  };
+  presets: Array<{
+    id: string;
+    label: string;
+    description?: string;
+  }>;
+  message?: string;
+  error?: string;
+}
 
 /**
  * Music UI Builder
@@ -138,6 +162,11 @@ export class MusicUIBuilder {
     isPaused: boolean;
     artworkUrl?: string;
     autoplayMode?: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+    filter?: {
+      id: string;
+      label: string;
+      description?: string;
+    };
   }): EmbedBuilder {
     const statusIcon = data.isPaused ? '⏸️' : '✨';
     const statusText = data.isPaused ? 'Paused' : 'Now Playing';
@@ -156,10 +185,10 @@ export class MusicUIBuilder {
     }
     embed.setDescription(description);
 
-    // Browser-style image positioning: below title, above progress
+    // Fixed-size thumbnail for consistent embed width
     if (data.artworkUrl) {
       const highQualityUrl = this.improveImageQuality(data.artworkUrl);
-      embed.setImage(highQualityUrl);
+      embed.setThumbnail(highQualityUrl);
     }
 
     // Progress bar with clear spacing
@@ -209,6 +238,10 @@ export class MusicUIBuilder {
     };
     const autoplayText = autoplayDescriptions[autoplayMode] || '**Disabled**';
 
+    const filterLabel = data.filter?.label ?? 'Flat';
+    const filterDescription = data.filter?.description ?? 'All enhancements disabled';
+    const filterValue = `**${filterLabel}**${filterDescription ? ` • *${filterDescription}*` : ''}`;
+
     embed.addFields(
       {
         name: '📋 Queue',
@@ -222,7 +255,7 @@ export class MusicUIBuilder {
       },
       {
         name: '🎛️ Filter',
-        value: '**None** • *Coming soon*',
+        value: filterValue,
         inline: true
       }
     );
@@ -254,6 +287,8 @@ export class MusicUIBuilder {
     loopMode?: 'off' | 'track' | 'queue';
     isMuted?: boolean;
     autoplayMode?: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+    activeFilterId?: string;
+    activeFilterLabel?: string;
   }): ActionRowBuilder<ButtonBuilder>[] {
     // Extract state information with defaults
     const isPlaying = state?.isPlaying ?? false;
@@ -262,11 +297,21 @@ export class MusicUIBuilder {
     const queueLength = state?.queueLength ?? 0;
     const autoplayMode = state?.autoplayMode ?? 'off';
     const autoplayEnabled = autoplayMode !== 'off';
-    // Can skip if: there's a queue, OR (there's a track playing/paused AND autoplay is on)
-    const canSkip = state?.canSkip ?? (hasQueue || queueLength > 0 || ((isPlaying || isPaused) && autoplayEnabled));
+    // Allow skipping whenever playback is active, even if the queue is empty.
+    const canSkip = state?.canSkip ?? (
+      isPlaying ||
+      isPaused ||
+      hasQueue ||
+      queueLength > 0 ||
+      autoplayEnabled
+    );
     const volume = state?.volume ?? 100;
     const loopMode = state?.loopMode ?? 'off';
     const isMuted = state?.isMuted ?? false;
+    const activeFilterId = state?.activeFilterId ?? 'flat';
+    const filterLabelRaw = state?.activeFilterLabel ?? 'Filters';
+    const filterLabel = filterLabelRaw.length > 20 ? `${filterLabelRaw.slice(0, 20)}…` : filterLabelRaw;
+    const filterActive = activeFilterId !== 'flat';
 
     // Row 1: NAVEGACIÓN - Previous | -30s | Play/Pause | +30s | Skip
     const row1 = new ActionRowBuilder<ButtonBuilder>()
@@ -318,8 +363,8 @@ export class MusicUIBuilder {
           .setDisabled(volume >= 200 || isMuted || (!isPlaying && !isPaused)), // Disabled at max volume, muted, or no track
         new ButtonBuilder()
           .setCustomId('music_filters')
-          .setLabel('🎚️ Filters')
-          .setStyle(ButtonStyle.Secondary)
+          .setLabel(filterActive ? `🎚️ ${filterLabel}` : '🎚️ Filters')
+          .setStyle(filterActive ? ButtonStyle.Success : ButtonStyle.Secondary)
           .setDisabled(!isPlaying && !isPaused), // Disabled if no track
         new ButtonBuilder()
           .setCustomId('music_stop')
@@ -364,6 +409,64 @@ export class MusicUIBuilder {
       );
 
     return [row1, row2, row3];
+  }
+
+  buildFilterPanel(state: FilterPanelState): { embeds: EmbedBuilder[]; components: Array<ActionRowBuilder<any>> } {
+    const embed = new EmbedBuilder()
+      .setTitle('🎚️ Audio Filters')
+      .setColor(state.success ? 0x6A0DAD : 0xF04D4D)
+      .setTimestamp();
+
+    if (state.preset) {
+      embed.setDescription(`Active preset: **${state.preset.label}**`);
+      if (state.preset.description) {
+        embed.addFields({ name: 'Current preset', value: state.preset.description, inline: false });
+      }
+    } else {
+      embed.setDescription('No preset active. Choose one below to enhance playback.');
+    }
+
+    if (state.error) {
+      embed.addFields({ name: 'Status', value: `❌ ${state.error}`, inline: false });
+    }
+
+    if (state.message) {
+      embed.setFooter({ text: state.message });
+    }
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('filters_select')
+      .setPlaceholder('Select an audio filter preset')
+      .addOptions(
+        state.presets.map((preset) => {
+          const description = preset.description ? preset.description.slice(0, 90) : 'Apply this preset';
+          return new StringSelectMenuOptionBuilder()
+            .setLabel(preset.label)
+            .setValue(preset.id)
+            .setDescription(description)
+            .setDefault(state.preset?.id === preset.id);
+        }),
+      );
+
+    const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+    const resetButton = new ButtonBuilder()
+      .setCustomId('filters_reset')
+      .setLabel('♻️ Reset')
+      .setStyle(state.preset?.id === 'flat' ? ButtonStyle.Secondary : ButtonStyle.Danger)
+      .setDisabled(state.preset?.id === 'flat');
+
+    const closeButton = new ButtonBuilder()
+      .setCustomId('filters_close')
+      .setLabel('Close')
+      .setStyle(ButtonStyle.Secondary);
+
+    const buttonsRow = new ActionRowBuilder<ButtonBuilder>().addComponents(resetButton, closeButton);
+
+    return {
+      embeds: [embed],
+      components: [selectRow, buttonsRow],
+    };
   }
 
   buildQueueEmbed(data: {
@@ -425,6 +528,29 @@ export class MusicUIBuilder {
     }
 
     return embed;
+  }
+
+  buildQueueNavigationButtons(currentPage: number, totalPages: number): ActionRowBuilder<ButtonBuilder>[] {
+    // Only show navigation if there are multiple pages
+    if (totalPages <= 1) {
+      return [];
+    }
+
+    const row = new ActionRowBuilder<ButtonBuilder>()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId(`music_queue_prev:${currentPage}`)
+          .setLabel('◀️ Previous')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(currentPage <= 1),
+        new ButtonBuilder()
+          .setCustomId(`music_queue_next:${currentPage}`)
+          .setLabel('▶️ Next')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(currentPage >= totalPages)
+      );
+
+    return [row];
   }
 
   private formatProgress(position: number, duration: number): string {

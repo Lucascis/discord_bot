@@ -1,0 +1,79 @@
+%% Container Diagram (C4 Model - Level 2)
+%% Purpose: Shows the internal architecture of the Discord Music Bot system
+%% Author: Discord Bot Team
+%% Last Updated: 2025-11-03
+
+graph TB
+    %% External Users/Systems
+    User["👤 Discord User<br/>[Person]"]
+    Discord["Discord API<br/>[External System]"]
+    MusicAPIs["Music APIs<br/>[External System]<br/>YouTube, Spotify,<br/>SoundCloud"]
+    Stripe["Stripe API<br/>[External System]"]
+
+    %% Application Layer
+    subgraph DiscordBot["Discord Music Bot [Software System]"]
+
+        %% Gateway Service
+        Gateway["Gateway Service<br/>[Node.js Container]<br/><br/>Handles Discord<br/>interactions, slash<br/>commands, and events<br/><br/>Technology:<br/>Discord.js, TypeScript"]
+
+        %% Audio Service
+        Audio["Audio Service<br/>[Node.js Container]<br/><br/>Manages music playback,<br/>queue operations, and<br/>Lavalink integration<br/><br/>Technology:<br/>lavalink-client, TypeScript"]
+
+        %% API Service
+        API["API Service<br/>[Node.js Container]<br/><br/>Provides REST endpoints<br/>for webhooks, analytics,<br/>and external access<br/><br/>Technology:<br/>Express.js, TypeScript"]
+
+        %% Worker Service
+        Worker["Worker Service<br/>[Node.js Container]<br/><br/>Handles background jobs,<br/>cleanup tasks, and<br/>scheduled operations<br/><br/>Technology:<br/>Node.js, TypeScript"]
+
+        %% Lavalink
+        Lavalink["Lavalink<br/>[Java Container]<br/><br/>Audio processing server<br/>with advanced plugins<br/>for music streaming<br/><br/>Technology:<br/>Lavalink 4.1.1, Java"]
+    end
+
+    %% Data Layer
+    subgraph Data["Data Layer"]
+        PostgreSQL["PostgreSQL<br/>[Database]<br/><br/>Persistent storage<br/>for queues, settings,<br/>and subscriptions<br/><br/>Technology:<br/>PostgreSQL 15"]
+
+        Redis["Redis<br/>[Cache & Pub/Sub]<br/><br/>Caching, session<br/>management, and<br/>inter-service messaging<br/><br/>Technology:<br/>Redis 7"]
+    end
+
+    %% User Interactions
+    User -->|"Slash commands<br/>HTTPS/WSS"| Discord
+    Discord -->|"Events & Commands<br/>Gateway WebSocket"| Gateway
+
+    %% Service Interactions
+    Gateway -->|"Publishes commands<br/>redis pub/sub"| Redis
+    Gateway -->|"Reads/Writes<br/>guild settings"| PostgreSQL
+    Gateway -->|"Sends UI updates<br/>REST API"| Discord
+
+    Redis -->|"Subscribes to commands<br/>redis pub/sub"| Audio
+    Audio -->|"Publishes UI updates<br/>redis pub/sub"| Redis
+    Redis -->|"Receives UI updates<br/>redis pub/sub"| Gateway
+
+    Audio -->|"Reads/Writes queue<br/>SQL queries"| PostgreSQL
+    Audio -->|"Manages players<br/>WebSocket"| Lavalink
+    Audio -->|"Caches search results<br/>GET/SET"| Redis
+
+    Lavalink -->|"Streams audio<br/>UDP packets"| Discord
+    Lavalink -->|"Fetches music<br/>HTTPS"| MusicAPIs
+
+    API -->|"Receives webhooks<br/>HTTPS POST"| Stripe
+    API -->|"Reads/Writes<br/>subscriptions"| PostgreSQL
+    API -->|"Publishes events<br/>redis pub/sub"| Redis
+    API -->|"Caches data<br/>GET/SET"| Redis
+
+    Worker -->|"Cleanup operations<br/>SQL queries"| PostgreSQL
+    Worker -->|"Publishes jobs<br/>redis pub/sub"| Redis
+
+    %% External Integrations
+    Discord -->|"Voice connection<br/>UDP"| Lavalink
+
+    %% Styling
+    classDef person fill:#08427b,stroke:#052e56,color:#fff
+    classDef container fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef database fill:#2b7a2b,stroke:#1a5c1a,color:#fff
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+
+    class User person
+    class Gateway,Audio,API,Worker,Lavalink container
+    class PostgreSQL,Redis database
+    class Discord,MusicAPIs,Stripe external

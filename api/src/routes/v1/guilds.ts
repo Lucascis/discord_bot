@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Router as ExpressRouter } from 'express';
 import { asyncHandler } from '../../middleware/async-handler.js';
 import {
   validateGuildId,
@@ -25,7 +25,7 @@ import { env } from '@discord-bot/config';
  * Following Discord.js v14 best practices and microservices architecture
  */
 
-const router = Router();
+const router: ExpressRouter = Router();
 
 // Redis client for inter-service communication
 const redis = new Redis(env.REDIS_URL);
@@ -67,7 +67,7 @@ async function requestFromGateway<T>(
           } else {
             resolve(response.data);
           }
-        } catch (parseError) {
+        } catch {
           reject(new Error('Invalid response format'));
         }
       }

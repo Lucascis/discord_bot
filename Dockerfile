@@ -18,40 +18,51 @@ RUN corepack enable pnpm \
 # Set working directory
 WORKDIR /app
 
-# Copy package files for dependency installation
+# Copy workspace configuration
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# Copy all package.json files maintaining directory structure
-COPY packages/ ./packages/
+# Copy all package.json files (for dependency resolution)
+COPY packages/cache/package.json ./packages/cache/package.json
+COPY packages/cluster/package.json ./packages/cluster/package.json
+COPY packages/commands/package.json ./packages/commands/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/cqrs/package.json ./packages/cqrs/package.json
+COPY packages/database/package.json ./packages/database/package.json
+COPY packages/event-store/package.json ./packages/event-store/package.json
+COPY packages/logger/package.json ./packages/logger/package.json
+COPY packages/observability/package.json ./packages/observability/package.json
+COPY packages/performance/package.json ./packages/performance/package.json
+COPY packages/subscription/package.json ./packages/subscription/package.json
+
+# Copy service package.json files
 COPY gateway/package.json ./gateway/package.json
 COPY audio/package.json ./audio/package.json
 COPY api/package.json ./api/package.json
 COPY worker/package.json ./worker/package.json
 
-# Install dependencies (use --frozen-lockfile for production builds)
+# Copy Prisma schema BEFORE installation (required for postinstall hook)
+COPY packages/database/prisma ./packages/database/prisma
+
+# Install all dependencies (including dev dependencies for build stage)
+# Using --no-frozen-lockfile to avoid pnpmfile checksum mismatch in Docker
 RUN pnpm install --no-frozen-lockfile
 
-# Builder stage - compile TypeScript to JavaScript
+# Builder stage - copy pre-built dist folders and generate Prisma
 FROM base AS builder
 
-# Copy source code
+# Copy all source code including pre-built dist folders
+# Note: dist/ folders are commented out in .dockerignore to include them
 COPY . .
 
-# Generate Prisma client first
+# Generate Prisma client (required for runtime)
 RUN pnpm --filter @discord-bot/database prisma:generate
-
-# Build all packages and services
-RUN pnpm -r build
-
-# Keep Prisma client for production
-# Skip removing dev dependencies since Prisma client is needed
 
 # Production stage - final optimized image
 FROM node:22-alpine AS production
 
 # Create non-root user for security (Alpine)
 RUN addgroup -g 1001 nodejs \
-  && adduser -D -u 1001 -G nodejs nextjs
+  && adduser -D -u 1001 -G nodejs appuser
 
 # Enable corepack for pnpm and install runtime dependencies
 RUN corepack enable pnpm \
@@ -60,20 +71,31 @@ RUN corepack enable pnpm \
 # Set working directory
 WORKDIR /app
 
-# Copy built application from builder stage with all dependencies
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nextjs:nodejs /app/packages ./packages
-COPY --from=builder --chown=nextjs:nodejs /app/gateway ./gateway
-COPY --from=builder --chown=nextjs:nodejs /app/audio ./audio
-COPY --from=builder --chown=nextjs:nodejs /app/api ./api
-COPY --from=builder --chown=nextjs:nodejs /app/worker ./worker
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
-COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
+# Copy workspace configuration
+COPY --from=builder --chown=appuser:nodejs /app/package.json ./
+COPY --from=builder --chown=appuser:nodejs /app/pnpm-workspace.yaml ./
+COPY --from=builder --chown=appuser:nodejs /app/pnpm-lock.yaml ./
+
+# Copy all packages with their package.json AND dist folders
+# The dist folders must exist for ESM module resolution to work
+COPY --from=builder --chown=appuser:nodejs /app/packages ./packages
+
+# Copy services with their dist folders
+COPY --from=builder --chown=appuser:nodejs /app/gateway ./gateway
+COPY --from=builder --chown=appuser:nodejs /app/audio ./audio
+COPY --from=builder --chown=appuser:nodejs /app/api ./api
+COPY --from=builder --chown=appuser:nodejs /app/worker ./worker
+
+# Copy pre-installed node_modules from builder layer to avoid reinstalling
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+
+# Optional: Remove devDependencies to reduce image size (uncomment if needed)
+# RUN pnpm --filter "!@discord-bot/database" --prod prune
 
 # Switch to non-root user
-USER nextjs
+USER appuser
 
-# Health check endpoint - more secure implementation
+# Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
 

@@ -11,17 +11,17 @@ async function loadSentryDependencies() {
   }
 
   try {
-    // Use eval to bypass TypeScript static analysis
-    const sentryModule = await (eval('import("@sentry/node")') as Promise<Record<string, unknown>>);
+    // Use dynamic import for optional dependencies
+    const sentryModule = await import('@sentry/node');
     Sentry = sentryModule as unknown as SentryStub;
-    
+
     try {
-      const profilingModule = await (eval('import("@sentry/profiling-node")') as Promise<Record<string, unknown>>);
+      const profilingModule = await import('@sentry/profiling-node');
       nodeProfilingIntegration = profilingModule.nodeProfilingIntegration as (() => Record<string, unknown>);
     } catch {
       console.warn('Sentry profiling not available, continuing without profiling');
     }
-    
+
     return true;
   } catch (error) {
     console.warn('Sentry modules not available, error monitoring will be disabled:', error);

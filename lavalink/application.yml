@@ -35,7 +35,7 @@ lavalink:
     resamplingQuality: HIGH
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
-    playerUpdateInterval: 5
+    playerUpdateInterval: 10
     youtubePlaylistLoadLimit: 50  # Reduced to save memory
     soundcloudSearchEnabled: true
     gc-warnings: true
@@ -49,8 +49,8 @@ lavalink:
 
   # Plugin loading configuration
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:ff634d161ee4de95102cfcd725554a60bec6e5cf"
-      repository: "https://maven.lavalink.dev/snapshots"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.15.0"
+      repository: "https://maven.lavalink.dev/releases"
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
       repository: "https://maven.lavalink.dev/releases"
     - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
@@ -114,8 +114,10 @@ plugins:
     oauth:
       enabled: false
       refreshToken: ${YOUTUBE_REFRESH_TOKEN:}
-    # PoToken for enhanced compatibility (obtained from browser)
-    poToken: ${YOUTUBE_PO_TOKEN:}
+    # Proof of Origin Token for enhanced compatibility (v1.15.0 format)
+    pot:
+      token: ${YOUTUBE_PO_TOKEN:}
+      visitorData: ${YOUTUBE_VISITOR_DATA:}
   lavasrc:
     # Enhanced providers with YouTube Music prioritization
     providers:

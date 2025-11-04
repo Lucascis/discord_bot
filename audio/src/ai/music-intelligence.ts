@@ -48,10 +48,12 @@ export interface RecommendationSeed {
   mood?: MoodProfile;
 }
 
+type ListeningPattern = ListeningContext & { timestamp: Date };
+
 export class MusicIntelligenceEngine extends EventEmitter {
   private trackAnalysiCache = new Map<string, AudioAnalysis>();
   private userPreferences = new Map<string, MoodProfile>();
-  private guildListeningPatterns = new Map<string, ListeningContext[]>();
+  private guildListeningPatterns = new Map<string, ListeningPattern[]>();
   private genreClassifier = new Map<string, string[]>();
 
   constructor() {
@@ -282,7 +284,7 @@ export class MusicIntelligenceEngine extends EventEmitter {
       ...context,
       // Add timestamp for pattern analysis
       timestamp: new Date()
-    } as any);
+    });
 
     // Keep last 100 contexts
     if (patterns.length > 100) {
@@ -391,7 +393,7 @@ export class MusicIntelligenceEngine extends EventEmitter {
   private async buildTargetProfile(
     seed: RecommendationSeed,
     context: ListeningContext,
-    patterns: ListeningContext[]
+    patterns: ListeningPattern[]
   ): Promise<Partial<AudioAnalysis>> {
     let profile: Partial<AudioAnalysis> = {};
 
@@ -472,7 +474,7 @@ export class MusicIntelligenceEngine extends EventEmitter {
 
   private adjustProfileForPatterns(
     profile: Partial<AudioAnalysis>,
-    patterns: ListeningContext[]
+    patterns: ListeningPattern[]
   ): Partial<AudioAnalysis> {
     if (patterns.length === 0) return profile;
 
@@ -489,7 +491,7 @@ export class MusicIntelligenceEngine extends EventEmitter {
       // Slightly bias towards historically preferred activity
       const contextualProfile = this.adjustProfileForContext(profile, {
         ...patterns[0],
-        activity: mostCommonActivity as any
+        activity: mostCommonActivity as ListeningContext['activity']
       });
 
       // Blend with original (70% original, 30% historical)
@@ -659,9 +661,9 @@ export class MusicIntelligenceEngine extends EventEmitter {
     const blended: Partial<AudioAnalysis> = { ...profile1 };
 
     for (const key of Object.keys(profile2) as Array<keyof AudioAnalysis>) {
-      const val1 = profile1[key] as number || 0.5;
-      const val2 = profile2[key] as number || 0.5;
-      (blended as any)[key] = val1 * (1 - weight) + val2 * weight;
+      const base = typeof profile1[key] === 'number' ? (profile1[key] as number) : 0.5;
+      const target = typeof profile2[key] === 'number' ? (profile2[key] as number) : 0.5;
+      blended[key] = base * (1 - weight) + target * weight;
     }
 
     return blended;

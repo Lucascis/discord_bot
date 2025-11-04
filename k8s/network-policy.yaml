@@ -1,0 +1,610 @@
+# NetworkPolicy Configuration
+# Purpose: Provides network-level security and traffic control between pods
+# Architecture: Zero-trust network segmentation with explicit allow rules
+# Security: Implements defense-in-depth by restricting pod-to-pod communication
+# Version: networking.k8s.io/v1
+# Author: Discord Bot Team
+# Last Updated: 2025-11-03
+
+# Default Deny All Policy
+# Baseline security: Deny all ingress and egress traffic by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+spec:
+  podSelector: {}  # Applies to all pods in namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# Allow DNS Resolution
+# All pods need DNS to resolve service names
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: security
+spec:
+  podSelector: {}  # Applies to all pods
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS queries to kube-dns/coredns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# Gateway Service Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-gateway-netpol
+  namespace: discord-bot
+  labels:
+    app: discord-gateway
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: discord-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept traffic from Ingress Controller and monitoring
+  ingress:
+  # From Ingress Controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3001
+
+  # From Prometheus (metrics scraping)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3001
+
+  # Egress: To PostgreSQL, Redis, and external Discord API
+  egress:
+  # To PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # To Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To external Discord API (HTTPS)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+  # To Lavalink (for voice state management)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: lavalink
+    ports:
+    - protocol: TCP
+      port: 2333
+
+---
+# Audio Service Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-audio-netpol
+  namespace: discord-bot
+  labels:
+    app: discord-audio
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: discord-audio
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept traffic from Ingress Controller and monitoring
+  ingress:
+  # From Ingress Controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3002
+
+  # From Prometheus (metrics scraping)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3002
+
+  # Egress: To PostgreSQL, Redis, Lavalink, and external APIs
+  egress:
+  # To PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # To Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To Lavalink
+  - to:
+    - podSelector:
+        matchLabels:
+          app: lavalink
+    ports:
+    - protocol: TCP
+      port: 2333
+
+  # To external APIs (YouTube, Spotify, SoundCloud, etc.)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# API Service Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-api-netpol
+  namespace: discord-bot
+  labels:
+    app: discord-api
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: discord-api
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept traffic from Ingress Controller
+  ingress:
+  # From Ingress Controller (external traffic)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+
+  # From Prometheus (metrics scraping)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3000
+
+  # Egress: To PostgreSQL, Redis, and other services
+  egress:
+  # To PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # To Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To Gateway service (for command forwarding)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: discord-gateway
+    ports:
+    - protocol: TCP
+      port: 3001
+
+  # To Audio service (for music control)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: discord-audio
+    ports:
+    - protocol: TCP
+      port: 3002
+
+  # To external APIs (Discord webhooks, etc.)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# Worker Service Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: discord-worker-netpol
+  namespace: discord-bot
+  labels:
+    app: discord-worker
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: discord-worker
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept traffic from monitoring only
+  ingress:
+  # From Prometheus (metrics scraping)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 3003
+
+  # Egress: To PostgreSQL and Redis for background jobs
+  egress:
+  # To PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # To Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To external APIs (if needed for jobs)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# Lavalink Service Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lavalink-netpol
+  namespace: discord-bot
+  labels:
+    app: lavalink
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: lavalink
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept traffic from Gateway and Audio services
+  ingress:
+  # From Gateway service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-gateway
+    ports:
+    - protocol: TCP
+      port: 2333
+
+  # From Audio service
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-audio
+    ports:
+    - protocol: TCP
+      port: 2333
+
+  # From Prometheus (metrics scraping)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9091
+
+  # Egress: To external music sources
+  egress:
+  # To YouTube, Spotify, SoundCloud, etc.
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# PostgreSQL Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-netpol
+  namespace: discord-bot
+  labels:
+    app: postgres
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept connections from application services only
+  ingress:
+  # From Gateway
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-gateway
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # From Audio
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-audio
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # From API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-api
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # From Worker
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-worker
+    ports:
+    - protocol: TCP
+      port: 5432
+
+  # From Prometheus (metrics scraping via postgres_exporter)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9187
+
+  # Egress: Minimal (only for replication if configured)
+  egress:
+  # To other PostgreSQL replicas (for future HA setup)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+# Redis Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-netpol
+  namespace: discord-bot
+  labels:
+    app: redis
+    tier: security
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Accept connections from application services only
+  ingress:
+  # From Gateway
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-gateway
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # From Audio
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-audio
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # From API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-api
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # From Worker
+  - from:
+    - podSelector:
+        matchLabels:
+          app: discord-worker
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # From Prometheus (metrics scraping via redis_exporter)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9121
+
+  # Egress: For Redis cluster communication (future HA setup)
+  egress:
+  # To other Redis nodes (for cluster mode)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 16379  # Redis cluster bus
+
+---
+# Notes on NetworkPolicies:
+#
+# 1. Default Deny Strategy:
+#    - Start with "default-deny-all" to block all traffic
+#    - Explicitly allow only required traffic
+#    - Implements zero-trust network security
+#
+# 2. Traffic Flow:
+#    External → Ingress → API/Gateway/Audio → PostgreSQL/Redis/Lavalink → External APIs
+#
+# 3. Service Communication:
+#    - Gateway → PostgreSQL, Redis, Lavalink, Discord API
+#    - Audio → PostgreSQL, Redis, Lavalink, Music APIs
+#    - API → PostgreSQL, Redis, Gateway, Audio
+#    - Worker → PostgreSQL, Redis
+#    - Lavalink → Music streaming services
+#
+# 4. Monitoring Access:
+#    - Prometheus can scrape metrics from all services
+#    - Metrics ports: Gateway(3001), Audio(3002), API(3000), Worker(3003), Lavalink(9091)
+#
+# 5. Database Security:
+#    - PostgreSQL and Redis only accept connections from application pods
+#    - No direct external access to databases
+#    - Access only through application services
+#
+# 6. External Access:
+#    - Only API service is exposed via Ingress
+#    - Gateway and Audio are internal only
+#    - Worker has no external access
+#
+# 7. Testing NetworkPolicies:
+#    # Check applied policies
+#    kubectl get networkpolicies -n discord-bot
+#
+#    # Test connectivity from a pod
+#    kubectl exec -it <pod-name> -n discord-bot -- nc -zv postgres 5432
+#
+#    # Test blocked traffic (should fail)
+#    kubectl run test-pod --rm -i --tty --image=busybox -n default -- nc -zv postgres.discord-bot 5432
+#
+# 8. Production Considerations:
+#    - Ensure CNI plugin supports NetworkPolicies (Calico, Cilium, Weave)
+#    - Monitor blocked traffic for debugging
+#    - Update policies when adding new services
+#    - Use namespace labels for easier management
+#
+# 9. Common Issues:
+#    - If pods can't communicate: Check both ingress and egress rules
+#    - If DNS fails: Ensure allow-dns policy is applied
+#    - If metrics scraping fails: Check Prometheus source selectors
+#
+# 10. Future Enhancements:
+#     - Add IP whitelisting for external access
+#     - Implement rate limiting at network level
+#     - Add policies for service mesh (Istio, Linkerd)
+#     - Create separate policies for development/staging/production

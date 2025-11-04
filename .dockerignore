@@ -3,8 +3,9 @@
 # Node.js dependencies and outputs
 node_modules/
 **/node_modules/
-dist/
-**/dist/
+# Keep dist/ for pre-built packages to avoid workspace resolution issues
+# dist/
+# **/dist/
 *.tsbuildinfo
 **/*.tsbuildinfo
 

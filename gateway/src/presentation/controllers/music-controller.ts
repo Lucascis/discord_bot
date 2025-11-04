@@ -1,10 +1,12 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { logger } from '@discord-bot/logger';
+import { safeValidateCommand } from '@discord-bot/cache';
 import { MusicUIBuilder } from '../ui/music-ui-builder.js';
 import { InteractionResponseHandler } from '../ui/interaction-response-handler.js';
 import { SettingsService } from '../../services/settings-service.js';
 import { DiscordPermissionService } from '../../infrastructure/discord/discord-permission-service.js';
+import { subscriptionMiddleware } from '../../middleware/subscription-middleware.js';
 
 /**
  * Music Controller
@@ -107,6 +109,18 @@ export class MusicController {
         })
       };
 
+      // Validate command before publishing
+      const validationResult = safeValidateCommand(commandData);
+      if ('error' in validationResult && !validationResult.success) {
+        logger.error({
+          guildId: interaction.guildId,
+          type: audioServiceType,
+          validationError: (validationResult as { success: false; error: string }).error
+        }, 'Command validation failed - not sending invalid command');
+        await interaction.reply({ content: '❌ Command validation failed.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
 
       if (audioServiceType === 'nowplaying') {
@@ -133,6 +147,19 @@ export class MusicController {
         guildId: interaction.guildId,
         percent: volume
       };
+
+      // Validate command before publishing
+      const validationResult = safeValidateCommand(commandData);
+      if ('error' in validationResult && !validationResult.success) {
+        logger.error({
+          guildId: interaction.guildId,
+          type: 'volume',
+          volume,
+          validationError: (validationResult as { success: false; error: string }).error
+        }, 'Volume command validation failed');
+        await interaction.reply({ content: '❌ Volume command validation failed.', flags: MessageFlags.Ephemeral });
+        return;
+      }
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `🔊 Setting volume to ${volume}%...`, flags: MessageFlags.Ephemeral });
@@ -216,6 +243,18 @@ export class MusicController {
       return;
     }
 
+    // Check subscription limits - monthly tracks usage
+    const limitCheck = await subscriptionMiddleware.checkUsageLimit(
+      interaction,
+      'monthly_tracks',
+      { incrementAmount: 1, showUpgradePrompt: true }
+    );
+
+    if (!limitCheck.allowed) {
+      // Error message already sent by middleware
+      return;
+    }
+
     const query = interaction.options.getString('query', true);
 
     try {
@@ -284,10 +323,23 @@ export class MusicController {
       // This applies to ALL music commands: /play, /playnext, /playnow
       logger.info({ guildId: interaction.guildId, commandType, isFirstTrack }, 'DEBUG: About to attempt voice connection');
       try {
+        const { joinVoiceChannel, VoiceConnectionStatus } = await import('@discordjs/voice');
         const existingConnection = getVoiceConnection(interaction.guildId);
 
-        if (!existingConnection) {
-          const { joinVoiceChannel } = await import('@discordjs/voice');
+        // Check if connection exists AND is in a valid state (not destroyed/disconnected)
+        const isValidConnection = existingConnection &&
+          existingConnection.state.status !== VoiceConnectionStatus.Destroyed &&
+          existingConnection.state.status !== VoiceConnectionStatus.Disconnected;
+
+        if (!isValidConnection) {
+          // Log whether we're creating new connection or replacing destroyed one
+          if (existingConnection) {
+            logger.info({
+              guildId: interaction.guildId,
+              oldState: existingConnection.state.status,
+              commandType
+            }, 'VOICE_CONNECT: Replacing destroyed/disconnected connection');
+          }
 
           joinVoiceChannel({
             channelId: voiceChannel.id,
@@ -298,13 +350,15 @@ export class MusicController {
           logger.info({
             guildId: interaction.guildId,
             voiceChannelId: voiceChannel.id,
-            commandType
-          }, `VOICE_CONNECT: Discord.js connected to voice channel for ${commandType}`);
+            commandType,
+            isReconnection: !!existingConnection
+          }, `VOICE_CONNECT: Discord.js ${existingConnection ? 'reconnected' : 'connected'} to voice channel for ${commandType}`);
         } else {
-          logger.debug({
+          logger.info({
             guildId: interaction.guildId,
+            currentState: existingConnection.state.status,
             commandType
-          }, `VOICE_CONNECT: Already connected, skipping connection for ${commandType}`);
+          }, `VOICE_CONNECT: Already connected (${existingConnection.state.status}), skipping connection for ${commandType}`);
         }
       } catch (voiceError) {
         logger.error({

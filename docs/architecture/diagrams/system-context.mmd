@@ -1,0 +1,49 @@
+%% System Context Diagram (C4 Model - Level 1)
+%% Purpose: Shows the Discord Music Bot in context with external systems and users
+%% Author: Discord Bot Team
+%% Last Updated: 2025-11-03
+
+graph TB
+    %% External Users
+    User["👤 Discord User<br/>[Person]<br/><br/>Uses Discord to<br/>play music in<br/>voice channels"]
+    Admin["👨‍💼 Server Admin<br/>[Person]<br/><br/>Configures bot<br/>and manages<br/>premium subscription"]
+    Developer["👨‍💻 Developer<br/>[Person]<br/><br/>Monitors system<br/>and deploys<br/>updates"]
+
+    %% Main System
+    DiscordBot["🎵 Discord Music Bot<br/>[Software System]<br/><br/>Provides music playback,<br/>queue management, and<br/>premium features for<br/>Discord servers"]
+
+    %% External Systems
+    Discord["Discord API<br/>[External System]<br/><br/>Provides Discord<br/>gateway, voice,<br/>and REST APIs"]
+    YouTube["YouTube<br/>[External System]<br/><br/>Provides music<br/>streaming and<br/>search"]
+    Spotify["Spotify API<br/>[External System]<br/><br/>Provides track<br/>metadata and<br/>search"]
+    SoundCloud["SoundCloud<br/>[External System]<br/><br/>Provides music<br/>streaming"]
+    Stripe["Stripe API<br/>[External System]<br/><br/>Handles payment<br/>processing and<br/>subscriptions"]
+    Sentry["Sentry<br/>[External System]<br/><br/>Error tracking<br/>and monitoring"]
+    Prometheus["Prometheus<br/>[External System]<br/><br/>Metrics collection<br/>and alerting"]
+
+    %% User Interactions
+    User -->|"Sends slash commands<br/>/play, /skip, /queue"| DiscordBot
+    User -->|"Joins voice channel<br/>to listen"| Discord
+    Admin -->|"Configures settings<br/>and premium features"| DiscordBot
+    Developer -->|"Monitors metrics<br/>and logs"| Prometheus
+    Developer -->|"Views errors<br/>and traces"| Sentry
+
+    %% System Interactions
+    DiscordBot -->|"Receives events via<br/>Gateway WebSocket"| Discord
+    DiscordBot -->|"Sends messages and<br/>embeds via REST API"| Discord
+    DiscordBot -->|"Streams audio to<br/>voice channels"| Discord
+    DiscordBot -->|"Searches and streams<br/>music"| YouTube
+    DiscordBot -->|"Fetches track<br/>metadata"| Spotify
+    DiscordBot -->|"Streams audio<br/>alternative source"| SoundCloud
+    DiscordBot -->|"Processes payments<br/>and subscriptions"| Stripe
+    DiscordBot -->|"Sends error reports<br/>and performance data"| Sentry
+    DiscordBot -->|"Exposes metrics<br/>on /metrics endpoint"| Prometheus
+
+    %% Styling
+    classDef person fill:#08427b,stroke:#052e56,color:#fff
+    classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+
+    class User,Admin,Developer person
+    class DiscordBot system
+    class Discord,YouTube,Spotify,SoundCloud,Stripe,Sentry,Prometheus external

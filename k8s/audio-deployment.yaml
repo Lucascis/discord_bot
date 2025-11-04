@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discord-audio
+  namespace: discord-bot
+  labels:
+    app: discord-audio
+    tier: application
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: discord-audio
+  template:
+    metadata:
+      labels:
+        app: discord-audio
+        tier: application
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3002"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: discord-bot
+      containers:
+      - name: audio
+        image: discord-bot/audio:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3002
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: "audio"
+        - name: NODE_OPTIONS
+          value: "--expose-gc --max-old-space-size=768"
+        envFrom:
+        - configMapRef:
+            name: discord-bot-config
+        - secretRef:
+            name: discord-bot-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "1000m"
+          limits:
+            memory: "1Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]  # Longer grace for active players
+      terminationGracePeriodSeconds: 45
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discord-audio
+  namespace: discord-bot
+  labels:
+    app: discord-audio
+spec:
+  type: ClusterIP
+  selector:
+    app: discord-audio
+  ports:
+  - name: http
+    port: 3002
+    targetPort: http
+    protocol: TCP
+  sessionAffinity: None
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: discord-audio-hpa
+  namespace: discord-bot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: discord-audio
+  minReplicas: 5
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Longer stabilization for audio
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 3
+        periodSeconds: 30
+      selectPolicy: Max

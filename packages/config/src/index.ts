@@ -35,6 +35,8 @@ const envSchema = z.object({
   SPOTIFY_CLIENT_SECRET: z.string().optional(),
   DEEZER_ARL: z.string().optional(),
   APPLE_MUSIC_MEDIA_TOKEN: z.string().optional(),
+  // Premium testing helpers
+  PREMIUM_TEST_GUILD_IDS: z.string().optional(),
 }).refine(data => {
   // Ensure ports don't conflict
   const ports = [data.GATEWAY_HTTP_PORT, data.AUDIO_HTTP_PORT, data.WORKER_HTTP_PORT];
@@ -49,6 +51,7 @@ export type Env = z.infer<typeof envSchema> & {
   SPOTIFY_ENABLED: boolean;
   DEEZER_ENABLED: boolean;
   APPLE_ENABLED: boolean;
+  PREMIUM_TEST_GUILD_IDS_LIST: string[];
 };
 
 // Parse and validate environment with detailed error logging
@@ -62,6 +65,34 @@ try {
     SPOTIFY_ENABLED: !!(baseEnv.SPOTIFY_CLIENT_ID && baseEnv.SPOTIFY_CLIENT_SECRET),
     DEEZER_ENABLED: !!baseEnv.DEEZER_ARL,
     APPLE_ENABLED: !!baseEnv.APPLE_MUSIC_MEDIA_TOKEN,
+    PREMIUM_TEST_GUILD_IDS_LIST: (() => {
+      const rawIds = (baseEnv.PREMIUM_TEST_GUILD_IDS ?? '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(id => id.length > 0);
+
+      const validIds: string[] = [];
+      const invalidIds: string[] = [];
+
+      for (const id of rawIds) {
+        if (/^\d{17,19}$/.test(id)) {
+          if (!validIds.includes(id)) {
+            validIds.push(id);
+          }
+        } else {
+          invalidIds.push(id);
+        }
+      }
+
+      if (invalidIds.length > 0) {
+        console.warn(
+          `Ignoring invalid PREMIUM_TEST_GUILD_IDS entries: ${invalidIds.join(', ')}. ` +
+          'Guild IDs must be 17-19 digit numbers.',
+        );
+      }
+
+      return validIds;
+    })(),
   };
   
   // Additional runtime security checks (skip in test environment)

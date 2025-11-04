@@ -1,0 +1,274 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: discord-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-discord_bot_staging_staging}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: discord-staging-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Lavalink Audio Server
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    container_name: discord-staging-lavalink
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - ./lavalink/plugins:/opt/Lavalink/plugins:rw
+      - lavalink_logs:/opt/Lavalink/logs
+    ports:
+      - "2333:2333"
+    networks:
+      - discord-staging-network
+
+  # Database Migrations
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: discord-staging-migrate
+    env_file: .env
+    command: sh -c "pnpm --filter @discord-bot/database prisma migrate deploy && pnpm --filter @discord-bot/database prisma db seed"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - discord-staging-network
+    restart: "no"
+
+  # Gateway Service (Discord Interface)
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gateway
+    container_name: discord-staging-gateway
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SERVICE_NAME: gateway
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Audio Service (Music Playback)
+  audio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: audio
+    container_name: discord-staging-audio
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SERVICE_NAME: audio
+      NODE_ENV: production
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lavalink:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # API Service (REST Endpoints)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: discord-staging-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SERVICE_NAME: api
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Worker Service (Background Tasks)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: discord-staging-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SERVICE_NAME: worker
+      NODE_ENV: production
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - discord-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Prometheus Metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: discord-staging-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - discord-staging-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: discord-staging-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3300:3000"
+    networks:
+      - discord-staging-network
+    depends_on:
+      - prometheus
+
+networks:
+  discord-staging-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  lavalink_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

@@ -17,6 +17,7 @@
 
 import { logger } from '@discord-bot/logger';
 import { audioCacheManager } from './cache.js';
+import type { AudioCacheStats } from './cache.js';
 import { predictiveCacheManager } from './predictive-cache.js';
 
 /**
@@ -208,7 +209,6 @@ export class AdaptiveCacheManager {
     const optimizations: string[] = [];
     let performanceImpact = 0;
 
-    const stats = audioCacheManager.getCacheStats();
     const avgMetrics = this.calculateAverageMetrics();
 
     // Memory optimization
@@ -598,12 +598,12 @@ export class AdaptiveCacheManager {
   /**
    * Calculate overall hit rate from cache stats
    */
-  private calculateOverallHitRate(stats: any): number {
+  private calculateOverallHitRate(stats: AudioCacheStats): number {
     try {
-      const searchHitRate = stats.search?.overall?.hitRate || 0;
-      const queueHitRate = stats.queue?.overall?.hitRate || 0;
-      const userHitRate = stats.user?.overall?.hitRate || 0;
-      const flagHitRate = stats.featureFlags?.overall?.hitRate || 0;
+      const searchHitRate = stats.search.overall.hitRate;
+      const queueHitRate = stats.queue.overall.hitRate;
+      const userHitRate = stats.user.overall.hitRate;
+      const flagHitRate = stats.featureFlags.overall.hitRate;
 
       return (searchHitRate + queueHitRate + userHitRate + flagHitRate) / 4;
     } catch {
@@ -646,7 +646,7 @@ export class AdaptiveCacheManager {
   /**
    * Analyze guild-specific cache performance
    */
-  private async analyzeGuildCachePerformance(guildId: string): Promise<{
+  private async analyzeGuildCachePerformance(_guildId: string): Promise<{
     activityLevel: 'low' | 'medium' | 'high';
     hitRate: number;
     avgResponseTime: number;
@@ -674,7 +674,6 @@ export class AdaptiveCacheManager {
   private async gradualCacheCleanup(): Promise<void> {
     try {
       // Get current cache stats
-      const stats = audioCacheManager.getCacheStats();
       const sizes = audioCacheManager.getCacheSizes();
 
       logger.info({ sizes }, 'Starting gradual cache cleanup');

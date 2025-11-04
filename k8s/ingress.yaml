@@ -1,0 +1,209 @@
+# Ingress Configuration
+# Purpose: Provides load balancing and external access to API service
+# Architecture: NGINX Ingress with TLS termination and rate limiting
+# High Availability: Load balances across API pod replicas
+# Version: networking.k8s.io/v1
+# Author: Discord Bot Team
+# Last Updated: 2025-11-03
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: discord-bot-ingress
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: networking
+  annotations:
+    # NGINX Ingress Controller Configuration
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Rate Limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+
+    # Timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+    # Security Headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
+
+    # CORS Configuration
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "false"
+
+    # Load Balancing
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+
+    # Client Body Size (for file uploads)
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # Certificate Manager (if using cert-manager for TLS)
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+spec:
+  ingressClassName: nginx
+
+  # TLS Configuration
+  tls:
+  - hosts:
+    - api.discord-bot.example.com
+    secretName: discord-bot-tls
+
+  rules:
+  # API Service
+  - host: api.discord-bot.example.com
+    http:
+      paths:
+      # Health Check Endpoints (no auth required)
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-api
+            port:
+              number: 3000
+
+      - path: /ready
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-api
+            port:
+              number: 3000
+
+      # API v1 Endpoints
+      - path: /api/v1
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-api
+            port:
+              number: 3000
+
+      # Metrics Endpoint (should be secured in production)
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-api
+            port:
+              number: 3000
+
+---
+# TLS Secret Example
+# This is a template - actual TLS certificates should be provided via cert-manager or manually
+apiVersion: v1
+kind: Secret
+metadata:
+  name: discord-bot-tls
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+type: kubernetes.io/tls
+data:
+  # Base64 encoded certificate and key
+  # In production, use cert-manager or provide actual certificates
+  # tls.crt: <base64-encoded-certificate>
+  # tls.key: <base64-encoded-private-key>
+
+---
+# Alternative: Internal-only Ingress (for monitoring/metrics)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: discord-bot-internal
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+    tier: networking
+    visibility: internal
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Whitelist internal IP ranges only
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+spec:
+  ingressClassName: nginx
+  rules:
+  # Metrics and Monitoring (internal only)
+  - host: metrics.discord-bot.internal
+    http:
+      paths:
+      # Prometheus Metrics from all services
+      - path: /gateway
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-gateway
+            port:
+              number: 3001
+
+      - path: /audio
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-audio
+            port:
+              number: 3002
+
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-api
+            port:
+              number: 3000
+
+      - path: /worker
+        pathType: Prefix
+        backend:
+          service:
+            name: discord-worker
+            port:
+              number: 3003
+
+      - path: /lavalink
+        pathType: Prefix
+        backend:
+          service:
+            name: lavalink
+            port:
+              number: 9091
+
+---
+# Rate Limiting ConfigMap
+# Advanced rate limiting rules for different endpoints
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-rate-limits
+  namespace: discord-bot
+  labels:
+    app: discord-bot
+data:
+  # Rate limit zones (used by NGINX)
+  rate-limit-config: |
+    # General API: 100 req/s per IP
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=100r/s;
+
+    # Search endpoint: 10 req/s per IP (more expensive)
+    limit_req_zone $binary_remote_addr zone=search_limit:10m rate=10r/s;
+
+    # Webhook endpoint: 50 req/s per IP
+    limit_req_zone $binary_remote_addr zone=webhook_limit:10m rate=50r/s;
+
+    # Music playback: 30 req/s per IP
+    limit_req_zone $binary_remote_addr zone=music_limit:10m rate=30r/s;

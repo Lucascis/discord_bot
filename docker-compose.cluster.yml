@@ -1,0 +1,744 @@
+version: '3.8'
+
+# Redis Cluster configuration for distributed Discord bot deployment
+# This setup provides:
+# - 6 Redis nodes (3 master + 3 replica) for high availability
+# - Redis Sentinel for automatic failover
+# - Optimized for production-scale multi-instance deployment
+
+services:
+  # ========== Redis Cluster Nodes ==========
+
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: discord-redis-node-1
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-1.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7001:6379"
+      - "17001:16379"
+    volumes:
+      - redis_node_1_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: discord-redis-node-2
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-2.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7002:6379"
+      - "17002:16379"
+    volumes:
+      - redis_node_2_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: discord-redis-node-3
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-3.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7003:6379"
+      - "17003:16379"
+    volumes:
+      - redis_node_3_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  redis-node-4:
+    image: redis:7-alpine
+    container_name: discord-redis-node-4
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-4.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7004:6379"
+      - "17004:16379"
+    volumes:
+      - redis_node_4_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  redis-node-5:
+    image: redis:7-alpine
+    container_name: discord-redis-node-5
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-5.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7005:6379"
+      - "17005:16379"
+    volumes:
+      - redis_node_5_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  redis-node-6:
+    image: redis:7-alpine
+    container_name: discord-redis-node-6
+    command: >
+      redis-server
+      --port 6379
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly yes
+      --appendfilename "node-6.aof"
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "7006:6379"
+      - "17006:16379"
+    volumes:
+      - redis_node_6_data:/data
+    networks:
+      - discord-cluster
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  # ========== Redis Cluster Initializer ==========
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: discord-redis-cluster-init
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+      redis-node-4:
+        condition: service_healthy
+      redis-node-5:
+        condition: service_healthy
+      redis-node-6:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for all nodes to be ready...' &&
+        sleep 5 &&
+        echo 'Creating Redis Cluster...' &&
+        redis-cli --cluster create
+          redis-node-1:6379
+          redis-node-2:6379
+          redis-node-3:6379
+          redis-node-4:6379
+          redis-node-5:6379
+          redis-node-6:6379
+          --cluster-replicas 1
+          --cluster-yes &&
+        echo 'Redis Cluster created successfully!' &&
+        redis-cli -c -h redis-node-1 -p 6379 cluster info
+      "
+    networks:
+      - discord-cluster
+    restart: "no"
+
+  # ========== Redis Sentinel (for failover) ==========
+
+  sentinel-1:
+    image: redis:7-alpine
+    container_name: discord-sentinel-1
+    command: >
+      sh -c "
+        echo 'port 26379' > /tmp/sentinel.conf &&
+        echo 'sentinel monitor mymaster redis-node-1 6379 2' >> /tmp/sentinel.conf &&
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+        echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+        echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+        redis-server /tmp/sentinel.conf --sentinel
+      "
+    depends_on:
+      - redis-cluster-init
+    ports:
+      - "26379:26379"
+    networks:
+      - discord-cluster
+    restart: unless-stopped
+
+  sentinel-2:
+    image: redis:7-alpine
+    container_name: discord-sentinel-2
+    command: >
+      sh -c "
+        echo 'port 26379' > /tmp/sentinel.conf &&
+        echo 'sentinel monitor mymaster redis-node-1 6379 2' >> /tmp/sentinel.conf &&
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+        echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+        echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+        redis-server /tmp/sentinel.conf --sentinel
+      "
+    depends_on:
+      - redis-cluster-init
+    ports:
+      - "26380:26379"
+    networks:
+      - discord-cluster
+    restart: unless-stopped
+
+  sentinel-3:
+    image: redis:7-alpine
+    container_name: discord-sentinel-3
+    command: >
+      sh -c "
+        echo 'port 26379' > /tmp/sentinel.conf &&
+        echo 'sentinel monitor mymaster redis-node-1 6379 2' >> /tmp/sentinel.conf &&
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+        echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+        echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+        redis-server /tmp/sentinel.conf --sentinel
+      "
+    depends_on:
+      - redis-cluster-init
+    ports:
+      - "26381:26379"
+    networks:
+      - discord-cluster
+    restart: unless-stopped
+
+  # ========== PostgreSQL (shared database) ==========
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: discord-postgres-cluster
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: discord
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_cluster_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d discord"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ========== Lavalink (shared audio server) ==========
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    container_name: discord-lavalink-cluster
+    env_file: .env
+    environment:
+      JAVA_OPTS: "-Xmx2G -Xms1G -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+    ports:
+      - "2333:2333"
+    volumes:
+      - lavalink_cluster_logs:/opt/Lavalink/logs
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - ./lavalink/plugins:/opt/Lavalink/plugins:rw
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2.5G
+        reservations:
+          memory: 2G
+
+  # ========== Gateway Service Instances ==========
+
+  gateway-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-gateway-1
+    command: node gateway/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=gateway-1
+      - SERVICE_TYPE=gateway
+      - PORT=3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 512M
+
+  gateway-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-gateway-2
+    command: node gateway/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=gateway-2
+      - SERVICE_TYPE=gateway
+      - PORT=3011
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3011:3011"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3011/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 512M
+
+  gateway-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-gateway-3
+    command: node gateway/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=gateway-3
+      - SERVICE_TYPE=gateway
+      - PORT=3021
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3021:3021"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3021/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 512M
+
+  # ========== Audio Service Instances ==========
+
+  audio-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-audio-1
+    command: node audio/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=audio-1
+      - SERVICE_TYPE=audio
+      - PORT=3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
+
+  audio-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-audio-2
+    command: node audio/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=audio-2
+      - SERVICE_TYPE=audio
+      - PORT=3012
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3012:3012"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3012/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
+
+  audio-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-audio-3
+    command: node audio/dist/index.js
+    env_file: .env
+    environment:
+      - INSTANCE_ID=audio-3
+      - SERVICE_TYPE=audio
+      - PORT=3022
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      lavalink:
+        condition: service_started
+    ports:
+      - "3022:3022"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3022/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 1G
+
+  # ========== API Service (load balanced) ==========
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: discord-api-cluster
+    command: node api/dist/index.js
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - discord-cluster
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+      replicas: 2
+
+  # ========== Prometheus (monitoring) ==========
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: discord-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - discord-cluster
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ========== Grafana (visualization) ==========
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: discord-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3030:3000"
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - discord-cluster
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+# Named volumes for data persistence
+volumes:
+  redis_node_1_data:
+    driver: local
+  redis_node_2_data:
+    driver: local
+  redis_node_3_data:
+    driver: local
+  redis_node_4_data:
+    driver: local
+  redis_node_5_data:
+    driver: local
+  redis_node_6_data:
+    driver: local
+  postgres_cluster_data:
+    driver: local
+  lavalink_cluster_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# Custom network for cluster isolation
+networks:
+  discord-cluster:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

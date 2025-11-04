@@ -8,11 +8,10 @@ import { logger } from '@discord-bot/logger';
 import {
   AudioEffectsSettings,
   AudioEffectsState,
-  CrossfadeSettings,
   EqualizerSettings,
   SmartCrossfadeContext,
-  AudioAnalysisData,
-  AudioQuality
+  AudioQuality,
+  EqualizerBand
 } from './types.js';
 
 export class AudioEffectsEngine extends EventEmitter {
@@ -203,7 +202,7 @@ export class AudioEffectsEngine extends EventEmitter {
     if (!state) return;
 
     const { nightcore, daycore, eightD } = state.effects;
-    const filters: any = {};
+    const filters: Record<string, unknown> = {};
 
     // Nightcore effect
     if (nightcore.enabled) {
@@ -246,7 +245,7 @@ export class AudioEffectsEngine extends EventEmitter {
     const state = this.guildStates.get(guildId);
     if (!state) return;
 
-    const filters: any = {};
+    const filters: Record<string, unknown> = {};
 
     // Volume control
     if (state.effects.volume !== 1.0) {
@@ -377,10 +376,11 @@ export class AudioEffectsEngine extends EventEmitter {
     ];
   }
 
-  private getEqualizerPresets() {
-    // Predefined EQ presets
+  private getEqualizerPresets(): EqualizerSettings['presets'] {
+    const cloneBands = (bands: EqualizerBand[]): EqualizerBand[] => bands.map(band => ({ ...band }));
+
     return {
-      flat: this.getDefaultEqualizerBands(),
+      flat: cloneBands(this.getDefaultEqualizerBands()),
       rock: [
         { frequency: 32, gain: 3, q: 1 },
         { frequency: 64, gain: 2, q: 1 },
@@ -392,6 +392,42 @@ export class AudioEffectsEngine extends EventEmitter {
         { frequency: 4000, gain: 3, q: 1 },
         { frequency: 8000, gain: 3, q: 1 },
         { frequency: 16000, gain: 2, q: 1 }
+      ],
+      pop: [
+        { frequency: 32, gain: 1, q: 1 },
+        { frequency: 64, gain: 1.5, q: 1 },
+        { frequency: 125, gain: 1, q: 1 },
+        { frequency: 250, gain: 0.5, q: 1 },
+        { frequency: 500, gain: 0, q: 1 },
+        { frequency: 1000, gain: 0.5, q: 1 },
+        { frequency: 2000, gain: 1, q: 1 },
+        { frequency: 4000, gain: 1.5, q: 1 },
+        { frequency: 8000, gain: 2, q: 1 },
+        { frequency: 16000, gain: 2.5, q: 1 }
+      ],
+      jazz: [
+        { frequency: 32, gain: 0, q: 1 },
+        { frequency: 64, gain: 0.5, q: 1 },
+        { frequency: 125, gain: 1, q: 1 },
+        { frequency: 250, gain: 0.5, q: 1 },
+        { frequency: 500, gain: 0, q: 1 },
+        { frequency: 1000, gain: 0.5, q: 1 },
+        { frequency: 2000, gain: 1, q: 1 },
+        { frequency: 4000, gain: 1.5, q: 1 },
+        { frequency: 8000, gain: 1, q: 1 },
+        { frequency: 16000, gain: 0.5, q: 1 }
+      ],
+      classical: [
+        { frequency: 32, gain: -1, q: 1 },
+        { frequency: 64, gain: -0.5, q: 1 },
+        { frequency: 125, gain: 0, q: 1 },
+        { frequency: 250, gain: 1, q: 1 },
+        { frequency: 500, gain: 1.5, q: 1 },
+        { frequency: 1000, gain: 2, q: 1 },
+        { frequency: 2000, gain: 1.5, q: 1 },
+        { frequency: 4000, gain: 1, q: 1 },
+        { frequency: 8000, gain: 0.5, q: 1 },
+        { frequency: 16000, gain: 0, q: 1 }
       ],
       electronic: [
         { frequency: 32, gain: 4, q: 1 },
@@ -416,8 +452,20 @@ export class AudioEffectsEngine extends EventEmitter {
         { frequency: 4000, gain: 0, q: 1 },
         { frequency: 8000, gain: 0, q: 1 },
         { frequency: 16000, gain: 0, q: 1 }
+      ],
+      vocal_enhance: [
+        { frequency: 32, gain: -1, q: 1 },
+        { frequency: 64, gain: -0.5, q: 1 },
+        { frequency: 125, gain: 0, q: 1 },
+        { frequency: 250, gain: 1.5, q: 1 },
+        { frequency: 500, gain: 2, q: 1 },
+        { frequency: 1000, gain: 3, q: 1 },
+        { frequency: 2000, gain: 2.5, q: 1 },
+        { frequency: 4000, gain: 1.5, q: 1 },
+        { frequency: 8000, gain: 1, q: 1 },
+        { frequency: 16000, gain: 0.5, q: 1 }
       ]
-    } as any;
+    };
   }
 
   private areKeysCompatible(key1: string, key2: string): boolean {

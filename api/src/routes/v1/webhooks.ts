@@ -1,14 +1,16 @@
-import { Router } from 'express';
-import { asyncHandler } from '../../middleware/async-handler.js';
 import {
-  validateGuildId,
-  validateWebhookPayload,
-  validateWebhookHeaders
-} from '../../middleware/validation.js';
-import { NotFoundError, InternalServerError, UnauthorizedError } from '../../middleware/error-handler.js';
+  Router,
+  type Router as ExpressRouter,
+  type RequestHandler,
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express';
+import { asyncHandler } from '../../middleware/async-handler.js';
+import { validateWebhookPayload, validateWebhookHeaders } from '../../middleware/validation.js';
+import { InternalServerError, UnauthorizedError } from '../../middleware/error-handler.js';
 import type {
   APIResponse,
-  WebhookEvent,
   WebhookPayload,
   WebhookResponse
 } from '../../types/api.js';
@@ -16,7 +18,7 @@ import { logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
 import Redis from 'ioredis';
 import { env } from '@discord-bot/config';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 
 /**
  * Webhook API Router
@@ -25,7 +27,7 @@ import crypto from 'crypto';
  * Supports external integrations, third-party services, and automation
  */
 
-const router = Router();
+const router: ExpressRouter = Router();
 
 // Redis client for inter-service communication
 const redis = new Redis(env.REDIS_URL);
@@ -33,9 +35,9 @@ const redis = new Redis(env.REDIS_URL);
 /**
  * Webhook signature verification middleware
  */
-const verifyWebhookSignature = (req: any, res: any, next: any) => {
-  const signature = req.headers['x-webhook-signature'];
-  const timestamp = req.headers['x-webhook-timestamp'];
+const verifyWebhookSignature: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
+  const signatureHeader = req.headers['x-webhook-signature'];
+  const timestampHeader = req.headers['x-webhook-timestamp'];
   const webhookSecret = process.env.WEBHOOK_SECRET || 'default-webhook-secret';
 
   if (!webhookSecret) {
@@ -43,9 +45,16 @@ const verifyWebhookSignature = (req: any, res: any, next: any) => {
     return next();
   }
 
-  if (!signature || !timestamp) {
+  if (!signatureHeader || !timestampHeader) {
     return next(new UnauthorizedError('Missing webhook signature or timestamp'));
   }
+
+  if (Array.isArray(signatureHeader) || Array.isArray(timestampHeader)) {
+    return next(new UnauthorizedError('Invalid webhook signature headers'));
+  }
+
+  const signature = String(signatureHeader);
+  const timestamp = String(timestampHeader);
 
   // Verify timestamp (prevent replay attacks)
   const currentTime = Math.floor(Date.now() / 1000);
@@ -55,16 +64,18 @@ const verifyWebhookSignature = (req: any, res: any, next: any) => {
   }
 
   // Verify signature
-  const body = JSON.stringify(req.body);
+  const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
   const expectedSignature = crypto
     .createHmac('sha256', webhookSecret)
-    .update(`${timestamp}.${body}`)
+    .update(`${timestamp}.${payload}`)
     .digest('hex');
 
-  if (!crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expectedSignature, 'hex')
-  )) {
+  const providedBuffer = Buffer.from(signature, 'hex');
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+
+  if (providedBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
+  ) {
     logger.warn({
       ip: req.ip,
       userAgent: req.headers['user-agent'],
@@ -99,6 +110,7 @@ async function publishWebhookEvent(
  * Webhook to trigger music playback
  */
 router.post('/music/play',
+  validateWebhookHeaders,
   verifyWebhookSignature,
   validateWebhookPayload,
   asyncHandler(async (req, res) => {
@@ -156,6 +168,7 @@ router.post('/music/play',
  * Webhook to control music playback (pause, resume, skip, stop)
  */
 router.post('/music/control',
+  validateWebhookHeaders,
   verifyWebhookSignature,
   validateWebhookPayload,
   asyncHandler(async (req, res) => {
@@ -219,6 +232,7 @@ router.post('/music/control',
  * Webhook to send Discord notifications
  */
 router.post('/notifications',
+  validateWebhookHeaders,
   verifyWebhookSignature,
   validateWebhookPayload,
   asyncHandler(async (req, res) => {
@@ -277,6 +291,7 @@ router.post('/notifications',
  * Subscribe to webhook events for real-time updates
  */
 router.post('/events/subscribe',
+  validateWebhookHeaders,
   verifyWebhookSignature,
   validateWebhookPayload,
   asyncHandler(async (req, res) => {

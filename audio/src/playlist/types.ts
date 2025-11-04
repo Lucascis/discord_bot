@@ -126,7 +126,7 @@ export interface PlaylistCollaboration {
 export interface PlaylistImportRequest {
   source: 'spotify' | 'youtube' | 'apple_music' | 'deezer' | 'soundcloud' | 'file';
   url?: string;
-  data?: any;
+  data?: unknown;
   options: {
     preserveOrder: boolean;
     skipUnavailable: boolean;
@@ -167,7 +167,7 @@ export interface PlaylistEvent {
   playlistId: string;
   type: 'created' | 'updated' | 'deleted' | 'track_added' | 'track_removed' | 'track_moved' | 'shared' | 'played';
   userId: string;
-  data: any;
+  data: Record<string, unknown>;
   timestamp: Date;
 }
 

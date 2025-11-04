@@ -1,21 +1,15 @@
-import { Router } from 'express';
+import { Router, type Router as ExpressRouter } from 'express';
 import { asyncHandler } from '../../middleware/async-handler.js';
-import {
-  validateGuildId,
-  validatePagination,
-  validateAnalyticsQuery
-} from '../../middleware/validation.js';
+import { validateGuildId, validatePagination } from '../../middleware/validation.js';
 import { NotFoundError, InternalServerError } from '../../middleware/error-handler.js';
 import type {
   APIResponse,
   PaginatedResponse,
   GuildAnalytics,
-  AnalyticsQuery,
   DashboardMetrics,
   Snowflake
 } from '../../types/api.js';
 import { logger } from '@discord-bot/logger';
-import { prisma } from '@discord-bot/database';
 import Redis from 'ioredis';
 import { env } from '@discord-bot/config';
 
@@ -26,7 +20,7 @@ import { env } from '@discord-bot/config';
  * Integrates with Worker Service for background analytics processing
  */
 
-const router = Router();
+const router: ExpressRouter = Router();
 
 // Redis client for inter-service communication
 const redis = new Redis(env.REDIS_URL);
@@ -67,7 +61,7 @@ async function requestFromWorker<T>(
           } else {
             resolve(response.data);
           }
-        } catch (parseError) {
+        } catch {
           reject(new Error('Invalid response format'));
         }
       }

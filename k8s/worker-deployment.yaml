@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discord-worker
+  namespace: discord-bot
+  labels:
+    app: discord-worker
+    tier: application
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: discord-worker
+  template:
+    metadata:
+      labels:
+        app: discord-worker
+        tier: application
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3003"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: discord-bot
+      containers:
+      - name: worker
+        image: discord-bot/worker:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3003
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: "worker"
+        envFrom:
+        - configMapRef:
+            name: discord-bot-config
+        - secretRef:
+            name: discord-bot-secrets
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 10"]  # Allow jobs to finish
+      terminationGracePeriodSeconds: 40
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discord-worker
+  namespace: discord-bot
+  labels:
+    app: discord-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: discord-worker
+  ports:
+  - name: http
+    port: 3003
+    targetPort: http
+    protocol: TCP
+  sessionAffinity: None
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: discord-worker-hpa
+  namespace: discord-bot
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: discord-worker
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Longer for background jobs
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Max

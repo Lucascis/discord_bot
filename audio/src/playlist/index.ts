@@ -20,7 +20,6 @@ playlistManager.on('trackAdded', (playlistId, track, position) => {
 });
 
 playlistManager.on('trackRemoved', (playlistId, track, index) => {
-  const lastEvent = playlistManager.getPlaylist(playlistId);
   // Get user from last event context - simplified for now
   collaborationManager.handleRealtimeTrackRemove(playlistId, 'system', index, track);
 });
