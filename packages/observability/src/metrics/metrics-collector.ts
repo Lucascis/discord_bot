@@ -7,13 +7,19 @@ import { logger } from '@discord-bot/logger';
  * Collects application-specific metrics
  */
 export class MetricsCollector {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private meter: any;
 
   // OpenTelemetry metrics
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private commandCounter: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private commandDuration: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private activeSessionsGauge: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private queueSizeHistogram: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private errorCounter: any;
 
   // Prometheus metrics
@@ -232,20 +238,23 @@ export class MetricsCollector {
   ): void {
     try {
       switch (type) {
-        case 'counter':
+        case 'counter': {
           const counter = this.meter.createCounter(name);
           counter.add(value, labels);
           break;
+        }
 
-        case 'gauge':
+        case 'gauge': {
           const gauge = this.meter.createUpDownCounter(name);
           gauge.add(value, labels);
           break;
+        }
 
-        case 'histogram':
+        case 'histogram': {
           const histogram = this.meter.createHistogram(name);
           histogram.record(value, labels);
           break;
+        }
       }
     } catch (error) {
       logger.error('Failed to record custom metric', {
@@ -271,6 +280,7 @@ export class MetricsCollector {
   getMetricsByGuild(guildId: string): Record<string, any> {
     const activeSessionsMetric = this.promActiveSessionsGauge.labels(guildId);
     const queueSizeMetric = this.promQueueSizeGauge.labels(guildId);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 
     return {
       activeSessions: activeSessionsMetric,

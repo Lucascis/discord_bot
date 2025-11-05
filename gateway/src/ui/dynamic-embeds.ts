@@ -3,17 +3,13 @@
  * Live updating embeds with premium UI features
  */
 
-import {
-  EmbedBuilder,
+import { EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ComponentType,
   Message,
   TextChannel,
-  VoiceChannel,
-  User
-} from 'discord.js';
+  User } from 'discord.js';
 import { logger } from '@discord-bot/logger';
 
 export interface NowPlayingData {
@@ -389,6 +385,7 @@ export class DynamicEmbedsSystem {
   async createQueueEmbed(
     channel: TextChannel,
     guildId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     queueData: any,
     page: number = 0
   ): Promise<Message | null> {
@@ -405,6 +402,7 @@ export class DynamicEmbedsSystem {
         .setColor(theme.primaryColor)
         .setTitle('🗒️ Music Queue')
         .setDescription(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           queueSlice.map((track: any, index: number) => {
             const position = startIndex + index + 1;
             const duration = this.formatDuration(track.duration);
@@ -469,6 +467,7 @@ export class DynamicEmbedsSystem {
   async createEffectsEmbed(
     channel: TextChannel,
     guildId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     effectsData: any
   ): Promise<Message | null> {
     try {

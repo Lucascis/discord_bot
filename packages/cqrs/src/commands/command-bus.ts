@@ -29,6 +29,7 @@ export interface CommandMetadata {
  * Command Handler Interface
  * Defines contract for command handlers
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface ICommandHandler<TCommand extends ICommand = ICommand, TResult = any> {
   readonly commandType: string;
   handle(command: TCommand): Promise<TResult>;
@@ -37,10 +38,12 @@ export interface ICommandHandler<TCommand extends ICommand = ICommand, TResult =
 /**
  * Command Execution Result
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface CommandResult<T = any> {
   success: boolean;
   data?: T;
   error?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   events?: any[];
   metadata?: Record<string, unknown>;
 }
@@ -111,6 +114,7 @@ export class CommandBus implements ICommandBus {
         guildId: command.metadata.guildId
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await handler.handle(command as any);
 
       const executionTime = Date.now() - startTime;

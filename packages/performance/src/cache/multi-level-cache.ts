@@ -59,6 +59,7 @@ interface CacheEntry<T> {
  * Multi-Level Cache System
  * Implements L1 (memory) + L2 (Redis) caching with performance optimizations
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class MultiLevelCache<T = any> {
   private readonly l1Cache: LRUCache<string, CacheEntry<T>>;
   private readonly l2Cache: Redis;

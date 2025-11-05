@@ -11,7 +11,9 @@ export class StubBillingService implements BillingService {
   private readonly simulatedLatency = 1000; // 1 second simulation
 
   async calculateProration(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     oldPlan: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     newPlan: any,
     remainingDays: number
   ): Promise<number> {

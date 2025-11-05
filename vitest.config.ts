@@ -33,6 +33,13 @@ export default defineConfig({
       '@discord-bot/logger': path.resolve(__dirname, 'packages/logger/src'),
       '@discord-bot/config': path.resolve(__dirname, 'packages/config/src'),
       '@discord-bot/commands': path.resolve(__dirname, 'packages/commands/src'),
+      '@discord-bot/cache': path.resolve(__dirname, 'packages/cache/src'),
+      '@discord-bot/subscription': path.resolve(__dirname, 'packages/subscription/src'),
+      '@discord-bot/cluster': path.resolve(__dirname, 'packages/cluster/src'),
+      '@discord-bot/cqrs': path.resolve(__dirname, 'packages/cqrs/src'),
+      '@discord-bot/event-store': path.resolve(__dirname, 'packages/event-store/src'),
+      '@discord-bot/observability': path.resolve(__dirname, 'packages/observability/src'),
+      '@discord-bot/performance': path.resolve(__dirname, 'packages/performance/src'),
       // Gateway src aliases
       '../src/errors.js': path.resolve(__dirname, 'gateway/src/errors.ts'),
       '../src/ui.js': path.resolve(__dirname, 'gateway/src/ui.ts'),

@@ -4,10 +4,8 @@
 
 import { Cluster } from 'ioredis';
 import { logger } from '@discord-bot/logger';
-import { Counter, Gauge, Histogram } from 'prom-client';
-import {
-  InstanceMetadata,
-  GuildAssignment,
+import { Counter, Histogram } from 'prom-client';
+import { InstanceMetadata,
   HeartbeatMessage,
   MigrationRequest,
   ServiceType,
@@ -16,8 +14,7 @@ import {
   ClusterConfig,
   REDIS_KEYS,
   REDIS_CHANNELS,
-  ClusterEventType
-} from './types.js';
+  ClusterEventType } from './types.js';
 import { ServiceRegistry } from './registry.js';
 import { SessionAffinityManager } from './affinity.js';
 import { DistributedLockManager, createLockResource } from './locks.js';
@@ -440,7 +437,7 @@ export class ClusterCoordinator {
           prev.assignedGuilds.length <= curr.assignedGuilds.length ? prev : curr
         );
 
-      case LoadBalancingStrategy.CONSISTENT_HASH:
+      case LoadBalancingStrategy.CONSISTENT_HASH: {
         // Consistent hashing based on guild ID
         const hash = crypto
           .createHash('md5')
@@ -448,6 +445,7 @@ export class ClusterCoordinator {
           .digest('hex');
         const index = parseInt(hash.substring(0, 8), 16) % availableInstances.length;
         return availableInstances[index];
+      }
 
       default:
         return availableInstances[0];
@@ -629,6 +627,7 @@ export class ClusterCoordinator {
   /**
    * Handle cluster events
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleClusterEvent(event: any): void {
     logger.debug({ event }, 'Cluster event received');
     // Additional event handling can be added here
@@ -649,6 +648,7 @@ export class ClusterCoordinator {
   /**
    * Handle migration events
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleMigrationEvent(event: any): void {
     logger.debug({ event }, 'Migration event received');
     // Additional migration event handling can be added here

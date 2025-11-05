@@ -9,7 +9,7 @@ import { BillingPeriod, PeriodType } from '../value-objects/billing-period.js';
 import { PaymentPlan, Currency } from '../entities/payment-plan.js';
 import { FeatureSubscription } from '../entities/feature-subscription.js';
 import { Customer } from '../entities/customer.js';
-import { UsageQuota, QuotaType } from '../value-objects/usage-quota.js';
+import { QuotaType } from '../value-objects/usage-quota.js';
 
 export interface PricingCalculation {
   readonly basePrice: number;

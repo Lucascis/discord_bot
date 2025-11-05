@@ -63,7 +63,9 @@ export class RedisPoolManager {
     logger.info('All Redis connection pools closed');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getPoolStats(): Record<string, any> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stats: Record<string, any> = {};
     for (const [name, pool] of this.pools) {
       stats[name] = pool.getStats();

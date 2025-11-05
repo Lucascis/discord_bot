@@ -1,14 +1,11 @@
-import {
-  CommandInteraction,
+import { CommandInteraction,
   ButtonInteraction,
   InteractionResponse,
   InteractionReplyOptions,
-  InteractionEditReplyOptions,
   InteractionUpdateOptions,
   EmbedBuilder,
   Message,
-  MessageFlags
-} from 'discord.js';
+  MessageFlags } from 'discord.js';
 import { MusicUIBuilder } from './music-ui-builder.js';
 import { DiscordErrorHandler } from '../../utils/discord-error-handler.js';
 import { logger } from '@discord-bot/logger';

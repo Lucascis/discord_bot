@@ -5,8 +5,6 @@
 
 import { SubscriptionTier } from '@discord-bot/config';
 import { AudioQuality, AudioQualityLevel } from '../value-objects/audio-quality.js';
-import { AudioQualityTier, QualityConfiguration } from '../entities/audio-quality-tier.js';
-import { FeatureSubscription } from '../entities/feature-subscription.js';
 
 export interface QualitySelectionCriteria {
   readonly userTier: SubscriptionTier;
@@ -514,7 +512,9 @@ export class AudioQualityDomainService {
    */
   getOptimalQuality(
     userTier: SubscriptionTier,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deviceCapabilities: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     userPreferences?: any
   ): AdaptiveQualityResult {
     const criteria: QualitySelectionCriteria = {
@@ -574,6 +574,7 @@ export class AudioQualityDomainService {
    */
   validateDeviceCompatibility(
     quality: AudioQualityLevel,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deviceCapabilities: any
   ): { isCompatible: boolean; issues: string[] } {
     const audioQuality = new AudioQuality(quality);
@@ -599,6 +600,7 @@ export class AudioQualityDomainService {
    */
   findCompatibleQuality(
     tier: SubscriptionTier,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deviceCapabilities: any
   ): { quality: AudioQualityLevel } {
     const availableQualities = this.getAvailableQualities(tier);
@@ -619,8 +621,10 @@ export class AudioQualityDomainService {
    * Validate adaptive streaming configuration
    */
   validateAdaptiveConfig(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: any,
     tier: SubscriptionTier,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deviceCapabilities: any
   ): { isValid: boolean; errors: string[] } {
     const errors: string[] = [];

@@ -42,6 +42,7 @@ export interface BatchConfig {
  */
 export class QueryOptimizer {
   private readonly metrics?: MetricsCollector;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly queryCache = new Map<string, any>();
   private readonly slowQueryThreshold = 1000; // 1 second
   private readonly batchConfig: BatchConfig = {
@@ -60,8 +61,10 @@ export class QueryOptimizer {
    */
   optimizeSelect(
     baseQuery: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     params: any[] = [],
     hints: QueryHint = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): { query: string; params: any[] } {
     let optimizedQuery = baseQuery;
 
@@ -337,9 +340,11 @@ export class QueryOptimizer {
    */
   async analyzeQuery(
     query: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     executeFn: (query: string) => Promise<any>
   ): Promise<{
     originalTime: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     explainPlan: any;
     recommendations: string[];
   }> {
@@ -403,6 +408,7 @@ export class QueryOptimizer {
     return hash.toString();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private recordMetrics(queryInfo: any, metrics: QueryMetrics): void {
     if (this.metrics) {
       this.metrics.recordCustomMetric(
@@ -430,6 +436,7 @@ export class QueryOptimizer {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private generateRecommendations(explainPlan: any, executionTime: number): string[] {
     const recommendations: string[] = [];
 

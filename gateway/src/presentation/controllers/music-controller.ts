@@ -15,6 +15,7 @@ import { subscriptionMiddleware } from '../../middleware/subscription-middleware
 export class MusicController {
 
   constructor(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly eventBus: any, // RedisEventBus
     private readonly uiBuilder: MusicUIBuilder,
     private readonly responseHandler: InteractionResponseHandler,
@@ -128,7 +129,7 @@ export class MusicController {
       } else {
         await interaction.reply({ content: `🎵 ${audioServiceType} command sent...`, flags: MessageFlags.Ephemeral });
       }
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to process command.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -163,7 +164,7 @@ export class MusicController {
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `🔊 Setting volume to ${volume}%...`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to set volume.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -189,7 +190,7 @@ export class MusicController {
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `🔁 Setting loop mode to: ${mode || 'cycle'}...`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to set loop mode.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -261,6 +262,7 @@ export class MusicController {
       logger.info({ guildId: interaction.guildId, commandType }, 'DEBUG: Starting music command processing');
 
       // Get user's voice channel
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const member = interaction.member as any;
       const voiceChannel = member?.voice?.channel;
 
@@ -426,7 +428,7 @@ export class MusicController {
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `🗑️ Removing track at position ${index}...`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to remove track.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -450,7 +452,7 @@ export class MusicController {
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `↕️ Moving track from position ${from} to ${to}...`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to move track.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -475,7 +477,7 @@ export class MusicController {
 
       await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
       await interaction.reply({ content: `⏩ Seeking to ${seconds} seconds...`, flags: MessageFlags.Ephemeral });
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to seek.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -490,7 +492,7 @@ export class MusicController {
 
     try {
       switch (subcommand) {
-        case 'button-feedback':
+        case 'button-feedback': {
           const enabled = interaction.options.getBoolean('enabled', true);
           const commandData = {
             type: 'SET_GUILD_SETTING',
@@ -507,8 +509,9 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
-        case 'dj-role':
+        case 'dj-role': {
           const role = interaction.options.getRole('role', true);
           const djCommandData = {
             type: 'SET_GUILD_SETTING',
@@ -525,8 +528,9 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
-        case 'djonly-mode':
+        case 'djonly-mode': {
           const djOnlyEnabled = interaction.options.getBoolean('enabled', true);
           const djOnlyCommandData = {
             type: 'SET_GUILD_SETTING',
@@ -543,8 +547,9 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
-        case 'voteskip-enabled':
+        case 'voteskip-enabled': {
           const voteSkipEnabled = interaction.options.getBoolean('enabled', true);
           const voteSkipEnabledCommandData = {
             type: 'SET_GUILD_SETTING',
@@ -561,8 +566,9 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
-        case 'voteskip-threshold':
+        case 'voteskip-threshold': {
           const threshold = interaction.options.getNumber('threshold', true);
           // Convert percentage (1-100) to decimal (0.01-1.0)
           const thresholdDecimal = threshold / 100;
@@ -582,8 +588,9 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
-        case 'autoplay':
+        case 'autoplay': {
           const autoplayMode = interaction.options.getString('mode', true);
           const autoplayCommandData = {
             type: 'SET_GUILD_SETTING',
@@ -600,11 +607,12 @@ export class MusicController {
             flags: MessageFlags.Ephemeral
           });
           break;
+        }
 
         default:
           await interaction.reply({ content: '❌ Unknown settings subcommand.', flags: MessageFlags.Ephemeral });
       }
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to update settings.', flags: MessageFlags.Ephemeral });
     }
   }
@@ -676,7 +684,7 @@ export class MusicController {
           flags: MessageFlags.Ephemeral
         });
       }
-    } catch (error) {
+    } catch {
       await interaction.reply({ content: '❌ Failed to update autoplay settings.', flags: MessageFlags.Ephemeral });
     }
   }

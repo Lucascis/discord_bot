@@ -20,14 +20,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
 
-    "baseUrl": "./src",
-    "paths": {
-      "@discord-bot/config": ["../packages/config/src/index.ts"],
-      "@discord-bot/database": ["../packages/database/src/index.ts"],
-      "@discord-bot/logger": ["../packages/logger/src/index.ts"],
-      "@discord-bot/subscription": ["../packages/subscription/src/index.ts"]
-    },
-
     // Output
     "outDir": "dist",
     "rootDir": "src",

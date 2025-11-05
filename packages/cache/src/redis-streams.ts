@@ -206,6 +206,7 @@ export class RedisStreamsManager {
   /**
    * Get stream information for monitoring
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getStreamInfo(streamName: string): Promise<any> {
     if (!this.isConnected) {
       throw new Error('Redis Streams client not connected');
@@ -222,6 +223,7 @@ export class RedisStreamsManager {
   /**
    * Get consumer group information for monitoring
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getGroupInfo(streamName: string): Promise<any> {
     if (!this.isConnected) {
       throw new Error('Redis Streams client not connected');
@@ -238,6 +240,7 @@ export class RedisStreamsManager {
   /**
    * Get pending messages for a consumer group
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getPendingMessages(streamName: string, groupName: string): Promise<any> {
     if (!this.isConnected) {
       throw new Error('Redis Streams client not connected');
@@ -337,6 +340,7 @@ export class RedisStreamsManager {
   /**
    * Get consumer group information for monitoring
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getConsumerGroupInfo(streamName: string, groupName: string): Promise<any> {
     if (!this.isConnected) {
       throw new Error('Redis Streams client not connected');
@@ -344,6 +348,7 @@ export class RedisStreamsManager {
 
     try {
       const groups = await this.client.xInfoGroups(streamName);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return groups.find((group: any) => group.name === groupName) || null;
     } catch (error) {
       logger.debug({ error, streamName, groupName }, 'Failed to get consumer group info - group may not exist');

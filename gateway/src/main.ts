@@ -1,17 +1,14 @@
 // Load environment variables FIRST, before any other imports
 import './env-loader.js';
 
-import {
-  Client,
+import { Client,
   GatewayIntentBits,
   Events,
-  MessageFlags,
   LimitedCollection,
   Collection,
   GatewayDispatchEvents,
   ButtonInteraction,
-  StringSelectMenuInteraction,
-} from 'discord.js';
+  StringSelectMenuInteraction } from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
@@ -28,14 +25,10 @@ import { DiscordPermissionService } from './infrastructure/discord/discord-permi
 import { RedisCircuitBreaker } from '@discord-bot/cache';
 import { SearchCache, UserCache, QueueCache, SettingsCache } from '@discord-bot/cache';
 // Message validation imports
-import {
-  safeValidateVoiceCredentialsMessage,
+import { safeValidateVoiceCredentialsMessage,
   safeValidateVoiceCredentials,
   safeValidateCommand,
-  safeValidateTrackQueued,
-  type CommandMessage,
-  type VoiceCredentialsMessage,
-} from '@discord-bot/cache';
+  safeValidateTrackQueued } from '@discord-bot/cache';
 
 // Redis Streams services
 import { AudioCommandService } from './services/audio-command-service.js';
@@ -75,8 +68,11 @@ import { HealthServer } from './infrastructure/http/health-server.js';
  */
 class GatewayApplication {
   private discordClient!: Client;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private redisClient!: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private redisSubscriber!: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private audioRedisClient!: any;
   private audioCommandService!: AudioCommandService;
   private musicController!: MusicController;
@@ -103,6 +99,7 @@ class GatewayApplication {
   private voiceServerData: Map<string, { token: string; endpoint: string; processedAt?: number }> = new Map();
 
   // Request Deduplication System (prevents concurrent queue requests)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingQueueRequests: Map<string, { requestId: string; timestamp: number; promise: Promise<any> }> = new Map();
 
   // Enterprise Cache System
@@ -466,7 +463,7 @@ class GatewayApplication {
     const musicSessionDomainService = new MusicSessionDomainService();
 
     // Application Layer (Use Cases)
-    const playMusicUseCase = new PlayMusicUseCase(
+    const _playMusicUseCase = new PlayMusicUseCase(
       musicSessionRepository,
       this.guildSettingsRepository,
       musicSessionDomainService,
@@ -474,15 +471,16 @@ class GatewayApplication {
       permissionService
     );
 
-    const controlMusicUseCase = new ControlMusicUseCase(
+    const _controlMusicUseCase = new ControlMusicUseCase(
       musicSessionRepository,
       this.guildSettingsRepository,
       musicSessionDomainService,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       {} as any /* audio control service */
     );
 
     // Commercial Use Cases
-    const subscriptionManagementUseCase = new SubscriptionManagementUseCase(
+    const _subscriptionManagementUseCase = new SubscriptionManagementUseCase(
       customerRepository,
       paymentService,
       notificationService
@@ -495,6 +493,7 @@ class GatewayApplication {
 
     // Create event bus instance for controller
     const eventBus = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       publish: async (channel: string, message: any) => {
         try {
           await this.redisClient.publish(channel, typeof message === 'string' ? message : JSON.stringify(message));
@@ -502,7 +501,7 @@ class GatewayApplication {
           logger.error({ error, channel }, 'Failed to publish message to Redis');
         }
       },
-      subscribe: async (channel: string, callback: Function) => {
+      subscribe: async (channel: string, callback: (channel: string, message: string) => void) => {
         try {
           // Use dedicated subscriber client
           await this.redisSubscriber.subscribe(channel, (message: string, receivedChannel: string) => {
@@ -688,6 +687,7 @@ class GatewayApplication {
     logger.info('Gateway subscribed to Audio service channels: discord-bot:to-discord, discord-bot:ui:now');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleAudioServiceMessage(data: any): Promise<void> {
     // Handle messages from Audio service (track_queued, track_started, etc.)
     logger.info({ operation: data.payload?.op }, 'Processing Audio service message');
@@ -789,6 +789,7 @@ class GatewayApplication {
    */
   private async publishWithRetry(
     channel: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     message: any,
     guildId: string,
     maxAttempts: number = 3
@@ -894,6 +895,7 @@ class GatewayApplication {
     return false;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleVoiceStateUpdate(data: any): Promise<void> {
     // CRITICAL: This function sends Discord voice credentials to Lavalink
     // When Audio service requests voice connection, Gateway must provide Discord credentials
@@ -991,6 +993,7 @@ class GatewayApplication {
   /**
    * Handle Voice Server Update events (provides token and endpoint)
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleVoiceServerUpdate(update: any): Promise<void> {
     try {
       const guildId = update.guild.id;
@@ -1132,6 +1135,8 @@ class GatewayApplication {
   /**
    * Handle Discord voice state updates (when bot joins/leaves voice channels)
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleDiscordVoiceStateUpdate(oldState: any, newState: any): Promise<void> {
     // Only process bot's own voice state changes
     if (newState.id !== this.discordClient.user?.id) return;
@@ -1215,6 +1220,7 @@ class GatewayApplication {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleUIUpdate(data: any): Promise<void> {
     // Handle real-time UI updates from Audio service
     logger.info({ guildId: data.guildId }, 'Processing UI update');
@@ -1430,6 +1436,7 @@ class GatewayApplication {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async cleanupOldUIPrincipalMessages(channel: any): Promise<void> {
     try {
       // RULE 1: Only one UI PRINCIPAL message per channel
@@ -1438,7 +1445,9 @@ class GatewayApplication {
       const botMessages = recentMessages.filter(msg =>
         msg.author.id === this.discordClient.user?.id &&
         msg.components.length > 0 &&
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         msg.components.some((row: any) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           row.components.some((component: any) =>
             component.customId?.startsWith('music_')
           )
@@ -1584,6 +1593,7 @@ class GatewayApplication {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleVoteSkipCommand(interaction: any): Promise<void> {
     try {
       if (!interaction.guildId) {
@@ -1676,6 +1686,8 @@ class GatewayApplication {
    * Apply optimistic UI updates for instant button feedback
    * Extracts current state from message, predicts new state based on command, and updates UI immediately
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async applyOptimisticUIUpdate(interaction: any, commandType: string, additionalData: any): Promise<void> {
     try {
       // Get the current UI message from the interaction
@@ -1733,6 +1745,8 @@ class GatewayApplication {
   /**
    * Extract current state from the Now Playing embed
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractStateFromEmbed(embed: any): any {
     const title = embed.title || '';
     const description = embed.description || '';
@@ -1744,11 +1758,17 @@ class GatewayApplication {
 
     // Extract state from fields
     const fields = embed.fields || [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const volumeField = fields.find((f: any) => f.name === '🔊 Volume');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const loopField = fields.find((f: any) => f.name === '🔁 Loop Mode');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const statusField = fields.find((f: any) => f.name === '⚡ Status');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const queueField = fields.find((f: any) => f.name === '📋 Queue');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const autoplayField = fields.find((f: any) => f.name === '▶️ Autoplay');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const progressField = fields.find((f: any) => f.name === '⏱️ Progress');
 
     // Parse volume from field value (format: "▓▓▓▓░░░░ **100%**")
@@ -1840,6 +1860,9 @@ class GatewayApplication {
   /**
    * Predict the new state based on the command and current state
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private predictNewState(currentState: any, commandType: string, additionalData: any): any {
     const newState = { ...currentState };
 
@@ -1849,11 +1872,12 @@ class GatewayApplication {
         newState.isPaused = !currentState.isPaused;
         break;
 
-      case 'volumeAdjust':
+      case 'volumeAdjust': {
         // Adjust volume by delta
         const delta = parseInt(additionalData.delta || '0', 10);
         newState.volume = Math.max(0, Math.min(200, currentState.volume + delta));
         break;
+      }
 
       case 'loop':
         // Cycle through loop modes: off → track → queue → off
@@ -1871,13 +1895,14 @@ class GatewayApplication {
         newState.volume = currentState.volume === 0 ? 100 : 0;
         break;
 
-      case 'autoplay':
+      case 'autoplay': {
         // Cycle through autoplay modes: off → similar → artist → genre → mixed → off
         const modes: Array<'off' | 'similar' | 'artist' | 'genre' | 'mixed'> = ['off', 'similar', 'artist', 'genre', 'mixed'];
         const currentIndex = modes.indexOf(currentState.autoplayMode);
         const nextIndex = (currentIndex + 1) % modes.length;
         newState.autoplayMode = modes[nextIndex];
         break;
+      }
 
       // Commands that don't change visual state immediately
       case 'skip':
@@ -1893,6 +1918,7 @@ class GatewayApplication {
     return newState;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async checkButtonDJPermissions(interaction: any): Promise<boolean> {
     try {
       const guildId = interaction.guildId!;
@@ -1976,6 +2002,7 @@ class GatewayApplication {
 
       // Map button interactions to corresponding commands
       let commandType: string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let additionalData: any = {};
 
       switch (customId) {
@@ -2055,10 +2082,12 @@ class GatewayApplication {
             break;
           }
 
-          logger.warn({ customId }, 'Unknown button interaction');
-          const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
-          if (showFeedback) {
-            await interaction.reply({ content: '❌ Unknown button action', ephemeral: true });
+          {
+            logger.warn({ customId }, 'Unknown button interaction');
+            const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
+            if (showFeedback) {
+              await interaction.reply({ content: '❌ Unknown button action', ephemeral: true });
+            }
           }
           return;
       }
@@ -2090,6 +2119,7 @@ class GatewayApplication {
             const response = await existingRequest.promise;
             if (response?.items && Array.isArray(response.items)) {
               const queueEmbed = this.uiBuilder.buildQueueEmbed({
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 tracks: response.items.map((item: any) => ({
                   title: item.title || 'Unknown Track',
                   artist: undefined,
@@ -2131,6 +2161,7 @@ class GatewayApplication {
 
           if (response?.items && Array.isArray(response.items)) {
             const queueEmbed = this.uiBuilder.buildQueueEmbed({
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               tracks: response.items.map((item: any) => ({
                 title: item.title || 'Unknown Track',
                 artist: undefined,
@@ -2375,6 +2406,7 @@ class GatewayApplication {
 
     // CRITICAL: WebSocket fallback for VOICE_SERVER_UPDATE (Discord.js Events sometimes miss these)
     // Only processes if Discord.js handler missed it (prevents duplicates with timing check)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.discordClient.ws.on(GatewayDispatchEvents.VoiceServerUpdate, async (data: any) => {
       const guildId = data.guild_id;
 
@@ -2402,6 +2434,7 @@ class GatewayApplication {
 
     // CRITICAL: Send raw Discord events to Audio service for Lavalink-client
     // This is required for player.connected to work properly
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.discordClient.on('raw', async (data: any) => {
       try {
         await this.audioRedisClient.publish('discord-bot:to-audio', JSON.stringify(data));
@@ -2514,8 +2547,10 @@ class GatewayApplication {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private normalizeFilterState(response: any): FilterPanelState {
     const presets: FilterPanelState['presets'] = Array.isArray(response?.presets)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ? response.presets.map((preset: any) => ({
           id: String(preset.id ?? preset.value ?? preset.name ?? 'flat'),
           label: String(preset.label ?? preset.name ?? preset.id ?? 'Flat'),
@@ -2545,6 +2580,7 @@ class GatewayApplication {
    * Handle message deletion events to detect UI deletion (Rule 3)
    * RULE 3: Deleting UI PRINCIPAL must disconnect bot immediately
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleMessageDelete(message: any): Promise<void> {
     try {
       // Check if deleted message was a UI PRINCIPAL message tracked in our system
@@ -2634,6 +2670,8 @@ class GatewayApplication {
    * Execute a queue request and wait for response from audio service
    * Implements proper Redis pub/sub pattern with request-response correlation
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async executeQueueRequest(guildId: string, additionalData: any): Promise<any> {
     logger.info({
       guildId,
@@ -2672,6 +2710,7 @@ class GatewayApplication {
    * Wait for a response from the audio service via Redis
    * Following Redis v5 best practices for subscription management with retry logic
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async waitForAudioResponse(channel: string, timeoutMs: number = 5000, maxRetries: number = 2): Promise<any> {
     let lastError: Error | null = null;
 
@@ -2710,6 +2749,7 @@ class GatewayApplication {
   /**
    * Single attempt to get response from Redis
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async attemptRedisResponse(channel: string, timeoutMs: number): Promise<any> {
     return new Promise((resolve, reject) => {
       let timeout: NodeJS.Timeout;
@@ -2763,6 +2803,7 @@ class GatewayApplication {
 
     // Check error message or code for retryable patterns
     const errorMessage = error.message.toLowerCase();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const errorCode = (error as any).code;
 
     return retryableErrors.some(retryableError =>

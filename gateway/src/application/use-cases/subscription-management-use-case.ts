@@ -1,6 +1,5 @@
-import { Customer, CustomerStatus } from '../../domain/entities/customer.js';
-import { SubscriptionPlan, PlanType } from '../../domain/entities/subscription-plan.js';
-import { GuildId } from '../../domain/value-objects/guild-id.js';
+import { Customer } from '../../domain/entities/customer.js';
+import { SubscriptionPlan, PlanType, PlanLimits } from '../../domain/entities/subscription-plan.js';
 
 /**
  * Subscription Management Use Case - Commercial Feature
@@ -248,7 +247,7 @@ export class SubscriptionManagementUseCase {
     isActive: boolean;
     isOnTrial: boolean;
     daysUntilExpiration: number;
-    limits: any;
+    limits: PlanLimits;
   }> {
     const customer = await this.customerRepository.findByGuildId(guildId);
 

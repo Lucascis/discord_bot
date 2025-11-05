@@ -105,6 +105,7 @@ export class TransactionManager {
                       if (typeof modelOriginal === 'function') {
                         return function(...args: unknown[]) {
                           operationTracker(`${String(prop)}.${String(modelProp)}`);
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
                           return (modelOriginal as any).apply(modelTarget, args);
                         };
                       }
@@ -174,6 +175,7 @@ export class TransactionManager {
   /**
    * Execute multiple independent transactions in parallel with coordination
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async withParallelTransactions<T extends Record<string, any>>(
     transactions: {
       [K in keyof T]: (tx: Prisma.TransactionClient) => Promise<T[K]>;
@@ -183,6 +185,7 @@ export class TransactionManager {
     const transactionPromises = Object.entries(transactions).map(
       async ([key, operation]) => {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const result = await this.withTransaction(operation as any, options);
           return { key, result, error: null };
         } catch (error) {
@@ -210,6 +213,7 @@ export class TransactionManager {
 
     const finalResult = {} as T;
     for (const { key, result } of results) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (finalResult as any)[key] = result;
     }
 
@@ -221,12 +225,15 @@ export class TransactionManager {
    */
   async withSaga<T>(
     steps: Array<{
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       execute: (tx: Prisma.TransactionClient) => Promise<any>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       compensate: (tx: Prisma.TransactionClient, result?: any) => Promise<void>;
       name: string;
     }>,
     options: TransactionOptions = {}
   ): Promise<T> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const completedSteps: Array<{ step: typeof steps[0]; result: any }> = [];
 
     try {

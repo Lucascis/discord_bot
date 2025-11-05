@@ -4,10 +4,16 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { AudioQuality, AudioQualityLevel, AudioQualityConfig } from '../../domain/value-objects/audio-quality.js';
+import { AudioQualityLevel } from '../../domain/value-objects/audio-quality.js';
 import { AudioQualityTier } from '../../domain/entities/audio-quality-tier.js';
 import { FeatureSubscription } from '../../domain/entities/feature-subscription.js';
-import { AudioQualityDomainService, QualityRecommendation, AdaptiveQualityResult, PerformanceMetrics } from '../../domain/services/audio-quality-domain-service.js';
+import { AudioQualityDomainService } from '../../domain/services/audio-quality-domain-service.js';
+
+interface QualityAdjustment {
+  action: string;
+  previousValue: AudioQualityLevel | number | string;
+  newValue: AudioQualityLevel | number | string;
+}
 
 export interface AudioQualityRepository {
   findByGuild(guildId: string): Promise<AudioQualityTier | null>;
@@ -220,7 +226,7 @@ export class AudioQualityManagementUseCase {
           error: 'Failed to apply quality settings'
         };
       }
-    } catch (error) {
+    } catch {
       return {
         success: false,
         error: 'Quality management error'
@@ -296,7 +302,7 @@ export class AudioQualityManagementUseCase {
         success: true,
         adaptiveConfig
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
         error: 'Failed to enable adaptive streaming'
@@ -314,7 +320,7 @@ export class AudioQualityManagementUseCase {
   ): Promise<{
     currentPerformance: StreamingPerformance;
     recommendations: string[];
-    autoAdjustments: { action: string; previousValue: any; newValue: any }[];
+    autoAdjustments: QualityAdjustment[];
   }> {
     // Measure current performance
     const performance = await this.audioStreamingService.measurePerformance(sessionId);
@@ -331,13 +337,13 @@ export class AudioQualityManagementUseCase {
       userTier
     );
 
-    const autoAdjustments: { action: string; previousValue: any; newValue: any }[] = [];
+    const autoAdjustments: QualityAdjustment[] = [];
 
     // Apply automatic adjustments if needed
     if (optimization.shouldAutoAdjust) {
       for (const adjustment of optimization.adjustments) {
         switch (adjustment.type) {
-          case 'quality_downgrade':
+          case 'quality_downgrade': {
             const currentQuality = await this.audioStreamingService.getCurrentQuality(sessionId);
             await this.audioStreamingService.setQuality(sessionId, adjustment.newQuality);
             autoAdjustments.push({
@@ -346,6 +352,7 @@ export class AudioQualityManagementUseCase {
               newValue: adjustment.newQuality
             });
             break;
+          }
 
           case 'buffer_adjustment':
             // This would adjust buffer settings if the streaming service supports it
@@ -371,7 +378,7 @@ export class AudioQualityManagementUseCase {
    */
   async getQualityAnalytics(
     timeframe: 'day' | 'week' | 'month',
-    guildId?: string
+    _guildId?: string
   ): Promise<{
     statistics: QualityStatistics;
     trends: { metric: string; change: number; direction: 'up' | 'down' | 'stable' }[];

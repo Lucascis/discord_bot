@@ -4,10 +4,8 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { FeatureGate, FeatureName, FeatureRestriction } from '../value-objects/feature-gate.js';
-import { PremiumFeature, FeatureCategory } from '../entities/premium-feature.js';
+import { FeatureGate, FeatureName } from '../value-objects/feature-gate.js';
 import { FeatureSubscription } from '../entities/feature-subscription.js';
-import { Customer } from '../entities/customer.js';
 
 export interface AccessCheckResult {
   readonly hasAccess: boolean;

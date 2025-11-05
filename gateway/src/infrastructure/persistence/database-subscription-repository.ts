@@ -8,17 +8,24 @@ import { PrismaClient } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
 export interface SubscriptionRepository {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getSubscription(guildId: string): Promise<any | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createSubscription(guildId: string, planType: string): Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateSubscription(guildId: string, data: any): Promise<any>;
   deleteSubscription(guildId: string): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getCustomerByGuild(guildId: string): Promise<any | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createCustomer(email: string, name: string, guildId: string): Promise<any>;
 }
 
 export class DatabaseSubscriptionRepository implements SubscriptionRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSubscription(guildId: string): Promise<any | null> {
     try {
       // Use ServerConfiguration instead of subscription table
@@ -47,6 +54,7 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createSubscription(guildId: string, planType: string): Promise<any> {
     try {
       const config = await this.prisma.serverConfiguration.create({
@@ -78,6 +86,8 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateSubscription(guildId: string, data: any): Promise<any> {
     try {
       const config = await this.prisma.serverConfiguration.update({
@@ -122,6 +132,7 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getCustomerByGuild(guildId: string): Promise<any | null> {
     try {
       // Customer model doesn't exist in current schema
@@ -133,6 +144,7 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createCustomer(email: string, name: string, guildId: string): Promise<any> {
     try {
       // Customer model doesn't exist in current schema

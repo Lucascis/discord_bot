@@ -1,4 +1,6 @@
 import pino from 'pino';
+import { loadavg } from 'os';
+import { PerformanceObserver } from 'perf_hooks';
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 import { EventEmitter } from 'events';
@@ -87,7 +89,7 @@ export class PerformanceMonitor extends EventEmitter {
 
   collectMetrics(): PerformanceMetrics {
     const memUsage = process.memoryUsage();
-    const loadAverage = process.platform !== 'win32' ? require('os').loadavg() : [0, 0, 0];
+    const loadAverage = process.platform !== 'win32' ? loadavg() : [0, 0, 0];
 
     // Calculate event loop lag
     const currentTime = process.hrtime.bigint();
@@ -128,7 +130,7 @@ export class PerformanceMonitor extends EventEmitter {
 
     // Hook into GC events if available
     try {
-      const { PerformanceObserver } = require('perf_hooks');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const obs = new PerformanceObserver((list: any) => {
         const entries = list.getEntries();
         for (const entry of entries) {
@@ -196,6 +198,7 @@ export class PerformanceMonitor extends EventEmitter {
   }
 
   // Connection pool monitoring
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static createConnectionPoolMonitor(poolName: string, getPoolStats: () => any): void {
     setInterval(() => {
       const stats = getPoolStats();

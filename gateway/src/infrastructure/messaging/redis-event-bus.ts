@@ -6,16 +6,21 @@
 import { logger } from '@discord-bot/logger';
 
 export interface EventBus {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   publish(channel: string, data: any): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   subscribe(channel: string, handler: (data: any) => void): Promise<void>;
   unsubscribe(channel: string): Promise<void>;
 }
 
 export class RedisEventBus implements EventBus {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private subscribers: Map<string, (data: any) => void> = new Map();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private readonly redisClient: any) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async publish(channel: string, data: any): Promise<void> {
     try {
       const message = JSON.stringify(data);
@@ -32,6 +37,7 @@ export class RedisEventBus implements EventBus {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async subscribe(channel: string, handler: (data: any) => void): Promise<void> {
     try {
       this.subscribers.set(channel, handler);

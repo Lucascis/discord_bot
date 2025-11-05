@@ -3,7 +3,7 @@
  * Defines all features available in the subscription system
  */
 
-import { SubscriptionTier, FeatureCategory, FeatureType } from '@prisma/client';
+import { SubscriptionTier, FeatureCategory, } from '@prisma/client';
 import type { FeatureFlag } from './types.js';
 
 /**

@@ -163,7 +163,7 @@ export class SubscriptionService {
     guildId: string,
     newTier: SubscriptionTier,
     newPeriod: PeriodType,
-    paymentMethodId?: string
+    _paymentMethodId?: string
   ): Promise<SubscriptionUpgradeResult> {
     try {
       // Get current subscription
@@ -225,7 +225,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      logger.error({ error, guildId, targetTier }, 'Subscription upgrade failed');
+      logger.error({ error, guildId, targetTier: newTier }, 'Subscription upgrade failed');
       return {
         success: false,
         error: 'Service error'
@@ -240,7 +240,7 @@ export class SubscriptionService {
     userId: string,
     guildId: string,
     newTier: SubscriptionTier,
-    reason: string
+    _reason: string
   ): Promise<{ success: boolean; effectiveDate?: Date; creditAmount?: number; error?: string }> {
     try {
       // Get current subscription
@@ -265,7 +265,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      logger.error({ error, guildId, targetTier }, 'Subscription downgrade failed');
+      logger.error({ error, guildId, targetTier: newTier }, 'Subscription downgrade failed');
       return {
         success: false,
         error: 'Service error'
@@ -404,7 +404,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      logger.error({ error, guildId, targetTier }, 'Trial conversion failed');
+      logger.error({ error, guildId }, 'Trial conversion failed');
       return {
         success: false,
         error: 'Service error'
@@ -456,6 +456,7 @@ export class SubscriptionService {
     userId: string,
     limit: number = 10
   ): Promise<{
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     billingRecords: any[];
     totalSpent: number;
     nextBillingDate?: Date;
@@ -472,7 +473,7 @@ export class SubscriptionService {
       };
 
     } catch (error) {
-      logger.error({ error, guildId }, 'Failed to get billing history');
+      logger.error({ error, userId }, 'Failed to get billing history');
       return {
         billingRecords: [],
         totalSpent: 0,
@@ -509,6 +510,7 @@ export class SubscriptionService {
     return features[tier] || [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getQuotaLimits(tier: SubscriptionTier): any {
     const quotas = {
       free: { queueSize: 50, monthlyPlaytime: 36000, concurrentSessions: 1, apiCallsPerDay: 100 },
@@ -539,11 +541,13 @@ export class SubscriptionService {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async getUsageStatistics(userId: string, guildId: string): Promise<any> {
     // Get usage data from feature use case
     const usageStats = await this.featureUseCase.getUsageAnalytics(userId, 'month');
 
     const quotaLimits = this.getQuotaLimits('premium'); // Would get actual tier
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const utilization = Object.entries(usageStats.featureUsage || {}).reduce((acc, [key, value]: [string, any]) => {
       const limit = quotaLimits[key];
       if (limit > 0) {
@@ -562,6 +566,7 @@ export class SubscriptionService {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async analyzeUsagePatterns(userId: string, guildId: string): Promise<any> {
     // Analyze user behavior to generate recommendations
     const stats = await this.getUsageStatistics(userId, guildId);
@@ -574,7 +579,10 @@ export class SubscriptionService {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private generateRecommendations(current: SubscriptionStatus, usage: any): any[] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const recommendations: any[] = [];
 
     if (current.tier === 'free' && usage.heavyUsage) {

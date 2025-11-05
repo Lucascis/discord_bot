@@ -57,6 +57,34 @@ COPY . .
 # Generate Prisma client (required for runtime)
 RUN pnpm --filter @discord-bot/database prisma:generate
 
+# Build all TypeScript packages (in correct dependency order)
+# Base packages (no dependencies)
+RUN pnpm --filter @discord-bot/config build || true
+
+# Core packages (depend on config)
+RUN pnpm --filter @discord-bot/logger build || true
+RUN pnpm --filter @discord-bot/database build || true
+
+# Infrastructure packages
+RUN pnpm --filter @discord-bot/cache build || true
+RUN pnpm --filter @discord-bot/event-store build || true
+
+# Advanced packages (depend on infrastructure)
+RUN pnpm --filter @discord-bot/cqrs build || true
+RUN pnpm --filter @discord-bot/observability build || true
+RUN pnpm --filter @discord-bot/performance build || true
+
+# Feature packages (depend on core + infrastructure)
+RUN pnpm --filter @discord-bot/subscription build || true
+RUN pnpm --filter @discord-bot/cluster build || true
+RUN pnpm --filter @discord-bot/commands build || true
+
+# Build services
+RUN pnpm --filter gateway build || true
+RUN pnpm --filter audio build || true
+RUN pnpm --filter api build || true
+RUN pnpm --filter worker build || true
+
 # Production stage - final optimized image
 FROM node:22-alpine AS production
 

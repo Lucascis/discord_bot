@@ -123,6 +123,7 @@ export class SettingsService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateSetting(guildId: string, setting: string, value: any): Promise<void> {
     try {
       // Validate the setting is allowed to be updated
@@ -144,6 +145,7 @@ export class SettingsService {
         }
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateData: any = {
         [setting]: value,
         updatedAt: new Date()

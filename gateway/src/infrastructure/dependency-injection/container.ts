@@ -3,7 +3,7 @@
  * Provides centralized dependency management for the gateway service
  */
 
-import { Client } from 'discord.js';
+import { Client, GatewayIntentBits } from 'discord.js';
 import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
@@ -30,6 +30,7 @@ import { DiscordPermissionService } from '../discord/discord-permission-service.
 export interface DIContainer {
   // Infrastructure
   discordClient: Client;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   redisClient: any;
   eventBus: RedisEventBus;
 
@@ -143,7 +144,7 @@ export class EnterpriseContainer {
         'GuildVoiceStates',
         'GuildMessages',
         'MessageContent'
-      ].map(intent => require('discord.js').GatewayIntentBits[intent]),
+      ].map(intent => GatewayIntentBits[intent as keyof typeof GatewayIntentBits]),
 
       // Enterprise optimizations
       sweepers: {
@@ -153,6 +154,7 @@ export class EnterpriseContainer {
         },
         users: {
           interval: 3600,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           filter: () => (user: any) => user.bot
         }
       },
@@ -172,6 +174,7 @@ export class EnterpriseContainer {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async createRedisClient(): Promise<any> {
     const redisConfig = {
       url: process.env.REDIS_URL || 'redis://localhost:6379',

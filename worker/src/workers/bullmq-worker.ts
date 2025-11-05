@@ -94,10 +94,12 @@ function createWorkerOptions(queueName: string): WorkerOptions {
 /**
  * Generic job processor wrapper with metrics
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-unsafe-function-type
 function createJobProcessor<T extends JobData>(
   queueName: string,
   processors: Record<string, Function>
 ) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (job: any): Promise<JobResult> => {
     const startTime = Date.now();
     const jobType = job.data.subtype || job.data.type;

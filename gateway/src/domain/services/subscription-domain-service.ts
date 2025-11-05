@@ -6,7 +6,6 @@
 import { SubscriptionTier } from '@discord-bot/config';
 import { Customer } from '../entities/customer.js';
 import { FeatureSubscription, SubscriptionStatus } from '../entities/feature-subscription.js';
-import { PaymentPlan } from '../entities/payment-plan.js';
 import { BillingPeriod, PeriodType } from '../value-objects/billing-period.js';
 import { FeatureName } from '../value-objects/feature-gate.js';
 import { UsageQuota, QuotaType } from '../value-objects/usage-quota.js';

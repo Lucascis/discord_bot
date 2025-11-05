@@ -124,6 +124,7 @@ export abstract class EventSourcedRepository<T extends EventSourcedAggregateRoot
       if (snapshot) {
         // Restore from snapshot
         aggregate = this.createFromSnapshot(aggregateId, snapshot.data);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (aggregate as any)._version = snapshot.version;
         fromVersion = snapshot.version;
       } else {

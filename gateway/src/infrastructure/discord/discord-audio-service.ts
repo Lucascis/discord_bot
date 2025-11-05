@@ -7,6 +7,7 @@ import { logger } from '@discord-bot/logger';
  */
 export class DiscordAudioService implements AudioService {
   private readonly pendingRequests: Map<string, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolve: (value: any) => void;
     reject: (error: Error) => void;
     timeoutId: NodeJS.Timeout;
@@ -35,7 +36,9 @@ export class DiscordAudioService implements AudioService {
 
       if (cached && typeof cached === 'object' && 'tracks' in cached && 'source' in cached) {
         return {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           tracks: (cached as any).tracks,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           source: (cached as any).source as 'youtube' | 'spotify' | 'other',
           latency: Date.now() - startTime,
           cached: true
@@ -254,6 +257,7 @@ export class DiscordAudioService implements AudioService {
 
   private async waitForSearchResponse(requestId: string, timeoutMs: number = 10000): Promise<{ tracks: Array<{ title: string; uri: string; duration: number }>; source: string }> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await this.waitForResponse<any>(requestId, timeoutMs);
 
       // Handle search response format from audio service
@@ -287,6 +291,7 @@ export class DiscordAudioService implements AudioService {
 
   private async waitForPlayResponse(requestId: string, timeoutMs: number = 5000): Promise<{ success: boolean; message: string; queuePosition?: number }> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await this.waitForResponse<any>(requestId, timeoutMs);
 
       if (response.ok === true) {
@@ -318,6 +323,7 @@ export class DiscordAudioService implements AudioService {
 
   private async waitForStatusResponse(requestId: string, timeoutMs: number = 3000): Promise<{ connected: boolean }> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await this.waitForResponse<any>(requestId, timeoutMs);
 
       return {
@@ -333,6 +339,7 @@ export class DiscordAudioService implements AudioService {
 
   private async waitForConnectResponse(requestId: string, timeoutMs: number = 5000): Promise<{ success: boolean; message?: string }> {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await this.waitForResponse<any>(requestId, timeoutMs);
 
       if (response.ok === true || response.success === true) {

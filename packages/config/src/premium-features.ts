@@ -1,12 +1,15 @@
 import { z } from 'zod';
 
 export const SubscriptionTier = z.enum(['free', 'basic', 'premium', 'enterprise']);
+// eslint-disable-next-line no-redeclare
 export type SubscriptionTier = z.infer<typeof SubscriptionTier>;
 
 export const AudioQuality = z.enum(['standard', 'high', 'lossless', 'spatial']);
+// eslint-disable-next-line no-redeclare
 export type AudioQuality = z.infer<typeof AudioQuality>;
 
 export const PeriodType = z.enum(['monthly', 'quarterly', 'yearly', 'lifetime', 'trial']);
+// eslint-disable-next-line no-redeclare
 export type PeriodType = z.infer<typeof PeriodType>;
 
 export const FeatureName = z.enum([
@@ -33,6 +36,7 @@ export const FeatureName = z.enum([
   'webhook_integration',
   'custom_integrations'
 ]);
+// eslint-disable-next-line no-redeclare
 export type FeatureName = z.infer<typeof FeatureName>;
 
 // Premium feature configuration with defaults per tier

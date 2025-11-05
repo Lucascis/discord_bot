@@ -30,59 +30,59 @@ export class MercadoPagoProcessor implements IPaymentProcessor {
     throw new Error('Mercado Pago integration is not implemented yet');
   }
 
-  async createCustomer(guildId: string, email?: string): Promise<PaymentCustomer> {
+  async createCustomer(_guildId: string, _email?: string): Promise<PaymentCustomer> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
   async createCheckoutSession(
-    guildId: string,
-    tier: SubscriptionTier,
-    billingCycle: BillingCycle,
-    successUrl: string,
-    cancelUrl: string
+    _guildId: string,
+    _tier: SubscriptionTier,
+    _billingCycle: BillingCycle,
+    _successUrl: string,
+    _cancelUrl: string
   ): Promise<CheckoutSession> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
   async cancelSubscription(
-    subscriptionId: string,
-    immediately?: boolean
+    _subscriptionId: string,
+    _immediately?: boolean
   ): Promise<PaymentSubscription> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
-  async resumeSubscription(subscriptionId: string): Promise<PaymentSubscription> {
+  async resumeSubscription(_subscriptionId: string): Promise<PaymentSubscription> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
-  async getSubscription(subscriptionId: string): Promise<PaymentSubscription> {
+  async getSubscription(_subscriptionId: string): Promise<PaymentSubscription> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
   async createBillingPortalSession(
-    customerId: string,
-    returnUrl: string
+    _customerId: string,
+    _returnUrl: string
   ): Promise<{ url: string }> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
   verifyWebhookSignature(
-    payload: string | Buffer,
-    signature: string,
-    secret: string
+    _payload: string | Buffer,
+    _signature: string,
+    _secret: string
   ): boolean {
     throw new Error('Mercado Pago integration not implemented');
   }
 
   async parseWebhookEvent(
-    payload: string | Buffer,
-    signature: string,
-    secret: string
+    _payload: string | Buffer,
+    _signature: string,
+    _secret: string
   ): Promise<WebhookEvent> {
     throw new Error('Mercado Pago integration not implemented');
   }
 
-  getPriceId(tier: SubscriptionTier, billingCycle: BillingCycle): string | null {
+  getPriceId(_tier: SubscriptionTier, _billingCycle: BillingCycle): string | null {
     throw new Error('Mercado Pago integration not implemented');
   }
 }

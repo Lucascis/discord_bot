@@ -166,7 +166,7 @@ export class Customer {
     this._usage.lastActivity = new Date();
   }
 
-  suspendSubscription(reason: string): void {
+  suspendSubscription(_reason: string): void {
     this._status = 'suspended';
     this._usage.lastActivity = new Date();
     // Note: In a real system, you'd store the suspension reason
@@ -231,7 +231,8 @@ export class Customer {
     id: string;
     email: string;
     name: string;
-    subscriptionPlan: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    subscriptionPlan: any; // Returns plain object, not SubscriptionPlan class
     status: CustomerStatus;
     guildIds: string[];
     usage: CustomerUsage;

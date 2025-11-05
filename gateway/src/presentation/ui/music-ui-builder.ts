@@ -411,6 +411,7 @@ export class MusicUIBuilder {
     return [row1, row2, row3];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   buildFilterPanel(state: FilterPanelState): { embeds: EmbedBuilder[]; components: Array<ActionRowBuilder<any>> } {
     const embed = new EmbedBuilder()
       .setTitle('🎚️ Audio Filters')

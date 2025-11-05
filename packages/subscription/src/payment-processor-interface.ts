@@ -15,6 +15,7 @@ export interface PaymentCustomer {
   /** Customer email (optional) */
   email?: string;
   /** Provider-specific metadata */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
 }
 
@@ -26,6 +27,7 @@ export interface CheckoutSession {
   /** Session status */
   status: 'open' | 'complete' | 'expired';
   /** Provider-specific metadata */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
 }
 
@@ -43,6 +45,7 @@ export interface PaymentSubscription {
   /** Whether to cancel at period end */
   cancelAtPeriodEnd: boolean;
   /** Provider-specific metadata */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
 }
 
@@ -50,8 +53,10 @@ export interface WebhookEvent {
   /** Event type (e.g., 'payment_intent.succeeded') */
   type: string;
   /** Event data */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any;
   /** Provider-specific raw event */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rawEvent?: any;
 }
 

@@ -4,6 +4,7 @@ import { logger } from '../logger/console-logger.js';
 
 export class HealthServer {
   private app: Express;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private server: any;
   private healthChecker: ApplicationHealthChecker;
 

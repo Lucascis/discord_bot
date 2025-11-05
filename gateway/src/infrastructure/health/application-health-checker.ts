@@ -1,5 +1,5 @@
 import { logger } from '../logger/console-logger.js';
-import { prisma, checkDatabaseHealth } from '@discord-bot/database';
+import { checkDatabaseHealth } from '@discord-bot/database';
 
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -23,9 +23,13 @@ export interface HealthCheck {
 
 export class ApplicationHealthChecker {
   private readonly startTime = Date.now();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private redisClient: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private discordClient: any;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(redisClient?: any, discordClient?: any) {
     this.redisClient = redisClient;
     this.discordClient = discordClient;

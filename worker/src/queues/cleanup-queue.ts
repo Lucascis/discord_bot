@@ -11,8 +11,7 @@ import { logger } from '@discord-bot/logger';
 import type {
   CleanupJobData,
   QueueConfig,
-  ScheduleOptions,
-  JobPriorityType
+  ScheduleOptions
 } from '../types/jobs.js';
 import { JobPriority, QueueName } from '../types/jobs.js';
 
@@ -51,15 +50,19 @@ export const cleanupQueue = new Queue<CleanupJobData>('cleanup', queueOptions);
 
 /**
  * Queue event listeners
+ * eslint-disable-next-line @typescript-eslint/no-explicit-any -- BullMQ event types are dynamic
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 cleanupQueue.on('error' as any, (error: any) => {
   logger.error({ error: error.message, queue: 'cleanup' }, 'Cleanup queue error');
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 cleanupQueue.on('waiting' as any, (jobId: any) => {
   logger.debug({ jobId, queue: 'cleanup' }, 'Cleanup job waiting');
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 cleanupQueue.on('active' as any, (job: any) => {
   logger.info({
     jobId: job.id,
@@ -69,6 +72,7 @@ cleanupQueue.on('active' as any, (job: any) => {
   }, 'Cleanup job started');
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 cleanupQueue.on('completed' as any, (job: any, result: any) => {
   logger.info({
     jobId: job.id,
@@ -79,6 +83,7 @@ cleanupQueue.on('completed' as any, (job: any, result: any) => {
   }, 'Cleanup job completed');
 });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 cleanupQueue.on('failed' as any, (job: any, error: any) => {
   logger.error({
     jobId: job?.id,

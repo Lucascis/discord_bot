@@ -188,6 +188,198 @@ Este script:
 - ✅ Verifica health endpoints
 - ✅ Muestra logs
 
+---
+
+## 💻 Desarrollo Local en Windows
+
+Si quieres desarrollar y modificar el código en Windows con soporte completo de VSCode IntelliSense:
+
+### Requisitos Adicionales
+- **Node.js 18+** ([Descargar](https://nodejs.org/))
+- **pnpm** (Instalador: `npm install -g pnpm`)
+- **VSCode** (opcional pero recomendado)
+
+### Setup de Desarrollo
+
+```powershell
+# 1. Instalar dependencias
+pnpm install
+
+# 2. Compilar todos los paquetes (IMPORTANTE)
+pnpm build
+
+# 3. Abrir en VSCode
+code .
+```
+
+### ¿Por qué necesito compilar?
+
+TypeScript necesita archivos `.d.ts` compilados para que VSCode pueda:
+- ✅ Mostrar autocomplete correcto
+- ✅ Detectar errores en tiempo real
+- ✅ Permitir "Go to Definition"
+- ✅ Ofrecer refactoring automático
+
+### Workflow de Desarrollo
+
+```powershell
+# Después de modificar código en un paquete
+pnpm --filter @discord-bot/<paquete> build
+
+# Ejemplos:
+pnpm --filter @discord-bot/logger build
+pnpm --filter @discord-bot/database build
+
+# Compilar todo
+pnpm build
+
+# Type checking (sin compilar)
+pnpm typecheck
+
+# Linting
+pnpm lint
+
+# Tests
+pnpm test
+```
+
+### Correr Servicios Durante Desarrollo
+
+Opción 1: **Docker (Recomendado)**
+```powershell
+# Los servicios corren en Docker, tú editas código localmente
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f gateway audio
+
+# Después de cambios, rebuild
+docker-compose build gateway
+docker-compose restart gateway
+```
+
+Opción 2: **Local (Avanzado)**
+```powershell
+# Iniciar solo infraestructura en Docker
+docker-compose up -d postgres redis lavalink
+
+# Correr servicios localmente (requiere todas las dependencias)
+pnpm dev           # Gateway en dev mode
+pnpm dev:all       # Todos los servicios en paralelo
+```
+
+### Estructura del Proyecto
+
+```
+discord_bot/
+├── packages/           # Paquetes compartidos
+│   ├── config/        # Configuración con Zod
+│   ├── database/      # Prisma ORM
+│   ├── logger/        # Logging con Sentry
+│   ├── cache/         # Redis client
+│   ├── commands/      # Sistema de comandos
+│   ├── subscription/  # Sistema de premium
+│   └── ...
+├── gateway/           # Servicio principal de Discord
+├── audio/             # Servicio de música y Lavalink
+├── api/               # API REST
+├── worker/            # Trabajos en background
+└── tsconfig.json      # Configuración de paths para VSCode
+```
+
+### Configuración TypeScript en Windows
+
+El proyecto está configurado para desarrollo multi-plataforma:
+
+**`tsconfig.json` (root)** - Para VSCode IntelliSense
+```json
+{
+  "paths": {
+    "@discord-bot/logger": ["./packages/logger/src"],
+    // ... todos los paquetes apuntan a src
+  }
+}
+```
+
+**`gateway/tsconfig.json`** - Para compilación
+```json
+{
+  // Sin paths - usa archivos compilados de node_modules
+}
+```
+
+Esta configuración permite que:
+- ✅ VSCode resuelva tipos desde código fuente (mejor experiencia)
+- ✅ Compilación use archivos .d.ts de node_modules (correcto para build)
+
+### Solución de Problemas de Desarrollo
+
+#### "Cannot find module '@discord-bot/xxx'"
+
+**En VSCode:**
+1. Asegúrate que ejecutaste `pnpm build`
+2. Recarga VSCode: `Ctrl+Shift+P` → "Reload Window"
+
+**En compilación:**
+```powershell
+# Limpiar y recompilar todo
+pnpm -r clean     # Si existe script clean
+pnpm build
+```
+
+#### Errores de TypeScript al compilar
+
+```powershell
+# Ver errores detallados
+pnpm typecheck
+
+# Compilar paquete específico con logs
+pnpm --filter @discord-bot/<paquete> build
+```
+
+#### VSCode lento o no responde
+
+El proyecto tiene 15 paquetes + 4 servicios. Para mejor rendimiento:
+1. Abrir solo la carpeta que necesitas editar
+2. Excluir `dist/` y `node_modules/` de búsqueda
+3. Usar búsqueda global solo cuando sea necesario
+
+### Scripts Útiles
+
+```powershell
+# Build
+pnpm build                                    # Todo
+pnpm --filter gateway build                   # Solo gateway
+pnpm --filter @discord-bot/logger build       # Solo logger
+
+# Desarrollo
+pnpm dev                                      # Gateway en dev
+pnpm dev:all                                  # Todos los servicios
+
+# Calidad de código
+pnpm typecheck                                # Verificar tipos
+pnpm lint                                     # ESLint
+pnpm lint --fix                               # Auto-fix
+
+# Testing
+pnpm test                                     # Todos los tests
+pnpm test:coverage                            # Con coverage
+pnpm --filter api test                        # Tests de API
+
+# Base de datos
+pnpm db:migrate                               # Migrar DB
+pnpm db:seed                                  # Seed inicial
+pnpm --filter @discord-bot/database prisma:generate  # Regenerar client
+```
+
+### Documentación de Desarrollo
+
+- **Arquitectura**: [CLAUDE.md](CLAUDE.md) - Guía completa para Claude Code
+- **Correcciones TypeScript**: [FIXES_APPLIED.md](FIXES_APPLIED.md) - Soluciones a problemas comunes
+- **Estado del Proyecto**: [PROJECT_STATUS.md](PROJECT_STATUS.md) - Métricas y status
+
+---
+
 ## 📚 Documentación Adicional
 
 - **Guía Completa**: Ver [DOCKER_README.md](./DOCKER_README.md)

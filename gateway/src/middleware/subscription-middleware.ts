@@ -338,6 +338,7 @@ export class SubscriptionMiddleware {
   private async sendUsageLimitReached(
     interaction: CommandInteraction,
     limitType: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     limitCheck: any,
     currentTier: SubscriptionTier
   ): Promise<void> {
@@ -422,9 +423,11 @@ export const subscriptionMiddleware = new SubscriptionMiddleware();
  * ```
  */
 export function RequireFeature(featureKey: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     descriptor.value = async function (interaction: CommandInteraction, ...args: any[]) {
       const result = await subscriptionMiddleware.checkFeatureAccess(interaction, featureKey);
 
@@ -451,9 +454,11 @@ export function RequireFeature(featureKey: string) {
  * ```
  */
 export function RequireLimit(limitType: string, incrementAmount: number = 1) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     descriptor.value = async function (interaction: CommandInteraction, ...args: any[]) {
       const result = await subscriptionMiddleware.checkUsageLimit(
         interaction,
@@ -484,9 +489,11 @@ export function RequireLimit(limitType: string, incrementAmount: number = 1) {
  * ```
  */
 export function RequireSubscription(options: SubscriptionCheckOptions) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     descriptor.value = async function (interaction: CommandInteraction, ...args: any[]) {
       const result = await subscriptionMiddleware.checkSubscription(interaction, options);
 

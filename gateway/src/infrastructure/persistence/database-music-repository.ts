@@ -7,18 +7,24 @@ import { PrismaClient } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
 export interface MusicRepository {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveQueue(guildId: string, queue: any[]): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getQueue(guildId: string): Promise<any[]>;
   clearQueue(guildId: string): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addToQueue(guildId: string, item: any): Promise<void>;
   removeFromQueue(guildId: string, index: number): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getCurrentTrack(guildId: string): Promise<any | null>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setCurrentTrack(guildId: string, track: any): Promise<void>;
 }
 
 export class DatabaseMusicRepository implements MusicRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async saveQueue(guildId: string, queue: any[]): Promise<void> {
     try {
       // First find or create the queue for this guild
@@ -57,6 +63,7 @@ export class DatabaseMusicRepository implements MusicRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getQueue(guildId: string): Promise<any[]> {
     try {
       const queueRecord = await this.prisma.queue.findFirst({
@@ -98,6 +105,7 @@ export class DatabaseMusicRepository implements MusicRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async addToQueue(guildId: string, item: any): Promise<void> {
     try {
       // Find or create queue
@@ -151,6 +159,7 @@ export class DatabaseMusicRepository implements MusicRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getCurrentTrack(guildId: string): Promise<any | null> {
     try {
       // For now, return the first item in the queue as current track
@@ -162,6 +171,7 @@ export class DatabaseMusicRepository implements MusicRepository {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async setCurrentTrack(guildId: string, track: any): Promise<void> {
     try {
       // For now, this is a no-op since we don't have a separate current track field

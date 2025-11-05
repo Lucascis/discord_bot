@@ -56,9 +56,11 @@ export const FeatureName = z.enum([
   'webhook_integrations',
   'api_access'
 ]);
+// eslint-disable-next-line no-redeclare
 export type FeatureName = z.infer<typeof FeatureName>;
 
 export const PeriodType = z.enum(['monthly', 'quarterly', 'yearly', 'lifetime', 'trial']);
+// eslint-disable-next-line no-redeclare
 export type PeriodType = z.infer<typeof PeriodType>;
 
 // Feature category groupings
@@ -70,10 +72,12 @@ export const FeatureCategory = z.enum([
   'queue_management',
   'premium_perks'
 ]);
+// eslint-disable-next-line no-redeclare
 export type FeatureCategory = z.infer<typeof FeatureCategory>;
 
 // Quality levels with technical specifications
 export const AudioQualityLevel = z.enum(['standard', 'high', 'lossless', 'spatial']);
+// eslint-disable-next-line no-redeclare
 export type AudioQualityLevel = z.infer<typeof AudioQualityLevel>;
 
 // Enhanced feature configuration with new architecture
@@ -391,6 +395,7 @@ export function getQuotaForTier(tier: SubscriptionTier, quota: keyof typeof ENHA
   return ENHANCED_PREMIUM_FEATURES[tier].quotas[quota];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getRestrictionForTier(tier: SubscriptionTier, restriction: keyof typeof ENHANCED_PREMIUM_FEATURES.free.restrictions): any {
   return ENHANCED_PREMIUM_FEATURES[tier].restrictions[restriction];
 }

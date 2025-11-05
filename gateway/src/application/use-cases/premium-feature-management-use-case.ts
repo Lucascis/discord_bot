@@ -4,10 +4,10 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { FeatureName, FeatureGate } from '../../domain/value-objects/feature-gate.js';
+import { FeatureName } from '../../domain/value-objects/feature-gate.js';
 import { PremiumFeature, FeatureCategory } from '../../domain/entities/premium-feature.js';
 import { FeatureSubscription } from '../../domain/entities/feature-subscription.js';
-import { UsageAnalytics, UsageEvent, UsageEventType } from '../../domain/entities/usage-analytics';
+import { UsageAnalytics, UsageEvent } from '../../domain/entities/usage-analytics';
 import { FeatureAccessDomainService, AccessCheckResult } from '../../domain/services/feature-access-domain-service.js';
 
 // Re-export for external use
@@ -58,7 +58,7 @@ export class PremiumFeatureManagementUseCase {
     userId: string,
     guildId: string,
     featureName: FeatureName,
-    requestContext?: { userAgent?: string; connectionType?: string }
+    _requestContext?: { userAgent?: string; connectionType?: string }
   ): Promise<AccessCheckResult & { accessGranted: boolean }> {
     const subscription = await this.subscriptionRepository.findByUserAndGuild(userId, guildId);
     const userTier = subscription?.tier || 'free';
@@ -148,7 +148,7 @@ export class PremiumFeatureManagementUseCase {
       }
 
       return { success: true };
-    } catch (error) {
+    } catch {
       return { success: false };
     }
   }
@@ -431,7 +431,7 @@ export class PremiumFeatureManagementUseCase {
     return recommendations;
   }
 
-  private async analyzeTrends(userId: string, guildId: string): Promise<{
+  private async analyzeTrends(_userId: string, _guildId: string): Promise<{
     growing: FeatureName[];
     declining: FeatureName[];
   }> {
@@ -490,7 +490,7 @@ export class PremiumFeatureManagementUseCase {
    */
   async checkFeatureRollout(
     featureName: FeatureName,
-    userId: string
+    _userId: string
   ): Promise<{
     isRolledOut: boolean;
     rolloutPercentage: number;
@@ -540,8 +540,8 @@ export class PremiumFeatureManagementUseCase {
    * Get usage analytics
    */
   async getUsageAnalytics(
-    userId: string,
-    timeframe: 'day' | 'week' | 'month'
+    _userId: string,
+    _timeframe: 'day' | 'week' | 'month'
   ): Promise<{
     totalUsage: number;
     featureUsage: Record<string, number>;

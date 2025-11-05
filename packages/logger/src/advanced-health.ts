@@ -405,7 +405,7 @@ export class AdvancedHealthMonitor {
           };
         }, 10000); // Every 10 seconds
       }
-    } catch (error) {
+    } catch {
       logger.debug('GC monitoring not available');
     }
   }

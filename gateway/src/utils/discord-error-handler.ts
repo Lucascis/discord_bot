@@ -223,7 +223,9 @@ export class DiscordErrorHandler {
    * Enhanced message update with automatic fallback to new message creation
    */
   static async updateMessage(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     updateOperation: () => Promise<any>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createNewOperation: () => Promise<any>,
     context: {
       operationName: string;
@@ -231,6 +233,7 @@ export class DiscordErrorHandler {
       guildId?: string;
       messageId?: string;
     }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     return this.executeWithFallback(
       updateOperation,
@@ -249,13 +252,16 @@ export class DiscordErrorHandler {
    * Enhanced interaction reply with comprehensive error handling
    */
   static async replyToInteraction(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     interaction: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     replyData: any,
     context: {
       operationName: string;
       interactionId?: string;
       guildId?: string;
     }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     // CRITICAL: Log all Discord API calls to expose silent failures
     logger.info({
@@ -350,7 +356,9 @@ export class DiscordErrorHandler {
   private static extractRetryAfter(error: DiscordAPIError): number {
     try {
       // Discord API error might include retry-after in headers or response
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const retryAfter = (error as any).headers?.['retry-after'] ||
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         (error as any).headers?.['Retry-After'] ||
                         1; // Default 1 second
       return typeof retryAfter === 'string' ? parseFloat(retryAfter) : retryAfter;

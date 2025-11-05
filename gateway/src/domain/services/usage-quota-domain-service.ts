@@ -4,8 +4,7 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { UsageQuota, QuotaType, QuotaLimit, QuotaUsage } from '../value-objects/usage-quota.js';
-import { FeatureSubscription } from '../entities/feature-subscription.js';
+import { UsageQuota, QuotaType } from '../value-objects/usage-quota.js';
 
 export interface QuotaValidationResult {
   readonly isValid: boolean;

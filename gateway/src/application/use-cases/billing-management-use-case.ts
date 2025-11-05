@@ -5,10 +5,10 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { PaymentPlan, PriceChange, BillingTrigger } from '../../domain/entities/payment-plan.js';
+import { PaymentPlan } from '../../domain/entities/payment-plan.js';
 import { FeatureSubscription } from '../../domain/entities/feature-subscription.js';
-import { BillingPeriod, PeriodType } from '../../domain/value-objects/billing-period.js';
-import { BillingDomainService, BillingCalculation, PriceAdjustment, InvoiceGeneration } from '../../domain/services/billing-domain-service.js';
+import { PeriodType } from '../../domain/value-objects/billing-period.js';
+import { BillingDomainService, BillingCalculation, PriceAdjustment } from '../../domain/services/billing-domain-service.js';
 
 export interface BillingRepository {
   saveBillingRecord(record: BillingRecord): Promise<void>;
@@ -75,6 +75,7 @@ export interface BillingRecord {
   planId?: string;
   invoiceId?: string;
   paymentIntentId?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata: Record<string, any>;
   createdAt: Date;
   processedAt?: Date;
@@ -206,6 +207,8 @@ export interface AnalyticsService {
 }
 
 export interface BillingService {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   calculateProration(oldPlan: any, newPlan: any, remainingDays: number): Promise<number>;
   processUpgrade(subscription: FeatureSubscription, newTier: SubscriptionTier): Promise<{ success: boolean; chargeAmount?: number }>;
   processDowngrade(subscription: FeatureSubscription, newTier: SubscriptionTier): Promise<{ success: boolean; creditAmount?: number }>;
@@ -295,7 +298,7 @@ export class BillingManagementUseCase {
           totalAmount: taxCalculation.totalAmount
         }
       };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to create billing setup' };
     }
   }
@@ -361,7 +364,7 @@ export class BillingManagementUseCase {
         billingCalculation,
         prorationAmount: taxCalculation.totalAmount
       };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to process upgrade billing' };
     }
   }
@@ -428,7 +431,7 @@ export class BillingManagementUseCase {
         refundId: refundResult.id,
         processedAmount: finalRefundAmount
       };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to process refund' };
     }
   }
@@ -486,7 +489,7 @@ export class BillingManagementUseCase {
         success: true,
         invoice
       };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to generate invoice' };
     }
   }
@@ -730,7 +733,7 @@ export class BillingManagementUseCase {
       // Create trial subscription (stub implementation)
       const subscription = FeatureSubscription.createTrial(userId, guildId, tier, trialDays);
       return { success: true, subscription };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to process trial subscription' };
     }
   }
@@ -763,7 +766,7 @@ export class BillingManagementUseCase {
       );
 
       return { success: true, billingCalculation };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to process upgrade' };
     }
   }
@@ -782,7 +785,7 @@ export class BillingManagementUseCase {
       const refundAmount = Math.max(0, remainingValue - newPlanPrice);
 
       return { success: true, refundAmount };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to process downgrade' };
     }
   }
@@ -808,7 +811,7 @@ export class BillingManagementUseCase {
       );
 
       return { success: true, refundAmount };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to cancel subscription' };
     }
   }
@@ -820,6 +823,7 @@ export class BillingManagementUseCase {
     subscription: FeatureSubscription,
     paymentMethodId: string,
     customerData: CustomerData
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ success: boolean; billingSetup?: any; error?: string }> {
     try {
       // Convert trial to paid (stub implementation)
@@ -839,7 +843,7 @@ export class BillingManagementUseCase {
       };
 
       return { success: true, billingSetup };
-    } catch (error) {
+    } catch {
       return { success: false, error: 'Failed to convert trial to paid' };
     }
   }

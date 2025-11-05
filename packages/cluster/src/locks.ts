@@ -107,7 +107,7 @@ export class DistributedLockManager {
 
       lockAcquisitionsTotal.labels(resource, 'success').inc();
       return lock;
-    } catch (error) {
+    } catch {
       lockAcquisitionsTotal.labels(resource, 'failure').inc();
       return null;
     }

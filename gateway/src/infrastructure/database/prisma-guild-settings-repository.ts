@@ -139,7 +139,7 @@ export class PrismaGuildSettingsRepository implements GuildSettingsRepository {
             allowExplicit: true
           });
           settings.push(guildSettings);
-        } catch (error) {
+        } catch {
           // Skip invalid guild IDs
           continue;
         }

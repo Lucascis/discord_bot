@@ -6,7 +6,7 @@
 import { SubscriptionTier } from '@discord-bot/config';
 import { FeatureName } from '../value-objects/feature-gate.js';
 import { UsageQuota, QuotaType } from '../value-objects/usage-quota.js';
-import { BillingPeriod, PeriodType } from '../value-objects/billing-period.js';
+import { BillingPeriod } from '../value-objects/billing-period.js';
 
 export type SubscriptionStatus = 'active' | 'suspended' | 'cancelled' | 'expired' | 'trial' | 'pending';
 
@@ -234,7 +234,7 @@ export class FeatureSubscription {
   /**
    * Suspend subscription
    */
-  suspend(until: Date, reason: string): void {
+  suspend(until: Date, _reason: string): void {
     this._status = 'suspended';
     this._suspendedUntil = until;
     this._updatedAt = new Date();
@@ -451,7 +451,10 @@ export class FeatureSubscription {
 
   /**
    * Get payment plan (stub)
+   * @returns Payment plan object (stub implementation, not actual PaymentPlan class)
+   * @note Using any here because this is a stub that returns a plain object, not PaymentPlan class
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   get paymentPlan(): any {
     return {
       id: `plan_${this._tier}_${this._billingPeriod.type}`,
@@ -508,6 +511,7 @@ export class FeatureSubscription {
     guildId: string;
     tier: SubscriptionTier;
     status: SubscriptionStatus;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     billingPeriod: any;
     isActive: boolean;
     isOnTrial: boolean;

@@ -19,7 +19,9 @@ export interface QueueCommandResult {
  */
 export class AudioCommandService {
   private responseHandlers = new Map<string, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolve: (value: any) => void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     reject: (reason: any) => void;
     timeout: NodeJS.Timeout;
   }>();
@@ -127,6 +129,7 @@ export class AudioCommandService {
     guildId: string,
     channelId?: string,
     options: AudioCommandOptions = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     const { timeout = 5000, retries = 2 } = options;
     const requestId = `nowplaying_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -150,6 +153,7 @@ export class AudioCommandService {
     guildId: string,
     additionalData: Record<string, string> = {},
     options: AudioCommandOptions = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     const { timeout = 10000, retries = 2 } = options;
     const requestId = `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -196,6 +200,7 @@ export class AudioCommandService {
     commandData: StreamCommandData,
     timeout: number,
     maxRetries: number
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     let lastError: Error | null = null;
 
@@ -237,6 +242,7 @@ export class AudioCommandService {
   /**
    * Single attempt to send command and receive response
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async attemptCommand(commandData: StreamCommandData, timeout: number): Promise<any> {
     return new Promise((resolve, reject) => {
       // Set up timeout

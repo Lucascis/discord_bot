@@ -131,7 +131,7 @@ export class PremiumFeature {
   /**
    * Record feature usage
    */
-  recordUsage(userId: string): void {
+  recordUsage(_userId: string): void {
     this._metrics = {
       ...this._metrics,
       totalUsage: this._metrics.totalUsage + 1,

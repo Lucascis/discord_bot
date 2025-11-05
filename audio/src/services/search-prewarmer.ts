@@ -112,7 +112,7 @@ export class SearchPrewarmer {
         // Clean up the dummy player
         try {
           dummyPlayer.destroy();
-        } catch (error) {
+        } catch {
           // Ignore cleanup errors
         }
       }
@@ -218,7 +218,7 @@ export class SearchPrewarmer {
     } finally {
       try {
         dummyPlayer.destroy();
-      } catch (error) {
+      } catch {
         // Ignore cleanup errors
       }
     }

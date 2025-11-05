@@ -3,21 +3,17 @@
  * Core service for managing subscriptions, features, and usage limits
  */
 
-import {
-  PrismaClient,
+import { PrismaClient,
   SubscriptionTier,
   SubscriptionStatus,
   BillingCycle,
-  ResetPeriod,
-  Prisma,
-} from '@prisma/client';
+  Prisma } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import { getPlanByTier, needsUpgrade, getNextTier } from './plans.js';
 import { tierHasFeature, getFeatureValue } from './features.js';
 import { getLimitValue, isWithinLimit, calculateLimitPercentage, calculateNextReset, getLimit } from './limits.js';
 import type {
   SubscriptionInfo,
-  SubscriptionCheckResult,
   FeatureAccessResult,
   UsageLimitResult,
   CreateSubscriptionParams,
@@ -414,6 +410,7 @@ export class SubscriptionService {
   /**
    * Check if subscription is active
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private isSubscriptionActive(subscription: any): boolean {
     if (subscription.status === SubscriptionStatus.CANCELED) return false;
     if (subscription.status === SubscriptionStatus.UNPAID) return false;
@@ -504,6 +501,7 @@ export class SubscriptionService {
    */
   private async logSubscriptionEvent(
     guildId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     eventType: any,
     tier?: SubscriptionTier,
     previousTier?: SubscriptionTier

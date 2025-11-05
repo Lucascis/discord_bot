@@ -29,6 +29,7 @@ export interface QueryMetadata {
  * Query Handler Interface
  * Defines contract for query handlers
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface IQueryHandler<TQuery extends IQuery = IQuery, TResult = any> {
   readonly queryType: string;
   handle(query: TQuery): Promise<TResult>;
@@ -37,6 +38,7 @@ export interface IQueryHandler<TQuery extends IQuery = IQuery, TResult = any> {
 /**
  * Query Execution Result
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface QueryResult<T = any> {
   success: boolean;
   data?: T;
@@ -110,6 +112,7 @@ export class QueryBus implements IQueryBus {
         guildId: query.metadata.guildId
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await handler.handle(query as any);
 
       const executionTime = Date.now() - startTime;

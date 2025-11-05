@@ -4,7 +4,7 @@
  */
 
 import { SubscriptionTier } from '@discord-bot/config';
-import { BillingPeriod, PeriodType } from '../value-objects/billing-period.js';
+import { BillingPeriod } from '../value-objects/billing-period.js';
 
 export type PaymentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded';
 export type PaymentMethod = 'credit_card' | 'paypal' | 'bank_transfer' | 'crypto' | 'voucher' | 'trial';
@@ -24,7 +24,7 @@ export interface BillingTrigger {
   readonly description: string;
   readonly scheduledAt: Date;
   readonly executedAt?: Date;
-  readonly metadata?: Record<string, any>;
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface PaymentSchedule {
@@ -333,7 +333,7 @@ export class PaymentPlan {
   /**
    * Cancel payment plan
    */
-  cancel(reason: string = 'User requested'): void {
+  cancel(_reason: string = 'User requested'): void {
     this._isActive = false;
     this._status = 'cancelled';
     this._cancelledAt = new Date();
@@ -518,6 +518,7 @@ export class PaymentPlan {
     id: string;
     name: string;
     tier: SubscriptionTier;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     billingPeriod: any;
     pricing: PlanPricing;
     status: PaymentStatus;
@@ -529,6 +530,7 @@ export class PaymentPlan {
     daysUntilNextPayment: number;
     totalAmountPaid: number;
     failedPaymentsCount: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     paymentStatistics: any;
     createdAt: Date;
     updatedAt: Date;

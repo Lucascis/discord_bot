@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
 import { prisma } from '@discord-bot/database';
 import Redis from 'ioredis';
-import { mockGuild, mockGuildSettings, validGuildId, validApiKey } from './fixtures.js';
+import { mockGuild, validGuildId, validApiKey } from './fixtures.js';
 
 describe('Guild Routes', () => {
   let mockRedis: any;

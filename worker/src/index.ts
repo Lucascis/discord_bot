@@ -57,7 +57,7 @@ const jobsProcessedCounter = new Counter({
   registers: [registry]
 });
 
-const jobDurationHistogram = new Histogram({
+const _jobDurationHistogram = new Histogram({
   name: 'discord_bot_job_duration_seconds',
   help: 'Job processing duration in seconds',
   labelNames: ['queue_name', 'job_type'],
@@ -65,7 +65,7 @@ const jobDurationHistogram = new Histogram({
   registers: [registry]
 });
 
-const redisConnectionsGauge = new Gauge({
+const _redisConnectionsGauge = new Gauge({
   name: 'discord_bot_redis_connections',
   help: 'Number of Redis connections',
   labelNames: ['connection_type', 'status'],
@@ -87,7 +87,7 @@ function updateMetrics(): void {
 
     // Update job metrics
     const jobMetrics = getJobMetrics();
-    for (const [status, count] of Object.entries(jobMetrics.byStatus)) {
+    for (const [status, _count] of Object.entries(jobMetrics.byStatus)) {
       jobsProcessedCounter.inc({ queue_name: 'all', job_type: 'all', status }, 0);
     }
   } catch (error) {

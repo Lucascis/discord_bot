@@ -109,13 +109,13 @@ const audioMetrics = mockAudioMetrics;
 const mockRedis = {
   connected: true,
   status: 'ready',
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   get: async (_key: string) => null,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   set: async (_key: string, _value: string, ..._args: unknown[]) => 'OK',
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   del: async (_key: string) => 1,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   publish: async (_channel: string, _message: string) => 1,
   disconnect: async () => {},
   quit: async () => {}

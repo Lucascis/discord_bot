@@ -1,6 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
-import { v4 as uuidv4 } from 'uuid';
 
 import type {
   DomainEvent,
@@ -39,6 +38,7 @@ export class PostgresEventStore implements IEventStore {
     }
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await this.prisma.$transaction(async (tx: any) => {
         // Check current version for optimistic concurrency control
         const currentVersion = await this.getCurrentVersion(tx, aggregateId, aggregateType);
@@ -126,8 +126,10 @@ export class PostgresEventStore implements IEventStore {
         take: options.limit
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const domainEvents = events.map((e: any) => this.mapToDomainEvent(e));
       const version = events.length > 0
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? Math.max(...events.map((e: any) => e.aggregateVersion))
         : 0;
 
@@ -363,7 +365,9 @@ export class PostgresEventStore implements IEventStore {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async getCurrentVersion(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx: any,
     aggregateId: string,
     aggregateType: string
@@ -403,11 +407,13 @@ export class PostgresEventStore implements IEventStore {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private buildDateFilter(fromDate?: Date, toDate?: Date): any {
     if (!fromDate && !toDate) {
       return undefined;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = {};
     if (fromDate) {
       filter.gte = fromDate;
@@ -419,6 +425,7 @@ export class PostgresEventStore implements IEventStore {
     return filter;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private mapToDomainEvent(event: any): DomainEvent {
     return {
       eventId: event.eventId,

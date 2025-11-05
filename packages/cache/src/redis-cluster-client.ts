@@ -463,7 +463,7 @@ export class RedisClusterClient {
           usedMemoryHuman: usedMemoryHumanMatch?.[1]?.trim()
         });
 
-      } catch (error) {
+      } catch {
         nodeStats.push({
           host: node.options.host || 'unknown',
           port: node.options.port || 0,

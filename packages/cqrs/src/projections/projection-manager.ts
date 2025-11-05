@@ -79,7 +79,7 @@ export class ProjectionManager {
       projectionCount: this.projections.size
     });
 
-    for (const [name, projection] of this.projections) {
+    for (const [name, _projection] of this.projections) {
       await this.start(name);
     }
   }
@@ -228,6 +228,7 @@ export class ProjectionManager {
         await projection.handle(event);
 
         // Update position after each event to ensure consistency
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const eventPosition = (event as any).globalPosition || state.lastProcessedPosition + 1;
         state.lastProcessedPosition = eventPosition;
         await projection.setLastProcessedPosition(eventPosition);

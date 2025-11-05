@@ -10,7 +10,7 @@
 
 import { logger } from '@discord-bot/logger';
 import { searchCache } from './cache.js';
-import { audioMetrics } from './metrics.js';
+import type { Player, SearchResult, UnresolvedSearchResult } from 'lavalink-client';
 
 interface PopularQuery {
   query: string;
@@ -40,7 +40,7 @@ export class SearchOptimizer {
   /**
    * Track search query for optimization
    */
-  trackSearch(query: string, source: string, responseTime: number, cached: boolean): void {
+  trackSearch(query: string, source: string, responseTime: number, _cached: boolean): void {
     const key = `${source}:${query.toLowerCase()}`;
     const existing = this.popularQueries.get(key);
 
@@ -110,7 +110,7 @@ export class SearchOptimizer {
   /**
    * Pre-warm cache with popular queries
    */
-  async warmPopularQueries(player: any): Promise<void> {
+  async warmPopularQueries(player: Player): Promise<void> {
     const trending = this.getTrendingQueries(10);
     const promises: Promise<void>[] = [];
 
@@ -137,7 +137,7 @@ export class SearchOptimizer {
   /**
    * Pre-warm cache based on time patterns
    */
-  async warmTimeBasedQueries(player: any): Promise<void> {
+  async warmTimeBasedQueries(player: Player): Promise<void> {
     const currentHour = new Date().getHours();
     const pattern = this.searchPatterns.get(currentHour);
 
@@ -174,14 +174,14 @@ export class SearchOptimizer {
   /**
    * Warm a specific query
    */
-  private async warmQuery(player: any, popular: PopularQuery): Promise<void> {
+  private async warmQuery(player: Player, popular: PopularQuery): Promise<void> {
     const key = `${popular.source}:${popular.query}`;
 
     try {
       const startTime = Date.now();
 
       // Perform the search
-      const result = await player.search(
+      const result: SearchResult | UnresolvedSearchResult = await player.search(
         { query: popular.query },
         { id: 'cache-warmer' }
       );

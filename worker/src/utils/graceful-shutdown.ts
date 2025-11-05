@@ -165,7 +165,7 @@ function handleUncaughtException(error: Error): void {
 /**
  * Handle unhandled promise rejections
  */
-function handleUnhandledRejection(reason: unknown, promise: Promise<unknown>): void {
+function handleUnhandledRejection(reason: unknown, _promise: Promise<unknown>): void {
   logger.error({
     reason: reason instanceof Error ? reason.message : String(reason),
     stack: reason instanceof Error ? reason.stack : undefined

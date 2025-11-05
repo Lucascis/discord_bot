@@ -122,6 +122,7 @@ export class PremiumService {
    */
   async getFeatureGates(guildId: string, channelId?: string): Promise<FeatureGates & {
     canUseChannel: boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     effectiveConfig: any;
   }> {
     const config = channelId
@@ -145,6 +146,7 @@ export class PremiumService {
       maxVolumeLimit: Math.min(effectiveConfig.volumeLimit, baseGates.maxVolumeLimit),
       maxQueueSize: Math.min(effectiveConfig.maxQueueSize, baseGates.maxQueueSize),
       maxSongDurationSeconds: Math.min(effectiveConfig.maxSongDuration, baseGates.maxSongDurationSeconds),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       canUseChannel: channelId ? (effectiveConfig as any).musicEnabled !== false : true,
       effectiveConfig,
     };
@@ -205,6 +207,7 @@ export class PremiumService {
   /**
    * Cache lyrics for a track
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async cacheLyrics(trackId: string, title: string, artist: string, lyrics: string, source: string, timedLyrics = false, lyricsData?: any) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Cache for 7 days

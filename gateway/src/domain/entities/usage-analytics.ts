@@ -6,7 +6,6 @@
 import { SubscriptionTier } from '@discord-bot/config';
 import { FeatureName } from '../value-objects/feature-gate.js';
 import { QuotaType } from '../value-objects/usage-quota.js';
-import { AudioQualityLevel } from '../value-objects/audio-quality.js';
 
 export type AnalyticsTimeframe = 'hour' | 'day' | 'week' | 'month' | 'year';
 export type UsageEventType = 'feature_used' | 'quota_reached' | 'upgrade' | 'downgrade' | 'cancellation' | 'trial_started' | 'trial_ended' | 'quality_changed' | 'subscription_upgraded' | 'trial_converted' | 'trial_expired';
@@ -19,6 +18,7 @@ export interface UsageEvent {
   readonly tier: SubscriptionTier;
   readonly featureName?: FeatureName;
   readonly quotaType?: QuotaType;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly metadata: Record<string, any>;
   readonly timestamp: Date;
 }
@@ -65,6 +65,7 @@ export class UsageAnalytics {
     private readonly _createdAt: Date = new Date(),
     private _updatedAt: Date = new Date(),
     private _computedAt: Date | null = null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private _trendsData: Record<string, any> = {}
   ) {
     this.validateAnalytics();
@@ -132,6 +133,7 @@ export class UsageAnalytics {
     return guildIds.size;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   get trendsData(): Record<string, any> {
     return { ...this._trendsData };
   }
@@ -588,6 +590,7 @@ export class UsageAnalytics {
     totalEvents: number,
     featureStats: Map<FeatureName, FeatureUsageStats>,
     conversionMetrics: ConversionMetrics,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     trendsData: Record<string, any>,
     createdAt: Date,
     updatedAt: Date

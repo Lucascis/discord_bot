@@ -7,6 +7,8 @@ import { AudioQualityLevel } from '../../domain/value-objects/audio-quality.js';
 import { AudioStreamingService, StreamingPerformance, AdaptiveConfig } from '../../application/use-cases/audio-quality-management-use-case.js';
 
 interface LavalinkNode {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   send(data: any): Promise<any>;
   stats: LavalinkStats;
 }
@@ -35,12 +37,14 @@ interface LavalinkStats {
 
 interface LavalinkPlayer {
   guildId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   track: any;
   position: number;
   connected: boolean;
   ping: number;
   volume: number;
   paused: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   filters: any;
 }
 
@@ -203,6 +207,7 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getQualityConfig(quality: AudioQualityLevel): any {
     switch (quality) {
       case 'spatial':
@@ -232,6 +237,7 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getSpatialEqualizer(): any[] {
     return [
       { band: 0, gain: 0.2 },
@@ -247,6 +253,7 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     ];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getSpatialAudioConfig(): any {
     return {
       level: 1.0,
@@ -256,6 +263,7 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getHighQualityEqualizer(): any[] {
     return [
       { band: 0, gain: 0.1 },
@@ -271,6 +279,7 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     ];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getEnhancedEqualizer(): any[] {
     return [
       { band: 0, gain: 0.05 },

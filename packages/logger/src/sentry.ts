@@ -17,7 +17,7 @@ async function loadSentryDependencies() {
 
     try {
       const profilingModule = await import('@sentry/profiling-node');
-      nodeProfilingIntegration = profilingModule.nodeProfilingIntegration as (() => Record<string, unknown>);
+      nodeProfilingIntegration = profilingModule.nodeProfilingIntegration as unknown as (() => Record<string, unknown>);
     } catch {
       console.warn('Sentry profiling not available, continuing without profiling');
     }
