@@ -327,7 +327,19 @@ export class PremiumController {
    * Handle /premium upgrade
    */
   private async handleUpgrade(interaction: ChatInputCommandInteraction): Promise<void> {
-    const targetTier = interaction.options.getString('tier', true) as SubscriptionTier;
+    const tierValue = interaction.options.getString('tier', true);
+
+    // Convert string to proper SubscriptionTier enum
+    const targetTier = SubscriptionTier[tierValue as keyof typeof SubscriptionTier];
+
+    if (!targetTier) {
+      await interaction.reply({
+        content: '❌ Invalid subscription tier selected.',
+        ephemeral: true,
+      });
+      return;
+    }
+
     const guildId = interaction.guildId!;
 
     if (this.isTestGuild(guildId)) {

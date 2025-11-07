@@ -248,22 +248,7 @@ const commands = [
         )
     ),
 
-  // Premium/subscription commands
-  new SlashCommandBuilder()
-    .setName('subscription')
-    .setDescription('Manage your subscription and premium features')
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('status')
-        .setDescription('Check your current subscription status')
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('upgrade')
-        .setDescription('Upgrade to premium for enhanced features')
-    ),
-
-  // Premium features management
+  // Premium features management (comprehensive subscription and features)
   new SlashCommandBuilder()
     .setName('premium')
     .setDescription('Access premium features and subscription management')
