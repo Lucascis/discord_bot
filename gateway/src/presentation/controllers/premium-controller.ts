@@ -217,6 +217,59 @@ export class PremiumController {
   }
 
   /**
+   * Handles cancel subscription button interactions.
+   */
+  public async handleCancelButton(interaction: ButtonInteraction): Promise<void> {
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      await interaction.reply({ content: 'This action is server-only.', ephemeral: true });
+      return;
+    }
+
+    const hasPermission = await this.ensureManageGuildPermissions(interaction);
+    if (!hasPermission) {
+      return;
+    }
+
+    const customId = interaction.customId;
+
+    // Handle abort - user changed their mind
+    if (customId === 'premium_cancel_abort') {
+      await interaction.update({
+        content: '✅ Subscription cancellation aborted. Your subscription remains active.',
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
+
+    // Handle confirm - proceed with cancellation
+    if (customId === 'premium_cancel_confirm') {
+      try {
+        await this.subscriptionService.cancelSubscription(guildId, 'User requested cancellation');
+
+        const subscription = await this.subscriptionService.getSubscription(guildId);
+        const endDate = subscription.currentPeriodEnd
+          ? `<t:${Math.floor(subscription.currentPeriodEnd.getTime() / 1000)}:F>`
+          : 'the end of your billing period';
+
+        await interaction.update({
+          content: `✅ **Subscription Cancelled**\n\nYour subscription has been cancelled and will remain active until ${endDate}.\n\nYou can upgrade again at any time using \`/premium plans\`.`,
+          embeds: [],
+          components: [],
+        });
+      } catch (error) {
+        logger.error('Failed to cancel subscription', { error, guildId });
+        await interaction.update({
+          content: '❌ Failed to cancel subscription. Please try again later or contact support.',
+          embeds: [],
+          components: [],
+        });
+      }
+    }
+  }
+
+  /**
    * Handle /premium status
    */
   private async handleStatus(interaction: ChatInputCommandInteraction): Promise<void> {

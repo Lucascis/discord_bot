@@ -1999,6 +1999,11 @@ class GatewayApplication {
         return;
       }
 
+      if (customId === 'premium_cancel_confirm' || customId === 'premium_cancel_abort') {
+        await this.premiumController.handleCancelButton(interaction);
+        return;
+      }
+
       if (customId === 'filters_reset') {
         const hasPermission = await this.checkButtonDJPermissions(interaction);
         if (!hasPermission) {

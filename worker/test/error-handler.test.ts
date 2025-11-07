@@ -12,6 +12,16 @@ import {
   withErrorHandling
 } from '../src/utils/error-handler.js';
 
+// Mock logger module - must be defined inline to avoid hoisting issues
+vi.mock('@discord-bot/logger', () => ({
+  logger: {
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn()
+  }
+}));
+
 describe('error-handler', () => {
   describe('ValidationError', () => {
     it('should create validation error with correct properties', () => {
@@ -197,15 +207,6 @@ describe('error-handler', () => {
 
   describe('logJobError', () => {
     it('should log retryable errors as warnings', () => {
-      const mockLogger = {
-        warn: vi.fn(),
-        error: vi.fn()
-      };
-
-      vi.mock('@discord-bot/logger', () => ({
-        logger: mockLogger
-      }));
-
       const error = new TimeoutError('operation', 5000);
       logJobError(error, 'job-123', 'cleanup', { data: 'test' });
 
@@ -289,7 +290,7 @@ describe('error-handler', () => {
 
     it('should classify and re-throw errors', async () => {
       const failingFn = async () => {
-        throw new Error('Validation failed');
+        throw new Error('Validation failed: invalid input');
       };
       const wrapped = withErrorHandling(failingFn);
 

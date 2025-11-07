@@ -316,20 +316,20 @@ async function registerCommands() {
     // Register guild commands if DISCORD_GUILD_ID is set (for development)
     if (DISCORD_GUILD_ID) {
       console.log(`\n🏠 Registering guild commands for guild: ${DISCORD_GUILD_ID}`);
-      const response = await rest.put(
+      const response = (await rest.put(
         Routes.applicationGuildCommands(DISCORD_APPLICATION_ID, DISCORD_GUILD_ID),
         { body: commandsJson }
-      ) as any[];
+      )) as unknown[];
       console.log('✅ Guild commands registered successfully!');
       console.log(`📊 Discord API returned ${response.length} registered commands`);
       console.log('💡 Guild commands appear instantly for testing');
     } else {
       // Register global commands (for production)
       console.log('\n🌍 Registering global commands...');
-      const response = await rest.put(
+      const response = (await rest.put(
         Routes.applicationCommands(DISCORD_APPLICATION_ID),
         { body: commandsJson }
-      ) as any[];
+      )) as unknown[];
       console.log('✅ Global commands registered successfully!');
       console.log(`📊 Discord API returned ${response.length} registered commands`);
       console.log('⏳ Global commands may take up to 1 hour to appear in all servers');
@@ -344,7 +344,6 @@ async function registerCommands() {
     console.log('  📊 Information: /nowplaying');
     console.log('  🎸 Autoplay: /autoplay');
     console.log('  ⚙️  Server Settings: /settings (6 subcommands)');
-    console.log('  💎 Subscription: /subscription (2 subcommands)');
     console.log('  ✨ Premium Features: /premium (7 subcommands)');
 
     console.log('\n🔗 Next steps:');
