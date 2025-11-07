@@ -508,7 +508,7 @@ export class CustomerManagementService {
       throw new Error(`Subscription ${subscriptionId} does not belong to customer ${customerId}`);
     }
 
-    const provider = this.paymentFactory.getProvider(subscription.provider as unknown);
+    const provider = this.paymentFactory.getProvider(subscription.provider as 'paypal' | 'stripe' | 'mercadopago' | 'stub');
     const providerSubscriptionId = subscription.providerSubscriptionId;
 
     // Cancel in provider
@@ -623,7 +623,7 @@ export class CustomerManagementService {
       throw new Error(`Payment ${paymentIntentId} not found for customer ${customerId}`);
     }
 
-    const provider = this.paymentFactory.getProvider(payment.provider as unknown);
+    const provider = this.paymentFactory.getProvider(payment.provider as 'paypal' | 'stripe' | 'mercadopago' | 'stub');
 
     // Create refund in provider
     const refund = await provider.createRefund({
@@ -841,18 +841,20 @@ export class CustomerManagementService {
    * Get appropriate payment provider for customer
    */
   private getProviderForCustomer(customer: unknown): IPaymentProvider {
+    const typedCustomer = customer as { stripeCustomerId?: string; mercadopagoCustomerId?: string; paypalCustomerId?: string };
+
     // If customer has Stripe ID, use Stripe
-    if (customer.stripeCustomerId) {
+    if (typedCustomer.stripeCustomerId) {
       return this.paymentFactory.getProvider('stripe');
     }
 
     // If customer has MercadoPago ID, use MercadoPago
-    if (customer.mercadopagoCustomerId) {
+    if (typedCustomer.mercadopagoCustomerId) {
       return this.paymentFactory.getProvider('mercadopago');
     }
 
     // If customer has PayPal ID, use PayPal
-    if (customer.paypalCustomerId) {
+    if (typedCustomer.paypalCustomerId) {
       return this.paymentFactory.getProvider('paypal');
     }
 
@@ -864,13 +866,15 @@ export class CustomerManagementService {
    * Get provider-specific customer ID
    */
   private getProviderCustomerId(customer: unknown, providerName: string): string | undefined {
+    const typedCustomer = customer as { stripeCustomerId?: string; mercadopagoCustomerId?: string; paypalCustomerId?: string };
+
     switch (providerName) {
       case 'stripe':
-        return customer.stripeCustomerId;
+        return typedCustomer.stripeCustomerId;
       case 'mercadopago':
-        return customer.mercadopagoCustomerId;
+        return typedCustomer.mercadopagoCustomerId;
       case 'paypal':
-        return customer.paypalCustomerId;
+        return typedCustomer.paypalCustomerId;
       default:
         return undefined;
     }

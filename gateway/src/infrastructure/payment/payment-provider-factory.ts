@@ -309,7 +309,7 @@ class PaymentTransactionContext {
  */
 export function createPaymentFactoryFromEnv(): PaymentProviderFactory {
   const config: PaymentFactoryConfig = {
-    defaultProvider: (process.env.PAYMENT_PROVIDER as unknown) || 'stub',
+    defaultProvider: (process.env.PAYMENT_PROVIDER as 'paypal' | 'stripe' | 'mercadopago' | 'stub' | undefined) || 'stub',
     providers: {},
     fallbackProvider: 'stub'
   };

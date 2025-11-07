@@ -903,9 +903,9 @@ export class StripePaymentProvider implements IPaymentProvider {
         type: stripeEvent.type,
         created: stripeEvent.created,
         data: {
-          object: this.mapWebhookObject(stripeEvent.data.object),
+          object: this.mapWebhookObject(stripeEvent.data.object) as PaymentCustomer | PaymentIntent | Subscription | RefundResult | Invoice,
         },
-        previousAttributes: stripeEvent.data.previous_attributes as unknown,
+        previousAttributes: stripeEvent.data.previous_attributes as Record<string, unknown> | undefined,
       };
     } catch {
       throw new StripeProviderError(
