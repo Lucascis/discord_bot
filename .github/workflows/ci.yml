@@ -37,15 +37,15 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm --filter @discord-bot/database prisma:generate
 
+      - name: Build all packages
+        run: pnpm build
+
       - name: TypeScript Type Checking
         run: pnpm typecheck
 
       - name: ESLint
         run: pnpm lint
         continue-on-error: true # Don't fail due to pre-existing lint issues
-
-      - name: Build all packages
-        run: pnpm build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

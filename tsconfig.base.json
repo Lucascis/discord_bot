@@ -5,7 +5,7 @@
     "moduleResolution": "node",
     "allowImportingTsExtensions": false,
     "lib": ["ES2020", "DOM"],
-    
+
     // Strict type checking
     "strict": true,
     "noImplicitAny": true,
@@ -13,25 +13,25 @@
     "strictFunctionTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    
+
     // Module resolution and interop
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    
+
     // Output
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": false,
-    
-    // Code quality  
+
+    // Code quality
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "removeComments": false,
     "types": ["node"],
-    
+
     // Advanced options
     "incremental": true
   },
