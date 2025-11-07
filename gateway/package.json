@@ -35,7 +35,7 @@
     "stripe": "^14.25.0"
   },
   "optionalDependencies": {
-    "@opentelemetry/resources": "^1.23.0",
+    "@opentelemetry/resources": "^2.2.0",
     "@opentelemetry/semantic-conventions": "^1.23.0"
   },
   "devDependencies": {
