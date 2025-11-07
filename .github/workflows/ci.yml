@@ -45,7 +45,6 @@ jobs:
 
       - name: ESLint
         run: pnpm lint
-        continue-on-error: true # Don't fail due to pre-existing lint issues
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
