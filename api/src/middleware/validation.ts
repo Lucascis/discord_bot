@@ -79,8 +79,10 @@ export function validate(schemas: ValidationSchemas) {
       }
 
       // Validate query parameters
+      // NOTE: Cannot directly assign to req.query (read-only property in IncomingMessage)
+      // Instead, validate and let it throw if invalid - the parsed query is already in req.query
       if (schemas.query) {
-        req.query = schemas.query.parse(req.query);
+        schemas.query.parse(req.query);
       }
 
       next();
@@ -198,7 +200,7 @@ export const webhookPayloadSchema = z.object({
 export const webhookHeadersSchema = z.object({
   'x-webhook-signature': z.string().optional(),
   'x-webhook-timestamp': z.string().regex(/^\d+$/).optional()
-});
+}).passthrough(); // Allow other headers like x-api-key, user-agent, etc.
 
 // ===== WEBHOOK MIDDLEWARE =====
 

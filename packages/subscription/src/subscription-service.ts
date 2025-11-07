@@ -6,7 +6,7 @@
 import { PrismaClient,
   SubscriptionTier,
   SubscriptionStatus,
-  BillingCycle,
+  BillingInterval,
   Prisma } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import { getPlanByTier, needsUpgrade, getNextTier } from './plans.js';
@@ -23,39 +23,95 @@ import type {
 } from './types.js';
 
 export class SubscriptionService {
-  constructor(private readonly prisma: PrismaClient) {}
+  private testGuildIds: Set<string> = new Set();
+
+  constructor(
+    private readonly prisma: PrismaClient,
+    options?: { testGuildIds?: string[] }
+  ) {
+    if (options?.testGuildIds) {
+      this.testGuildIds = new Set(options.testGuildIds);
+    }
+  }
 
   /**
    * Get subscription info for a guild
    * Creates a FREE tier subscription if none exists
    */
   async getSubscription(guildId: string): Promise<SubscriptionInfo> {
-    let subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+    // Find customer by guildId (for guild-level subscriptions)
+    // In the new schema, we need to find a customer that has this guildId
+    // For now, we'll use discordUserId as the lookup since guildId might not be set on Customer
+    // This is a transitional approach - ideally we'd have a Guild->Customer mapping
+
+    // First, try to find an active subscription for this guild
+    // We'll look for a customer with this guildId or create one
+    let customer = await this.prisma.customer.findFirst({
+      where: {
+        // For guild subscriptions, we use the guildId as the discordUserId
+        // This allows backward compatibility
+        discordUserId: guildId,
+      },
       include: {
-        usageLimits: true,
-        usageTracking: true,
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          include: {
+            plan: true,
+            price: true,
+            usageLimits: true,
+            usageTracking: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
       },
     });
 
-    // Create default FREE subscription if none exists
-    if (!subscription) {
-      subscription = await this.createSubscription({
+    // Create default FREE subscription if no customer/subscription exists
+    if (!customer || customer.subscriptions.length === 0) {
+      const subscription = await this.createSubscription({
         guildId,
         tier: SubscriptionTier.FREE,
-        billingCycle: BillingCycle.MONTHLY,
+        billingCycle: BillingInterval.MONTH,
+      });
+
+      // Re-fetch to get the full subscription with relations
+      customer = await this.prisma.customer.findFirst({
+        where: { discordUserId: guildId },
+        include: {
+          subscriptions: {
+            where: { id: subscription.id },
+            include: {
+              plan: true,
+              price: true,
+              usageLimits: true,
+              usageTracking: true,
+            },
+          },
+        },
       });
     }
 
-    const plan = getPlanByTier(subscription.tier);
+    const subscription = customer!.subscriptions[0];
+
+    // Map plan name to tier
+    const tier = this.getTierFromPlanName(subscription.plan.name);
+    const plan = getPlanByTier(tier);
     const isActive = this.isSubscriptionActive(subscription);
+    const isTrialing = !!(subscription.trialStart && subscription.trialEnd && new Date() <= subscription.trialEnd);
 
     return {
-      guildId: subscription.guildId,
-      tier: subscription.tier,
+      guildId,
+      tier,
       status: subscription.status,
       isActive,
-      isTrialing: subscription.isTrialing,
+      isTrialing,
       currentPeriodStart: subscription.currentPeriodStart,
       currentPeriodEnd: subscription.currentPeriodEnd,
       cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
@@ -75,29 +131,100 @@ export class SubscriptionService {
     const trialEnd = trialDays ? new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000) : null;
 
     // Calculate period dates
-    let currentPeriodStart = now;
-    let currentPeriodEnd: Date | null = null;
+    const currentPeriodStart = now;
+    let currentPeriodEnd: Date;
 
-    if (tier !== SubscriptionTier.FREE) {
-      currentPeriodEnd = billingCycle === BillingCycle.MONTHLY
+    if (tier === SubscriptionTier.FREE) {
+      // FREE tier: set period end far in the future (effectively unlimited)
+      currentPeriodEnd = new Date(now.getFullYear() + 100, now.getMonth(), now.getDate());
+    } else {
+      currentPeriodEnd = billingCycle === BillingInterval.MONTH
         ? new Date(now.getFullYear(), now.getMonth() + 1, now.getDate())
         : new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
     }
 
+    // Get or create customer
+    let customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+    });
+
+    if (!customer) {
+      customer = await this.prisma.customer.create({
+        data: {
+          discordUserId: guildId,
+          email: `guild-${guildId}@placeholder.local`, // Placeholder email for guild subscriptions
+          stripeCustomerId,
+          status: 'ACTIVE',
+        },
+      });
+    }
+
+    // Get or create subscription plan
+    const planName = tier.toLowerCase();
+    let plan = await this.prisma.subscriptionPlan.findUnique({
+      where: { name: planName },
+    });
+
+    if (!plan) {
+      const planDef = getPlanByTier(tier);
+      plan = await this.prisma.subscriptionPlan.create({
+        data: {
+          name: planName,
+          displayName: planDef.displayName,
+          description: planDef.description,
+          features: planDef.features as unknown as Prisma.InputJsonValue,
+          limits: planDef.limits as unknown as Prisma.InputJsonValue,
+          active: true,
+        },
+      });
+    }
+
+    // Get or create price for this plan
+    let price = await this.prisma.subscriptionPrice.findFirst({
+      where: {
+        planId: plan.id,
+        interval: billingCycle,
+        provider: 'stripe',
+      },
+    });
+
+    if (!price) {
+      const planDef = getPlanByTier(tier);
+      const amount = billingCycle === BillingInterval.MONTH ? planDef.price.monthly : planDef.price.yearly;
+
+      price = await this.prisma.subscriptionPrice.create({
+        data: {
+          planId: plan.id,
+          provider: 'stripe',
+          providerPriceId: `price_${tier.toLowerCase()}_${billingCycle.toLowerCase()}_${Date.now()}`,
+          amount,
+          currency: 'USD',
+          interval: billingCycle,
+          intervalCount: 1,
+          trialPeriodDays: trialDays,
+          active: true,
+        },
+      });
+    }
+
+    // Create subscription
     const subscription = await this.prisma.subscription.create({
       data: {
-        guildId,
-        tier,
+        customerId: customer.id,
+        planId: plan.id,
+        priceId: price.id,
+        provider: 'stripe',
+        providerSubscriptionId: `sub_${guildId}_${Date.now()}`,
         status: trialDays ? SubscriptionStatus.TRIALING : SubscriptionStatus.ACTIVE,
-        billingCycle: tier === SubscriptionTier.FREE ? null : billingCycle,
-        currentPeriodStart: tier === SubscriptionTier.FREE ? null : currentPeriodStart,
-        currentPeriodEnd: tier === SubscriptionTier.FREE ? null : currentPeriodEnd,
-        stripeCustomerId,
-        isTrialing: !!trialDays,
+        currentPeriodStart,
+        currentPeriodEnd,
         trialStart,
         trialEnd,
+        cancelAtPeriodEnd: false,
       },
       include: {
+        plan: true,
+        price: true,
         usageLimits: true,
         usageTracking: true,
       },
@@ -107,7 +234,7 @@ export class SubscriptionService {
     await this.initializeUsageLimits(subscription.id, tier);
 
     // Initialize usage tracking
-    await this.initializeUsageTracking(subscription.id, currentPeriodStart, currentPeriodEnd || new Date());
+    await this.initializeUsageTracking(subscription.id, currentPeriodStart, currentPeriodEnd);
 
     // Log subscription event
     await this.logSubscriptionEvent(guildId, 'CREATED', tier);
@@ -121,16 +248,36 @@ export class SubscriptionService {
    * Update subscription
    */
   async updateSubscription(guildId: string, params: UpdateSubscriptionParams) {
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+    // Find customer and current subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          include: {
+            plan: true,
+            price: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
     });
 
-    if (!subscription) {
+    if (!customer || customer.subscriptions.length === 0) {
       throw new Error(`Subscription not found for guild ${guildId}`);
     }
 
-    const previousTier = subscription.tier;
+    const subscription = customer.subscriptions[0];
+    const previousTier = this.getTierFromPlanName(subscription.plan.name);
     const newTier = params.tier || previousTier;
+    const newBillingCycle = params.billingCycle || subscription.price.interval;
 
     // Log upgrade/downgrade event
     if (newTier !== previousTier) {
@@ -138,22 +285,67 @@ export class SubscriptionService {
       await this.logSubscriptionEvent(guildId, eventType, newTier, previousTier);
     }
 
-    const updateData: Prisma.SubscriptionUpdateInput = {
-      tier: newTier,
-    };
+    const updateData: Prisma.SubscriptionUpdateInput = {};
+
+    // Update plan if tier changed
+    if (newTier !== previousTier || newBillingCycle !== subscription.price.interval) {
+      // Get or create new plan
+      const planName = newTier.toLowerCase();
+      let plan = await this.prisma.subscriptionPlan.findUnique({
+        where: { name: planName },
+      });
+
+      if (!plan) {
+        const planDef = getPlanByTier(newTier);
+        plan = await this.prisma.subscriptionPlan.create({
+          data: {
+            name: planName,
+            displayName: planDef.displayName,
+            description: planDef.description,
+            features: planDef.features as unknown as Prisma.InputJsonValue,
+            limits: planDef.limits as unknown as Prisma.InputJsonValue,
+            active: true,
+          },
+        });
+      }
+
+      // Get or create new price
+      let price = await this.prisma.subscriptionPrice.findFirst({
+        where: {
+          planId: plan.id,
+          interval: newBillingCycle,
+          provider: 'stripe',
+        },
+      });
+
+      if (!price) {
+        const planDef = getPlanByTier(newTier);
+        const amount = newBillingCycle === BillingInterval.MONTH ? planDef.price.monthly : planDef.price.yearly;
+
+        price = await this.prisma.subscriptionPrice.create({
+          data: {
+            planId: plan.id,
+            provider: 'stripe',
+            providerPriceId: `price_${newTier.toLowerCase()}_${newBillingCycle.toLowerCase()}_${Date.now()}`,
+            amount,
+            currency: 'USD',
+            interval: newBillingCycle,
+            intervalCount: 1,
+            active: true,
+          },
+        });
+      }
+
+      updateData.plan = { connect: { id: plan.id } };
+      updateData.price = { connect: { id: price.id } };
+    }
 
     if (typeof params.cancelAtPeriodEnd !== 'undefined') {
       updateData.cancelAtPeriodEnd = params.cancelAtPeriodEnd;
     }
 
-    if (newTier === SubscriptionTier.FREE) {
-      updateData.billingCycle = { set: null };
-    } else if (typeof params.billingCycle !== 'undefined') {
-      updateData.billingCycle = { set: params.billingCycle };
-    }
-
     const updated = await this.prisma.subscription.update({
-      where: { guildId },
+      where: { id: subscription.id },
       data: updateData,
     });
 
@@ -171,35 +363,103 @@ export class SubscriptionService {
    * Cancel subscription
    */
   async cancelSubscription(guildId: string, reason?: string, immediately = false) {
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+    // Find customer and current subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          include: {
+            plan: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
     });
 
-    if (!subscription) {
+    if (!customer || customer.subscriptions.length === 0) {
       throw new Error(`Subscription not found for guild ${guildId}`);
     }
 
+    const subscription = customer.subscriptions[0];
+    const previousTier = this.getTierFromPlanName(subscription.plan.name);
+
     if (immediately) {
       // Cancel immediately and downgrade to FREE
+      // Get FREE plan
+      const freePlanName = SubscriptionTier.FREE.toLowerCase();
+      let freePlan = await this.prisma.subscriptionPlan.findUnique({
+        where: { name: freePlanName },
+      });
+
+      if (!freePlan) {
+        const planDef = getPlanByTier(SubscriptionTier.FREE);
+        freePlan = await this.prisma.subscriptionPlan.create({
+          data: {
+            name: freePlanName,
+            displayName: planDef.displayName,
+            description: planDef.description,
+            features: planDef.features as unknown as Prisma.InputJsonValue,
+            limits: planDef.limits as unknown as Prisma.InputJsonValue,
+            active: true,
+          },
+        });
+      }
+
+      // Get FREE price
+      let freePrice = await this.prisma.subscriptionPrice.findFirst({
+        where: {
+          planId: freePlan.id,
+          interval: BillingInterval.MONTH,
+          provider: 'stripe',
+        },
+      });
+
+      if (!freePrice) {
+        freePrice = await this.prisma.subscriptionPrice.create({
+          data: {
+            planId: freePlan.id,
+            provider: 'stripe',
+            providerPriceId: `price_free_month_${Date.now()}`,
+            amount: 0,
+            currency: 'USD',
+            interval: BillingInterval.MONTH,
+            intervalCount: 1,
+            active: true,
+          },
+        });
+      }
+
       await this.prisma.subscription.update({
-        where: { guildId },
+        where: { id: subscription.id },
         data: {
-          tier: SubscriptionTier.FREE,
+          planId: freePlan.id,
+          priceId: freePrice.id,
           status: SubscriptionStatus.CANCELED,
           canceledAt: new Date(),
-          cancellationReason: reason,
+          cancelReason: reason,
           cancelAtPeriodEnd: false,
         },
       });
 
-      await this.logSubscriptionEvent(guildId, 'CANCELED', SubscriptionTier.FREE, subscription.tier);
+      // Update usage limits to FREE tier
+      await this.updateUsageLimits(subscription.id, SubscriptionTier.FREE);
+
+      await this.logSubscriptionEvent(guildId, 'CANCELED', SubscriptionTier.FREE, previousTier);
     } else {
       // Cancel at period end
       await this.prisma.subscription.update({
-        where: { guildId },
+        where: { id: subscription.id },
         data: {
           cancelAtPeriodEnd: true,
-          cancellationReason: reason,
+          cancelReason: reason,
         },
       });
     }
@@ -248,25 +508,57 @@ export class SubscriptionService {
    * Check usage limit
    */
   async checkUsageLimit(guildId: string, limitType: string): Promise<UsageLimitResult> {
+    // Test guilds bypass all limits
+    if (this.testGuildIds.has(guildId)) {
+      return {
+        withinLimit: true,
+        limitType,
+        currentValue: 0,
+        maxValue: -1, // unlimited for test guilds
+        percentageUsed: 0,
+        resetDate: undefined,
+        upgradeMessage: undefined,
+      };
+    }
+
     const subscription = await this.getSubscription(guildId);
     const maxValue = getLimitValue(limitType, subscription.tier);
+
+    // Find customer and subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (!customer || customer.subscriptions.length === 0) {
+      throw new Error(`Subscription not found for guild ${guildId}`);
+    }
+
+    const subscriptionRecord = customer.subscriptions[0];
 
     // Get or create usage limit
     let usageLimit = await this.prisma.usageLimit.findUnique({
       where: {
         subscriptionId_limitType: {
-          subscriptionId: (await this.prisma.subscription.findUnique({ where: { guildId } }))!.id,
+          subscriptionId: subscriptionRecord.id,
           limitType,
         },
       },
     });
 
     if (!usageLimit) {
-      const subscriptionRecord = await this.prisma.subscription.findUnique({ where: { guildId } });
-      if (!subscriptionRecord) {
-        throw new Error(`Subscription not found for guild ${guildId}`);
-      }
-
       const limitDef = getLimit(limitType);
       const resetPeriod = limitDef?.resetPeriod || null;
       const nextReset = resetPeriod ? calculateNextReset(resetPeriod) : null;
@@ -316,8 +608,27 @@ export class SubscriptionService {
    * Increment usage limit
    */
   async incrementUsage(guildId: string, limitType: string, amount = 1): Promise<void> {
-    const subscriptionRecord = await this.prisma.subscription.findUnique({ where: { guildId } });
-    if (!subscriptionRecord) return;
+    // Find customer and subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (!customer || customer.subscriptions.length === 0) return;
+
+    const subscriptionRecord = customer.subscriptions[0];
 
     const usageLimit = await this.prisma.usageLimit.findUnique({
       where: {
@@ -357,15 +668,36 @@ export class SubscriptionService {
    * Update usage tracking
    */
   async updateUsageTracking(guildId: string, updates: UsageTrackingUpdate): Promise<void> {
-    const subscriptionRecord = await this.prisma.subscription.findUnique({
-      where: { guildId },
-      include: { usageTracking: true },
+    // Find customer and subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          include: {
+            usageTracking: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
     });
 
-    if (!subscriptionRecord || !subscriptionRecord.usageTracking) return;
+    if (!customer || customer.subscriptions.length === 0) return;
+
+    const subscriptionRecord = customer.subscriptions[0];
+    const usageTracking = subscriptionRecord.usageTracking;
+
+    if (!usageTracking) return;
 
     await this.prisma.usageTracking.update({
-      where: { id: subscriptionRecord.usageTracking.id },
+      where: { id: usageTracking.id },
       data: {
         tracksPlayed: updates.tracksPlayed ? { increment: updates.tracksPlayed } : undefined,
         playbackMinutes: updates.playbackMinutes ? { increment: updates.playbackMinutes } : undefined,
@@ -382,14 +714,33 @@ export class SubscriptionService {
    * Get usage statistics
    */
   async getUsageStats(guildId: string): Promise<UsageStats | null> {
-    const subscriptionRecord = await this.prisma.subscription.findUnique({
-      where: { guildId },
-      include: { usageTracking: true },
+    // Find customer and subscription
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          where: {
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.PAST_DUE],
+            },
+          },
+          include: {
+            usageTracking: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
     });
 
-    if (!subscriptionRecord || !subscriptionRecord.usageTracking) return null;
+    if (!customer || customer.subscriptions.length === 0) return null;
 
+    const subscriptionRecord = customer.subscriptions[0];
     const tracking = subscriptionRecord.usageTracking;
+
+    if (!tracking) return null;
 
     return {
       current: {
@@ -417,7 +768,8 @@ export class SubscriptionService {
     if (subscription.status === SubscriptionStatus.INCOMPLETE_EXPIRED) return false;
 
     // Free tier is always active
-    if (subscription.tier === SubscriptionTier.FREE) return true;
+    // In new schema, check plan name instead of tier field
+    if (subscription.plan && subscription.plan.name === 'free') return true;
 
     // Check if period has ended
     if (subscription.currentPeriodEnd && new Date() > subscription.currentPeriodEnd) {
@@ -425,6 +777,27 @@ export class SubscriptionService {
     }
 
     return true;
+  }
+
+  /**
+   * Map plan name to SubscriptionTier enum
+   */
+  private getTierFromPlanName(planName: string): SubscriptionTier {
+    const normalized = planName.toLowerCase();
+
+    switch (normalized) {
+      case 'free':
+        return SubscriptionTier.FREE;
+      case 'basic':
+        return SubscriptionTier.BASIC;
+      case 'premium':
+        return SubscriptionTier.PREMIUM;
+      case 'enterprise':
+        return SubscriptionTier.ENTERPRISE;
+      default:
+        logger.warn({ planName }, 'Unknown plan name, defaulting to FREE');
+        return SubscriptionTier.FREE;
+    }
   }
 
   /**

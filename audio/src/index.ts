@@ -181,6 +181,8 @@ function isResolvedTrack(track: Track | UnresolvedTrack | null | undefined): tra
   return !!info && typeof info.identifier === 'string';
 }
 
+// Lavalink requires ALL 15 bands (0-14) to be specified to avoid null values
+// Bands we don't want to modify should have gain: 0
 const BASS_BOOST_BANDS = [
   { band: 0, gain: 0.3 },
   { band: 1, gain: 0.25 },
@@ -188,14 +190,33 @@ const BASS_BOOST_BANDS = [
   { band: 3, gain: 0.15 },
   { band: 4, gain: 0.1 },
   { band: 5, gain: 0.05 },
+  { band: 6, gain: 0 },
+  { band: 7, gain: 0 },
+  { band: 8, gain: 0 },
+  { band: 9, gain: 0 },
+  { band: 10, gain: 0 },
+  { band: 11, gain: 0 },
+  { band: 12, gain: 0 },
+  { band: 13, gain: 0 },
+  { band: 14, gain: 0 },
 ] as const;
 
 const CLARITY_BANDS = [
+  { band: 0, gain: 0 },
   { band: 1, gain: 0.1 },
   { band: 2, gain: 0.15 },
   { band: 3, gain: 0.2 },
   { band: 4, gain: 0.15 },
+  { band: 5, gain: 0 },
+  { band: 6, gain: 0 },
+  { band: 7, gain: 0 },
   { band: 8, gain: 0.05 },
+  { band: 9, gain: 0 },
+  { band: 10, gain: 0 },
+  { band: 11, gain: 0 },
+  { band: 12, gain: 0 },
+  { band: 13, gain: 0 },
+  { band: 14, gain: 0 },
 ] as const;
 
 const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
@@ -315,8 +336,14 @@ await initializeSentry({
 const memoryManager = MemoryManager.getInstance();
 memoryManager.startMonitoring();
 
+// SCALABILITY FIX: Track global timers for proper cleanup on shutdown
+const globalTimers: { intervals: NodeJS.Timeout[]; timeouts: NodeJS.Timeout[] } = {
+  intervals: [],
+  timeouts: [],
+};
+
 // Initialize adaptive cache monitoring with improved memory calculation
-setInterval(() => {
+const adaptiveCacheMonitoringInterval = setInterval(() => {
   const memUsage = process.memoryUsage();
 
   // Use RSS-based calculation for better memory pressure detection
@@ -343,6 +370,7 @@ setInterval(() => {
     }, 'High memory usage in audio service');
   }
 }, 60000); // Every minute
+globalTimers.intervals.push(adaptiveCacheMonitoringInterval);
 
 // Initialize Worker Service integration for background analytics
 try {
@@ -1092,6 +1120,51 @@ await redisSub.subscribe('discord-bot:to-audio', async (message) => {
     }
   } catch (e) {
     logger.error({ e, rawMessage: message }, 'failed to process raw event');
+  }
+});
+
+// ============================================================================
+// CRITICAL: Subscribe to Raw Discord Gateway Events for Lavalink Voice Sync
+// ============================================================================
+// Lavalink-client requires raw Discord gateway events to establish and maintain
+// voice connections. This channel receives VOICE_SERVER_UPDATE, VOICE_STATE_UPDATE,
+// and CHANNEL_DELETE events from the Gateway service for proper voice synchronization.
+//
+// See: https://lc4.gitbook.io/lavalink-client/ (sendRawData documentation)
+// ============================================================================
+await redisSub.subscribe('discord-bot:lavalink-raw-events', async (message) => {
+  try {
+    const packet = JSON.parse(message);
+
+    logger.debug({
+      eventType: packet.t,
+      guildId: packet.d?.guild_id,
+      hasData: !!packet.d
+    }, 'LAVALINK: Received raw Discord gateway event');
+
+    // Forward the raw event packet to lavalink-client manager
+    // The packet format is: { t: 'EVENT_NAME', d: { ...eventData } }
+    await manager.sendRawData(packet);
+
+    // Log successful processing for important events
+    if (packet.t === 'VOICE_SERVER_UPDATE') {
+      logger.info({
+        guildId: packet.d?.guild_id,
+        hasToken: !!packet.d?.token,
+        hasEndpoint: !!packet.d?.endpoint
+      }, 'LAVALINK: Processed raw VOICE_SERVER_UPDATE event via sendRawData()');
+    } else if (packet.t === 'VOICE_STATE_UPDATE') {
+      logger.debug({
+        guildId: packet.d?.guild_id,
+        userId: packet.d?.user_id,
+        hasSessionId: !!packet.d?.session_id
+      }, 'LAVALINK: Processed raw VOICE_STATE_UPDATE event via sendRawData()');
+    }
+  } catch (error) {
+    logger.error({
+      error: error instanceof Error ? error.message : String(error),
+      rawMessage: message
+    }, 'LAVALINK: Failed to process raw Discord gateway event');
   }
 });
 
@@ -1894,6 +1967,9 @@ await redisSub.subscribe('discord-bot:commands', withErrorHandling(async (messag
         await player.destroy();
         await pushIdleState(player);
         batchQueueSaver.scheduleUpdate(data.guildId, player);
+
+        // SCALABILITY FIX: Clean up all guild-specific Map entries to prevent memory leaks
+        cleanupGuildMaps(data.guildId);
       }
       return;
     }
@@ -2729,12 +2805,29 @@ const healthServer = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ players: playerStats, count: playerStats.length }));
     return;
   }
+
+  // Business metrics endpoint - Returns Prometheus format (MUST come before /metrics)
+  if (req.url.startsWith('/metrics/business')) {
+    try {
+      const prometheusMetrics = await audioMetrics.getPrometheusMetrics();
+
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
+      res.end(prometheusMetrics);
+    } catch (error) {
+      logger.error({ error }, 'Failed to generate business metrics response');
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to generate business metrics' }));
+    }
+    return;
+  }
+
+  // Standard Prometheus metrics endpoint
   if (req.url.startsWith('/metrics')) {
     res.writeHead(200, { 'content-type': registry.contentType });
     res.end(await registry.metrics());
     return;
   }
-  
+
   // Performance metrics endpoint
   if (req.url.startsWith('/performance')) {
     const metrics = PerformanceTracker.getMetrics();
@@ -2756,21 +2849,6 @@ const healthServer = http.createServer(async (req, res) => {
       predictive: predictiveAnalytics,
       timestamp: new Date().toISOString()
     }, null, 2));
-    return;
-  }
-
-  // Business metrics endpoint - Returns Prometheus format
-  if (req.url.startsWith('/metrics/business')) {
-    try {
-      const prometheusMetrics = await audioMetrics.getPrometheusMetrics();
-
-      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
-      res.end(prometheusMetrics);
-    } catch (error) {
-      logger.error({ error }, 'Failed to generate business metrics response');
-      res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Failed to generate business metrics' }));
-    }
     return;
   }
 
@@ -2861,12 +2939,34 @@ process.on('SIGINT', async () => {
     lastUiPush.destroy();
     guildTextChannels.destroy();
 
+    // SCALABILITY FIX: Clear all global timers to prevent resource leaks
+    logger.info({
+      intervalCount: globalTimers.intervals.length,
+      timeoutCount: globalTimers.timeouts.length
+    }, 'Clearing global timers...');
+    globalTimers.intervals.forEach(id => clearInterval(id));
+    globalTimers.timeouts.forEach(id => clearTimeout(id));
+    globalTimers.intervals = [];
+    globalTimers.timeouts = [];
+
     // CRITICAL FIX: Reject any pending voice connections during shutdown
     for (const [, entry] of pendingPlayerConnections.entries()) {
       clearTimeout(entry.timeoutId);
       entry.reject(new Error('Service shutting down'));
     }
     pendingPlayerConnections.clear();
+
+    // SCALABILITY FIX: Clear all guild-specific Map entries
+    logger.info({
+      previousTracks: previousTracks.size,
+      previousTrackTimestamps: previousTrackTimestamps.size,
+      mutedVolumes: mutedVolumes.size,
+      activeFilterPresets: activeFilterPresets.size
+    }, 'Clearing guild-specific Maps...');
+    previousTracks.clear();
+    previousTrackTimestamps.clear();
+    mutedVolumes.clear();
+    activeFilterPresets.clear();
 
     // Cleanup cache system
     await audioCacheManager.flushAllCaches().catch(() => {});
@@ -3188,6 +3288,38 @@ const pendingPlayerConnections = new Map<string, {
   reject: (error: Error) => void;
   timeoutId: NodeJS.Timeout;
 }>();
+
+/**
+ * SCALABILITY FIX: Centralized cleanup for all guild-specific Map entries
+ * This prevents memory leaks when guilds disconnect or bot leaves server
+ * @param guildId - The guild ID to clean up
+ */
+function cleanupGuildMaps(guildId: string): void {
+  const deletedCount = {
+    previousTracks: previousTracks.delete(guildId) ? 1 : 0,
+    previousTrackTimestamps: previousTrackTimestamps.delete(guildId) ? 1 : 0,
+    mutedVolumes: mutedVolumes.delete(guildId) ? 1 : 0,
+    activeFilterPresets: activeFilterPresets.delete(guildId) ? 1 : 0,
+    pendingConnections: pendingPlayerConnections.delete(guildId) ? 1 : 0,
+  };
+
+  const totalDeleted = Object.values(deletedCount).reduce((sum, count) => sum + count, 0);
+
+  if (totalDeleted > 0) {
+    logger.info({
+      guildId,
+      deletedEntries: deletedCount,
+      totalDeleted,
+      remainingMaps: {
+        previousTracks: previousTracks.size,
+        previousTrackTimestamps: previousTrackTimestamps.size,
+        mutedVolumes: mutedVolumes.size,
+        activeFilterPresets: activeFilterPresets.size,
+        pendingConnections: pendingPlayerConnections.size,
+      }
+    }, 'MEMORY_CLEANUP: Cleaned up guild-specific Map entries');
+  }
+}
 
 /**
  * CRITICAL FIX: Wait for voice credentials before connecting player

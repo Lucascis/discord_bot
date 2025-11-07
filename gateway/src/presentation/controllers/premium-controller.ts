@@ -20,14 +20,14 @@ import { SubscriptionService,
   formatPrice,
   getAllPlans,
   needsUpgrade } from '@discord-bot/subscription';
-import { prisma, SubscriptionTier, BillingCycle } from '@discord-bot/database';
+import { prisma, SubscriptionTier, BillingInterval } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
 type PremiumControllerOptions = {
   testGuildIds?: string[];
 };
 
-type PlanButtonMeta = {
+type _PlanButtonMeta = {
   tier: SubscriptionTier;
   label: string;
   description: string;
@@ -52,10 +52,9 @@ export class PremiumController {
   private readonly testGuildIds: Set<string>;
 
   constructor(options: PremiumControllerOptions = {}) {
-    this.subscriptionService = new SubscriptionService(prisma);
-    this.testGuildIds = new Set(
-      (options.testGuildIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0),
-    );
+    const testGuildIds = (options.testGuildIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+    this.subscriptionService = new SubscriptionService(prisma, { testGuildIds });
+    this.testGuildIds = new Set(testGuildIds);
   }
 
   /**
@@ -670,7 +669,7 @@ export class PremiumController {
   private async setGuildTier(guildId: string, tier: SubscriptionTier): Promise<void> {
       const params = tier === SubscriptionTier.FREE
         ? { tier, cancelAtPeriodEnd: false }
-        : { tier, billingCycle: 'MONTHLY' as BillingCycle, cancelAtPeriodEnd: false };
+        : { tier, billingCycle: BillingInterval.MONTH, cancelAtPeriodEnd: false };
 
       await this.subscriptionService.updateSubscription(guildId, params);
   }

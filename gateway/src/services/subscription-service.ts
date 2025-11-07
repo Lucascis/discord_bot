@@ -178,7 +178,7 @@ export class SubscriptionService {
       }
 
       // Calculate pricing
-      const pricing = await this.billingUseCase.calculatePricing(
+      const _pricing = await this.billingUseCase.calculatePricing(
         newTier,
         newPeriod,
         userId
@@ -494,7 +494,7 @@ export class SubscriptionService {
     return !hasUsedTrial;
   }
 
-  private async getPromotionalPlans(userId: string): Promise<SubscriptionPlan[]> {
+  private async getPromotionalPlans(_userId: string): Promise<SubscriptionPlan[]> {
     // Implementation would fetch user-specific promotional offers
     return [];
   }
@@ -542,7 +542,7 @@ export class SubscriptionService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async getUsageStatistics(userId: string, guildId: string): Promise<any> {
+  private async getUsageStatistics(userId: string, _guildId: string): Promise<any> {
     // Get usage data from feature use case
     const usageStats = await this.featureUseCase.getUsageAnalytics(userId, 'month');
 
@@ -579,7 +579,7 @@ export class SubscriptionService {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private generateRecommendations(current: SubscriptionStatus, usage: any): any[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -265,12 +265,12 @@ class GatewayApplication {
       try {
         await this.restoreRedisSubscriptions();
         logger.info('Successfully restored Redis subscriptions after reconnection');
-      } catch (error) {
+      } catch (error: unknown) {
         logger.error({ error }, 'Failed to restore Redis subscriptions after reconnection');
       }
     });
 
-    this.redisSubscriber.on('error', (error) => {
+    this.redisSubscriber.on('error', (error: Error) => {
       logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis subscriber connection error');
     });
 
@@ -284,12 +284,12 @@ class GatewayApplication {
       // Note: audioRedisClient is only used for publishing raw events, subscriptions not needed
     });
 
-    this.audioRedisClient.on('error', (error) => {
+    this.audioRedisClient.on('error', (error: Error) => {
       logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Audio Redis client connection error');
     });
 
     // Main Redis Client Error Handler (for operations)
-    this.redisClient.on('error', (error) => {
+    this.redisClient.on('error', (error: Error) => {
       logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis client connection error');
     });
 
@@ -1135,7 +1135,7 @@ class GatewayApplication {
   /**
    * Handle Discord voice state updates (when bot joins/leaves voice channels)
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleDiscordVoiceStateUpdate(oldState: any, newState: any): Promise<void> {
     // Only process bot's own voice state changes
@@ -1348,22 +1348,26 @@ class GatewayApplication {
       // RULE 1: Only one UI PRINCIPAL per channel - try to edit existing message first
       if (trackingInteraction && trackingInteraction.messageId) {
         try {
-          const existingMessage = await targetChannel.messages.fetch(trackingInteraction.messageId);
-          if (existingMessage) {
-            uiMessage = await existingMessage.edit(messageContent);
-            wasEdited = true;
-            logger.info({
-              guildId: data.guildId,
-              channelId: targetChannel.id,
-              messageId: existingMessage.id
-            }, 'Updated existing UI PRINCIPAL message (Rule 1)');
+          // Check if targetChannel has messages property (text channels)
+          if ('messages' in targetChannel) {
+            const existingMessage = await targetChannel.messages.fetch(trackingInteraction.messageId);
+            if (existingMessage) {
+              uiMessage = await existingMessage.edit(messageContent);
+              wasEdited = true;
+              logger.info({
+                guildId: data.guildId,
+                channelId: targetChannel.id,
+                messageId: existingMessage.id
+              }, 'Updated existing UI PRINCIPAL message (Rule 1)');
+            }
           }
-        } catch (editError) {
+        } catch (editError: unknown) {
           // Message no longer exists or can't be edited, create new one
+          const errorMessage = editError instanceof Error ? editError.message : String(editError);
           logger.warn({
             guildId: data.guildId,
             messageId: trackingInteraction.messageId,
-            error: editError.message
+            error: errorMessage
           }, 'Could not edit existing UI message, creating new one');
         }
       }
@@ -1384,53 +1388,62 @@ class GatewayApplication {
         }, 'DISCORD_SEND: Attempting to create new UI PRINCIPAL message');
 
         try {
-          uiMessage = await targetChannel.send(messageContent);
-          logger.info({
-            guildId: data.guildId,
-            channelId: targetChannel.id,
-            messageId: uiMessage.id,
-            success: true
-          }, 'DISCORD_SEND: Successfully created new UI PRINCIPAL message (Rule 1)');
-        } catch (sendError) {
+          // Check if targetChannel has send property (text channels)
+          if ('send' in targetChannel) {
+            uiMessage = await targetChannel.send(messageContent);
+            logger.info({
+              guildId: data.guildId,
+              channelId: targetChannel.id,
+              messageId: uiMessage.id,
+              success: true
+            }, 'DISCORD_SEND: Successfully created new UI PRINCIPAL message (Rule 1)');
+          }
+        } catch (sendError: unknown) {
+          const errorMessage = sendError instanceof Error ? sendError.message : String(sendError);
+          const errorCode = sendError && typeof sendError === 'object' && 'code' in sendError ? (sendError as { code?: string }).code : 'unknown';
           logger.error({
             guildId: data.guildId,
             channelId: targetChannel.id,
-            channelName: targetChannel.name,
-            error: sendError.message,
-            errorCode: sendError.code || 'unknown',
+            channelName: 'name' in targetChannel ? targetChannel.name : 'unknown',
+            error: errorMessage,
+            errorCode: errorCode || 'unknown',
             messageContent: JSON.stringify(messageContent, null, 2)
           }, 'DISCORD_SEND: CRITICAL FAILURE - Could not send UI message to Discord');
           return; // Exit if we can't send the UI message
         }
       }
 
-      // Update tracking system
-      this.activeInteractions.set(trackingChannelKey, {
-        messageId: uiMessage.id,
-        channelId: targetChannel.id,
-        guildId: data.guildId,
-        lastUpdated: Date.now()
-      });
-
-      // Skip cleanup for ephemeral processing messages - Discord manages them automatically
-      if (trackingInteraction?.processingMessageId) {
-        logger.debug({
+      // Only update tracking if we successfully created/updated a message
+      if (uiMessage) {
+        // Update tracking system
+        this.activeInteractions.set(trackingChannelKey, {
+          messageId: uiMessage.id,
+          channelId: targetChannel.id,
           guildId: data.guildId,
-          processingMessageId: trackingInteraction.processingMessageId
-        }, 'Skipping ephemeral processing message cleanup (Discord auto-manages)');
+          lastUpdated: Date.now()
+        });
+
+        // Skip cleanup for ephemeral processing messages - Discord manages them automatically
+        if (trackingInteraction?.processingMessageId) {
+          logger.debug({
+            guildId: data.guildId,
+            processingMessageId: trackingInteraction.processingMessageId
+          }, 'Skipping ephemeral processing message cleanup (Discord auto-manages)');
+        }
+
+        logger.info({
+          guildId: data.guildId,
+          channelId: targetChannel.id,
+          messageId: uiMessage.id,
+          trackTitle: data.title,
+          wasEdited: wasEdited
+        }, 'UI update completed successfully');
       }
 
-      logger.info({
-        guildId: data.guildId,
-        channelId: targetChannel.id,
-        messageId: uiMessage.id,
-        trackTitle: data.title,
-        wasEdited: wasEdited
-      }, 'UI update completed successfully');
-
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({
-        error: error.message,
+        error: errorMessage,
         guildId: data.guildId
       }, 'Failed to update Discord UI');
     }
@@ -1442,7 +1455,8 @@ class GatewayApplication {
       // RULE 1: Only one UI PRINCIPAL message per channel
       // Fetch recent messages and look for bot's UI messages with music components
       const recentMessages = await channel.messages.fetch({ limit: 50 });
-      const botMessages = recentMessages.filter(msg =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const botMessages = recentMessages.filter((msg: any) =>
         msg.author.id === this.discordClient.user?.id &&
         msg.components.length > 0 &&
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1686,7 +1700,7 @@ class GatewayApplication {
    * Apply optimistic UI updates for instant button feedback
    * Extracts current state from message, predicts new state based on command, and updates UI immediately
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async applyOptimisticUIUpdate(interaction: any, commandType: string, additionalData: any): Promise<void> {
     try {
@@ -1745,7 +1759,7 @@ class GatewayApplication {
   /**
    * Extract current state from the Now Playing embed
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractStateFromEmbed(embed: any): any {
     const title = embed.title || '';
@@ -1860,8 +1874,8 @@ class GatewayApplication {
   /**
    * Predict the new state based on the command and current state
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private predictNewState(currentState: any, commandType: string, additionalData: any): any {
     const newState = { ...currentState };
@@ -2400,22 +2414,45 @@ class GatewayApplication {
     });
 
     // Handle voice server updates via Discord.js event
+    // The handleVoiceServerUpdate method will automatically send credentials to audio service
     this.discordClient.on(Events.VoiceServerUpdate, async (update) => {
       await this.handleVoiceServerUpdate(update);
     });
 
-    // CRITICAL: WebSocket fallback for VOICE_SERVER_UPDATE (Discord.js Events sometimes miss these)
-    // Only processes if Discord.js handler missed it (prevents duplicates with timing check)
+    // ============================================================================
+    // CRITICAL: Forward RAW Discord Gateway Events to Audio Service for Lavalink
+    // ============================================================================
+    // Lavalink-client requires raw Discord gateway events via sendRawData() to
+    // establish voice connections. We forward VOICE_SERVER_UPDATE, VOICE_STATE_UPDATE,
+    // and CHANNEL_DELETE to the Audio service for proper Lavalink voice synchronization.
+    //
+    // See: https://lc4.gitbook.io/lavalink-client/ (Discord.js v14 integration)
+    // ============================================================================
+
+    // Track processed raw events to prevent duplicate handling
+    const processedRawEvents = new Map<string, number>();
+    const RAW_EVENT_DEDUP_WINDOW_MS = 1000;
+
+    // Helper to check if event was recently processed
+    const isRecentlyProcessed = (key: string): boolean => {
+      const timestamp = processedRawEvents.get(key);
+      if (timestamp && Date.now() - timestamp < RAW_EVENT_DEDUP_WINDOW_MS) {
+        return true;
+      }
+      processedRawEvents.set(key, Date.now());
+      // Cleanup old entries (older than 5 seconds)
+      for (const [k, v] of processedRawEvents.entries()) {
+        if (Date.now() - v > 5000) processedRawEvents.delete(k);
+      }
+      return false;
+    };
+
+    // Forward VOICE_SERVER_UPDATE raw events to Audio service for Lavalink
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.discordClient.ws.on(GatewayDispatchEvents.VoiceServerUpdate, async (data: any) => {
-      const guildId = data.guild_id;
-
-      // Check if we already processed this recently (prevents duplicate processing)
-      const lastProcessed = this.voiceServerData.get(guildId)?.processedAt || 0;
-      const now = Date.now();
-
-      if (now - lastProcessed < 1000) { // Skip if processed within last 1 second
-        logger.debug({ guildId }, 'VOICE_CONNECT: Skipping WebSocket VOICE_SERVER_UPDATE - recently processed by Discord.js');
+    this.discordClient.ws.on(GatewayDispatchEvents.VoiceServerUpdate as any, async (data: any) => {
+      const dedupKey = `VOICE_SERVER_UPDATE:${data.guild_id}:${data.token}`;
+      if (isRecentlyProcessed(dedupKey)) {
+        logger.debug({ guildId: data.guild_id }, 'LAVALINK: Skipping duplicate VOICE_SERVER_UPDATE raw event');
         return;
       }
 
@@ -2423,23 +2460,78 @@ class GatewayApplication {
         guildId: data.guild_id,
         hasToken: !!data.token,
         hasEndpoint: !!data.endpoint
-      }, 'VOICE_CONNECT: WebSocket fallback VOICE_SERVER_UPDATE received');
+      }, 'LAVALINK: Forwarding raw VOICE_SERVER_UPDATE to Audio service');
 
-      await this.handleVoiceServerUpdate({
-        guild: { id: data.guild_id },
-        token: data.token,
-        endpoint: data.endpoint
-      });
+      try {
+        // Forward the complete raw packet to Audio service for manager.sendRawData()
+        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
+          t: 'VOICE_SERVER_UPDATE',
+          d: data
+        }));
+
+        // Also handle via standard flow for voice credentials (belt and suspenders)
+        await this.handleVoiceServerUpdate({
+          token: data.token,
+          guild: { id: data.guild_id },
+          endpoint: data.endpoint
+        });
+      } catch (error) {
+        logger.error({
+          error: error instanceof Error ? error.message : String(error),
+          guildId: data.guild_id
+        }, 'LAVALINK: Failed to forward VOICE_SERVER_UPDATE to Audio service');
+      }
     });
 
-    // CRITICAL: Send raw Discord events to Audio service for Lavalink-client
-    // This is required for player.connected to work properly
+    // Forward VOICE_STATE_UPDATE raw events to Audio service for Lavalink
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.discordClient.on('raw', async (data: any) => {
+    this.discordClient.ws.on(GatewayDispatchEvents.VoiceStateUpdate as any, async (data: any) => {
+      const dedupKey = `VOICE_STATE_UPDATE:${data.guild_id}:${data.user_id}:${data.session_id || 'none'}`;
+      if (isRecentlyProcessed(dedupKey)) {
+        logger.debug({ guildId: data.guild_id }, 'LAVALINK: Skipping duplicate VOICE_STATE_UPDATE raw event');
+        return;
+      }
+
+      logger.debug({
+        guildId: data.guild_id,
+        userId: data.user_id,
+        hasSessionId: !!data.session_id
+      }, 'LAVALINK: Forwarding raw VOICE_STATE_UPDATE to Audio service');
+
       try {
-        await this.audioRedisClient.publish('discord-bot:to-audio', JSON.stringify(data));
+        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
+          t: 'VOICE_STATE_UPDATE',
+          d: data
+        }));
       } catch (error) {
-        logger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Failed to forward raw Discord event to Audio service');
+        logger.error({
+          error: error instanceof Error ? error.message : String(error),
+          guildId: data.guild_id
+        }, 'LAVALINK: Failed to forward VOICE_STATE_UPDATE to Audio service');
+      }
+    });
+
+    // Forward CHANNEL_DELETE events (needed for cleanup when voice channels are deleted)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.discordClient.ws.on(GatewayDispatchEvents.ChannelDelete as any, async (data: any) => {
+      // Only forward voice channel deletions
+      if (data.type !== 2) return; // 2 = GUILD_VOICE channel type
+
+      logger.debug({
+        channelId: data.id,
+        guildId: data.guild_id
+      }, 'LAVALINK: Forwarding raw CHANNEL_DELETE to Audio service');
+
+      try {
+        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
+          t: 'CHANNEL_DELETE',
+          d: data
+        }));
+      } catch (error) {
+        logger.error({
+          error: error instanceof Error ? error.message : String(error),
+          channelId: data.id
+        }, 'LAVALINK: Failed to forward CHANNEL_DELETE to Audio service');
       }
     });
   }
@@ -2618,12 +2710,15 @@ class GatewayApplication {
         if (voiceConnection) {
           logger.info({ guildId: message.guildId }, 'Disconnecting bot from Discord voice channel (Rule 3)');
           voiceConnection.destroy();
+        } else {
+          logger.debug({ guildId: message.guildId }, 'No voice connection found to destroy (tracked UI)');
         }
 
         return;
       }
 
       // TEMPORARY FIX: Disable Rule 3 completely to debug voice connection issues
+      // eslint-disable-next-line no-constant-condition
       if (false) {
 
         logger.info({
@@ -2658,10 +2753,12 @@ class GatewayApplication {
         const voiceConnection = getVoiceConnection(message.guildId);
         if (voiceConnection) {
           logger.info({ guildId: message.guildId }, 'Disconnecting bot from Discord voice channel (Rule 3)');
-          voiceConnection.destroy();
+          voiceConnection?.destroy();
+        } else {
+          logger.debug({ guildId: message.guildId }, 'No voice connection found to destroy (untracked UI)');
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error({ error }, 'Error handling message deletion');
     }
   }
@@ -2670,7 +2767,7 @@ class GatewayApplication {
    * Execute a queue request and wait for response from audio service
    * Implements proper Redis pub/sub pattern with request-response correlation
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async executeQueueRequest(guildId: string, additionalData: any): Promise<any> {
     logger.info({
@@ -2763,7 +2860,7 @@ class GatewayApplication {
           this.redisSubscriber.unsubscribe(channel, listener);
           const response = JSON.parse(message);
           resolve(response);
-        } catch (error) {
+        } catch (error: unknown) {
           logger.error({ channel, message, error: error instanceof Error ? error.message : String(error) }, 'gateway: error parsing Redis response');
           clearTimeout(timeout);
           // Ensure cleanup on error
@@ -2780,7 +2877,7 @@ class GatewayApplication {
       }, timeoutMs);
 
       // Subscribe with listener reference for proper cleanup
-      this.redisSubscriber.subscribe(channel, listener).catch((error) => {
+      this.redisSubscriber.subscribe(channel, listener).catch((error: Error) => {
         clearTimeout(timeout);
         reject(error);
       });

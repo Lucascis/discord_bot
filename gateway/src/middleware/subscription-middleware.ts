@@ -8,9 +8,10 @@
  */
 
 import { CommandInteraction, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, Colors } from 'discord.js';
-import { SubscriptionService, getNextTier, getPlanByTier, formatPrice } from '@discord-bot/subscription';
+import { SubscriptionService, GuildService, getNextTier, getPlanByTier, formatPrice } from '@discord-bot/subscription';
 import { prisma, SubscriptionTier } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
+import { env } from '@discord-bot/config';
 
 export interface SubscriptionCheckOptions {
   /** Feature key to check access for */
@@ -40,9 +41,22 @@ export interface SubscriptionCheckResult {
  */
 export class SubscriptionMiddleware {
   private subscriptionService: SubscriptionService;
+  private guildService: GuildService;
 
-  constructor() {
-    this.subscriptionService = new SubscriptionService(prisma);
+  constructor(options?: { testGuildIds?: string[] }) {
+    this.subscriptionService = new SubscriptionService(prisma, options);
+    this.guildService = new GuildService(prisma, options?.testGuildIds || []);
+  }
+
+  /**
+   * Get guild subscription tier using GuildService
+   * This is the new guild-based approach that separates guilds from users
+   *
+   * @param guildId - Discord guild ID
+   * @returns Promise<SubscriptionTier>
+   */
+  async getGuildTier(guildId: string): Promise<SubscriptionTier> {
+    return this.guildService.getGuildTier(guildId);
   }
 
   /**
@@ -408,7 +422,9 @@ export class SubscriptionMiddleware {
 /**
  * Global subscription middleware instance
  */
-export const subscriptionMiddleware = new SubscriptionMiddleware();
+export const subscriptionMiddleware = new SubscriptionMiddleware({
+  testGuildIds: env.PREMIUM_TEST_GUILD_IDS_LIST,
+});
 
 /**
  * Helper decorator for command handlers

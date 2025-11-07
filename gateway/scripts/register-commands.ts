@@ -252,6 +252,56 @@ const commands = [
         .setName('upgrade')
         .setDescription('Upgrade to premium for enhanced features')
     ),
+
+  // Premium features management
+  new SlashCommandBuilder()
+    .setName('premium')
+    .setDescription('Access premium features and subscription management')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('status')
+        .setDescription('View your current subscription status and tier')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('plans')
+        .setDescription('View all available subscription plans and pricing')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('upgrade')
+        .setDescription('Upgrade to a higher subscription tier')
+        .addStringOption(option =>
+          option.setName('tier')
+            .setDescription('Select subscription tier')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Basic - 10K tracks/month', value: 'basic' },
+              { name: 'Premium - 100K tracks/month', value: 'premium' },
+              { name: 'Enterprise - Unlimited', value: 'enterprise' }
+            )
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('features')
+        .setDescription('View detailed features comparison for all tiers')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('usage')
+        .setDescription('Check your current usage statistics and limits')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('cancel')
+        .setDescription('Cancel your subscription (takes effect at period end)')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('demo')
+        .setDescription('Try premium features temporarily (test guilds only)')
+    ),
 ];
 
 async function registerCommands() {
@@ -281,32 +331,36 @@ async function registerCommands() {
     // Register guild commands if DISCORD_GUILD_ID is set (for development)
     if (DISCORD_GUILD_ID) {
       console.log(`\n🏠 Registering guild commands for guild: ${DISCORD_GUILD_ID}`);
-      await rest.put(
+      const response = await rest.put(
         Routes.applicationGuildCommands(DISCORD_APPLICATION_ID, DISCORD_GUILD_ID),
         { body: commandsJson }
-      );
+      ) as any[];
       console.log('✅ Guild commands registered successfully!');
+      console.log(`📊 Discord API returned ${response.length} registered commands`);
       console.log('💡 Guild commands appear instantly for testing');
     } else {
       // Register global commands (for production)
       console.log('\n🌍 Registering global commands...');
-      await rest.put(
+      const response = await rest.put(
         Routes.applicationCommands(DISCORD_APPLICATION_ID),
         { body: commandsJson }
-      );
+      ) as any[];
       console.log('✅ Global commands registered successfully!');
+      console.log(`📊 Discord API returned ${response.length} registered commands`);
       console.log('⏳ Global commands may take up to 1 hour to appear in all servers');
     }
 
     console.log('\n🎉 Command registration completed!');
     console.log('\n📋 Command categories registered:');
     console.log('  🎵 Music Playback: /play, /playnext, /playnow');
-    console.log('  ⏯️  Playback Control: /pause, /resume, /stop, /skip');
+    console.log('  ⏯️  Playback Control: /pause, /resume, /stop, /skip, /voteskip');
     console.log('  🔊 Audio Settings: /volume, /loop, /seek');
     console.log('  📋 Queue Management: /queue, /shuffle, /clear, /remove, /move');
     console.log('  📊 Information: /nowplaying');
-    console.log('  ⚙️  Server Settings: /settings');
-    console.log('  💎 Premium Features: /subscription');
+    console.log('  🎸 Autoplay: /autoplay');
+    console.log('  ⚙️  Server Settings: /settings (6 subcommands)');
+    console.log('  💎 Subscription: /subscription (2 subcommands)');
+    console.log('  ✨ Premium Features: /premium (7 subcommands)');
 
     console.log('\n🔗 Next steps:');
     console.log('  1. Restart Discord (Ctrl+R) to see new commands immediately');

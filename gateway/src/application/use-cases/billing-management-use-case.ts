@@ -207,7 +207,7 @@ export interface AnalyticsService {
 }
 
 export interface BillingService {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   calculateProration(oldPlan: any, newPlan: any, remainingDays: number): Promise<number>;
   processUpgrade(subscription: FeatureSubscription, newTier: SubscriptionTier): Promise<{ success: boolean; chargeAmount?: number }>;
@@ -326,7 +326,7 @@ export class BillingManagementUseCase {
 
       // Calculate tax on proration amount
       const taxCalculation = await this.taxCalculationService.calculateTax(
-        billingCalculation.prorationAmount,
+        billingCalculation.prorationAmount ?? 0,
         'US' // Default country - would be retrieved from customer data
       );
 
@@ -473,7 +473,7 @@ export class BillingManagementUseCase {
         ],
         billingPeriod: {
           start: subscription.startDate,
-          end: subscription.getNextBillingDate()
+          end: subscription.getNextBillingDate() || new Date()
         },
         dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
       };
@@ -744,7 +744,8 @@ export class BillingManagementUseCase {
   async processUpgrade(
     subscription: FeatureSubscription,
     newTier: SubscriptionTier,
-    customerData: CustomerData
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    customerData: CustomerData // TODO: [STRIPE-INTEGRATION] Use customerData for Stripe customer update. See TECHNICAL_DEBT_AND_DECISIONS.md
   ): Promise<{ success: boolean; billingCalculation?: BillingCalculation; error?: string }> {
     try {
       // Calculate upgrade cost
@@ -821,8 +822,10 @@ export class BillingManagementUseCase {
    */
   async convertTrialToPaid(
     subscription: FeatureSubscription,
-    paymentMethodId: string,
-    customerData: CustomerData
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    paymentMethodId: string, // TODO: [STRIPE-INTEGRATION] Use paymentMethodId to attach payment method to customer. See TECHNICAL_DEBT_AND_DECISIONS.md
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    customerData: CustomerData // TODO: [STRIPE-INTEGRATION] Use customerData for Stripe customer creation. See TECHNICAL_DEBT_AND_DECISIONS.md
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ success: boolean; billingSetup?: any; error?: string }> {
     try {

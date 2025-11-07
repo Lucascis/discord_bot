@@ -329,7 +329,7 @@ export class DynamicEmbedsSystem {
   /**
    * Setup live progress updates
    */
-  private startLiveUpdates(guildId: string, initialData: NowPlayingData): void {
+  private startLiveUpdates(guildId: string, _initialData: NowPlayingData): void {
     // Clear existing interval
     const existingInterval = this.updateIntervals.get(guildId);
     if (existingInterval) {
@@ -620,7 +620,7 @@ export class DynamicEmbedsSystem {
   /**
    * Mock function - would integrate with audio service
    */
-  private async getCurrentPlaybackData(guildId: string): Promise<NowPlayingData | null> {
+  private async getCurrentPlaybackData(_guildId: string): Promise<NowPlayingData | null> {
     // This would integrate with the actual audio service to get real-time data
     return null;
   }

@@ -19,17 +19,24 @@
 - **Advanced Autoplay**: 4 intelligent recommendation modes (similar, artist, genre, mixed)
 - **SponsorBlock Integration**: Auto-skip sponsor segments
 
-### 💎 Premium Subscription System
+### 💎 Enterprise Billing System
+- **Multi-Provider Support**: Stripe, MercadoPago, PayPal (pluggable architecture)
+- **Regional Routing**: Automatic provider selection by country
 - **4-Tier Plans**: FREE, BASIC, PREMIUM, ENTERPRISE
 - **Feature Flags**: 15+ configurable tier-based features
-- **Usage Limits**: Dynamic tracking and enforcement
-- **Stripe Integration**: Automated billing and webhooks
-- **Rate Limiting**: Tier-based API rate limits
+- **Customer Management**: Complete CRM with lifecycle tracking
+- **Analytics & Metrics**: Revenue, churn, LTV, cohort analysis
+- **Audit Trail**: Complete billing history for compliance
 
 ### 🏗️ Architecture
 - **Microservices**: Gateway, Audio, API, Worker services
 - **Event-Driven**: Redis pub/sub communication
-- **Scalable**: Horizontal scaling support
+- **Production-Ready Scalability**:
+  - Automatic memory leak prevention with cleanup on disconnect
+  - Global timer management with graceful shutdown
+  - Optimized for thousands of concurrent users
+  - PostgreSQL connection pooling (25 connections)
+  - Redis circuit breaker for fault tolerance
 - **Resilient**: Circuit breakers, retry logic, graceful degradation
 - **Observable**: Prometheus metrics, Sentry error tracking
 
@@ -94,12 +101,10 @@ curl http://localhost:3000/health
 
 | Document | Description |
 |----------|-------------|
-| **[Deployment Guide](DEPLOYMENT_GUIDE.md)** | Complete production deployment instructions |
-| **[Project Status](PROJECT_STATUS.md)** | Current status, metrics, and architecture |
-| **[Subscription System](SUBSCRIPTION_SYSTEM_STATUS.md)** | Premium features and tiers |
-| **[Premium Integration](PREMIUM_INTEGRATION_INSTRUCTIONS.md)** | How to integrate premium features |
-| **[Final Summary](FINAL_SUMMARY.md)** | Implementation summary and statistics |
-| **[Windows Quick Start](WINDOWS_QUICKSTART.md)** | Docker setup for Windows users |
+| **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | Production deployment instructions |
+| **[Project Structure](docs/PROJECT_STRUCTURE.md)** | Architecture and codebase structure |
+| **[Billing System](docs/ENTERPRISE_BILLING_SYSTEM.md)** | Payment integration and monetization |
+| **[Claude Instructions](CLAUDE.md)** | AI assistant development guidelines |
 
 ---
 
@@ -354,9 +359,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ✅ **Performance**: Optimized
 - ✅ **Scalability**: Multi-instance ready
 
-**Version**: 1.0.0
-**Last Updated**: November 2, 2025
-**Status**: ✅ Production Ready
+**Version**: 2.0.0
+**Last Updated**: November 5, 2025
+**Status**: ✅ Production Ready + Enterprise Billing
 
 ---
 

@@ -11,17 +11,22 @@ vi.mock('@discord-bot/logger', () => ({
   }
 }));
 
-// Mock prom-client
-vi.mock('prom-client', () => ({
-  Counter: vi.fn(() => ({
-    labels: vi.fn(() => ({
+// Mock prom-client with proper constructor
+vi.mock('prom-client', () => {
+  const mockCounter = vi.fn(function(this: any) {
+    this.labels = vi.fn(() => ({
       inc: vi.fn()
-    }))
-  })),
-  register: {
-    registerMetric: vi.fn()
-  }
-}));
+    }));
+    return this;
+  });
+
+  return {
+    Counter: mockCounter,
+    register: {
+      registerMetric: vi.fn()
+    }
+  };
+});
 
 describe('Discord API Error Handling', () => {
   beforeEach(() => {

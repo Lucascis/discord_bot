@@ -3,7 +3,7 @@
  * Provides centralized dependency management for the gateway service
  */
 
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Collection } from 'discord.js';
 import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
@@ -163,7 +163,7 @@ export class EnterpriseContainer {
       shards: 'auto',
 
       // Cache optimizations
-      makeCache: () => null,
+      makeCache: () => new Collection(),
 
       // Rate limiting
       rest: {

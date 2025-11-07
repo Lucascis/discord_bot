@@ -365,7 +365,7 @@ export class PostgresEventStore implements IEventStore {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   private async getCurrentVersion(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx: any,

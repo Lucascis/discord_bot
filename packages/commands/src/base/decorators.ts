@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { type CommandPermissions, type CommandRateLimit } from './command.js';
+import { logger } from '@discord-bot/logger';
 
 const METADATA_KEYS = {
   PERMISSIONS: Symbol('permissions'),
@@ -95,11 +96,11 @@ export function LogExecution(_target: unknown, _propertyKey: string, descriptor:
       const result = await originalMethod.apply(this, args);
       const executionTime = Date.now() - startTime;
       
-      console.log(`Command ${this?.metadata?.name || 'unknown'} executed in ${executionTime}ms`);
+      logger.debug(`Command ${this?.metadata?.name || 'unknown'} executed in ${executionTime}ms`);
       return result;
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      console.error(`Command ${this?.metadata?.name || 'unknown'} failed after ${executionTime}ms:`, error);
+      logger.error(`Command ${this?.metadata?.name || 'unknown'} failed after ${executionTime}ms:`, error);
       throw error;
     }
   };

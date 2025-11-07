@@ -37,7 +37,7 @@ const redis = new Redis(env.REDIS_URL);
 async function requestFromGateway<T>(
   requestType: string,
   payload: Record<string, unknown>,
-  timeoutMs: number = 5000
+  timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 5000
 ): Promise<T> {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
@@ -63,7 +63,12 @@ async function requestFromGateway<T>(
         try {
           const response = JSON.parse(message);
           if (response.error) {
-            reject(new Error(response.error));
+            const error = new Error(response.error) as Error & { notFound?: boolean };
+            // Mark as not found error if the error message indicates that
+            if (response.error.toLowerCase().includes('not found')) {
+              error.notFound = true;
+            }
+            reject(error);
           } else {
             resolve(response.data);
           }
@@ -89,7 +94,9 @@ async function requestFromGateway<T>(
  * List accessible guilds with pagination
  */
 router.get('/', validatePagination, asyncHandler(async (req, res) => {
-  const { page, limit } = req.query as unknown as { page: number; limit: number };
+  // Parse query params explicitly to numbers (validatePagination validates but doesn't convert)
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 20;
 
   try {
     logger.info({
@@ -161,6 +168,11 @@ router.get('/:guildId', validateGuildId, asyncHandler(async (req, res) => {
   } catch (error) {
     if (error instanceof NotFoundError) {
       throw error;
+    }
+
+    // Check if it's a not found error from the gateway service
+    if (error instanceof Error && (error as Error & { notFound?: boolean }).notFound) {
+      throw new NotFoundError('Guild');
     }
 
     logger.error({

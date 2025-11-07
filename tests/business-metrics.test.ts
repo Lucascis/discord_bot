@@ -1,14 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { logger, getBusinessMetrics, BusinessMetricsCollector } from '@discord-bot/logger';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { Registry } from 'prom-client';
+
+// Unmock @discord-bot/logger for this test file so we can test the real implementation
+vi.unmock('@discord-bot/logger');
+
+// Now import after unmocking
+import { logger, BusinessMetricsCollector } from '@discord-bot/logger';
 
 describe('Business Metrics Integration Tests', () => {
   let registry: Registry;
   let metricsCollector: BusinessMetricsCollector;
 
   beforeAll(() => {
-    registry = new Registry();
-    metricsCollector = getBusinessMetrics(registry);
     logger.info('Business metrics tests initialized');
   });
 
@@ -17,9 +20,9 @@ describe('Business Metrics Integration Tests', () => {
   });
 
   beforeEach(() => {
-    // Clear registry between tests
-    registry.clear();
-    metricsCollector = getBusinessMetrics(registry);
+    // Create fresh registry and collector for each test
+    registry = new Registry();
+    metricsCollector = new BusinessMetricsCollector(registry);
   });
 
   describe('User Engagement Metrics', () => {

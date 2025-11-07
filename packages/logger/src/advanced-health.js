@@ -31,7 +31,7 @@ export class AdvancedHealthMonitor {
     /**
      * Register a component for health monitoring
      */
-    registerComponent(name, healthCheck) {
+    registerComponent(name, _healthCheck) {
         this.components.set(name, {
             component: name,
             status: 'healthy',

@@ -3,6 +3,7 @@ import { searchCache } from '../services/cache.js';
 import { audioMetrics } from '../services/metrics.js';
 import { searchOptimizer } from '../services/search-optimizer.js';
 import { PerformanceTracker, SearchThrottler } from '../performance.js';
+import { logger } from '@discord-bot/logger';
 
 export type SearchResultLike = { tracks: unknown[] };
 
@@ -77,7 +78,7 @@ export async function smartSearch(
 
         // If no results found, try with more specific YouTube search prefix
         if (result.tracks.length === 0 && !isUrl) {
-          console.log(`No results for "${query}", trying with "music" suffix...`);
+          logger.info(`No results for "${query}", trying with "music" suffix...`);
           const enhancedQuery = `${query} music`;
           const enhancedResult = await player.search(
             { query: enhancedQuery },
@@ -90,7 +91,7 @@ export async function smartSearch(
 
         return result;
       } catch (error) {
-        console.log('Player search failed, using alternative search method:', error);
+        logger.info('Player search failed, using alternative search method:', error);
         // Just throw the error and let the calling code handle no results
         // since we can't reliably access the manager from here
         throw error;

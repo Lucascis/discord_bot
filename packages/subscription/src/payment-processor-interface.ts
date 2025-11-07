@@ -7,7 +7,7 @@
  * @module packages/subscription/payment-processor-interface
  */
 
-import { SubscriptionTier, BillingCycle } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@prisma/client';
 
 export interface PaymentCustomer {
   /** Unique ID from payment provider */
@@ -88,7 +88,7 @@ export interface IPaymentProcessor {
   createCheckoutSession(
     guildId: string,
     tier: SubscriptionTier,
-    billingCycle: BillingCycle,
+    billingCycle: BillingInterval,
     successUrl: string,
     cancelUrl: string
   ): Promise<CheckoutSession>;
@@ -162,7 +162,7 @@ export interface IPaymentProcessor {
    * @param billingCycle - Billing cycle
    * @returns Price ID or null if not configured
    */
-  getPriceId(tier: SubscriptionTier, billingCycle: BillingCycle): string | null;
+  getPriceId(tier: SubscriptionTier, billingCycle: BillingInterval): string | null;
 }
 
 /**

@@ -67,21 +67,21 @@ services:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
       - ./lavalink/plugins:/opt/Lavalink/plugins:rw
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -H 'Authorization: youshallnotpass' http://localhost:2333/version || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider --header='Authorization: ${LAVALINK_PASSWORD}' http://localhost:2333/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     networks:
       - discord-network
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 1.5G
+          cpus: '3'
+          memory: 2G
         reservations:
-          memory: 1G
+          memory: 1.5G
 
   # Discord Gateway Service
   gateway:

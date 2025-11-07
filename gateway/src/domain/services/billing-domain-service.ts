@@ -23,6 +23,7 @@ export interface PricingCalculation {
 }
 
 // Alias for compatibility
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface BillingCalculation extends PricingCalculation {}
 
 export interface PriceAdjustment {
@@ -199,7 +200,7 @@ export class BillingDomainService {
     // Calculate period information
     const periodLengthMs = this.getPeriodLengthMs(currentBilling.type);
     const periodStartDate = lastBillingDate;
-    const periodEndDate = new Date(periodStartDate.getTime() + periodLengthMs);
+    const _periodEndDate = new Date(periodStartDate.getTime() + periodLengthMs);
 
     const totalDays = Math.ceil(periodLengthMs / (1000 * 60 * 60 * 24));
     const usedMs = changeDate.getTime() - periodStartDate.getTime();
@@ -644,14 +645,15 @@ export class BillingDomainService {
    * Calculate period discount
    */
   calculatePeriodDiscount(period: PeriodType, basePrice: number): PriceAdjustment {
-    const discounts = {
+    const discounts: Record<PeriodType, number> = {
       monthly: 0,
       quarterly: 0.05,
       yearly: 0.15,
-      biannual: 0.10
+      trial: 0,
+      lifetime: 0.20
     };
 
-    const discountPercentage = discounts[period] || 0;
+    const discountPercentage = discounts[period];
     const amount = basePrice * discountPercentage;
 
     return {
@@ -669,7 +671,8 @@ export class BillingDomainService {
   validateAndApplyPromoCode(
     promoCode: string,
     finalPrice: number,
-    tier: SubscriptionTier
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    tier: SubscriptionTier // TODO: [PROMO-VALIDATION] Use tier for tier-specific promo code validation. See TECHNICAL_DEBT_AND_DECISIONS.md
   ): { isValid: boolean; adjustment: PriceAdjustment; discount?: number; reason?: string } {
     // Simple validation logic
     const promoCodes: Record<string, { discount: number; validUntil: Date; usageLimit?: number }> = {

@@ -106,7 +106,8 @@ export class AudioCommandService {
     textChannelId: string,
     userId: string,
     query: string,
-    options: AudioCommandOptions = {}
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    options: AudioCommandOptions = {} // TODO: [COMMAND-OPTIONS] Use options for timeout/retry configuration. See TECHNICAL_DEBT_AND_DECISIONS.md
   ): Promise<void> {
     const commandData: StreamCommandData = {
       type,
@@ -137,7 +138,7 @@ export class AudioCommandService {
     const commandData: StreamCommandData = {
       type: 'nowplaying',
       guildId,
-      channelId,
+      ...(channelId ? { channelId } : {}),
       requestId,
       timestamp: Date.now().toString()
     };

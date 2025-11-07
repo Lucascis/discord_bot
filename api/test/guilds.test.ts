@@ -2,29 +2,20 @@ import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
 import { prisma } from '@discord-bot/database';
-import Redis from 'ioredis';
 import { mockGuild, validGuildId, validApiKey } from './fixtures.js';
 
 describe('Guild Routes', () => {
-  let mockRedis: any;
-
   beforeEach(() => {
-    mockRedis = new Redis();
     vi.clearAllMocks();
   });
 
   describe('GET /api/v1/guilds', () => {
     it('should return paginated guild list', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('guild-response:test', JSON.stringify({
-              data: {
-                guilds: [mockGuild],
-                total: 1
-              }
-            }));
-          }, 10);
+      // Configure mock response for guild list
+      (global as any).setMockRedisResponse('GUILD_LIST', {
+        data: {
+          guilds: [mockGuild],
+          total: 1
         }
       });
 
@@ -45,13 +36,11 @@ describe('Guild Routes', () => {
     });
 
     it('should use default pagination values', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('guild-response:test', JSON.stringify({
-              data: { guilds: [], total: 0 }
-            }));
-          }, 10);
+      // Configure mock response with default pagination
+      (global as any).setMockRedisResponse('GUILD_LIST', {
+        data: {
+          guilds: [mockGuild],
+          total: 1
         }
       });
 
@@ -83,7 +72,8 @@ describe('Guild Routes', () => {
     });
 
     it('should handle gateway service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // Don't configure mock response to trigger timeout
+      // This will cause the request to timeout waiting for a response
 
       const res = await request(app)
         .get('/api/v1/guilds')
@@ -97,14 +87,9 @@ describe('Guild Routes', () => {
 
   describe('GET /api/v1/guilds/:guildId', () => {
     it('should return specific guild information', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('guild-response:test', JSON.stringify({
-              data: mockGuild
-            }));
-          }, 10);
-        }
+      // Configure mock response for specific guild
+      (global as any).setMockRedisResponse('GUILD_INFO', {
+        data: mockGuild
       });
 
       const res = await request(app)
@@ -128,14 +113,9 @@ describe('Guild Routes', () => {
     });
 
     it('should handle guild not found', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('guild-response:test', JSON.stringify({
-              data: null
-            }));
-          }, 10);
-        }
+      // Configure mock response for guild not found
+      (global as any).setMockRedisResponse('GUILD_INFO', {
+        error: 'Guild not found'
       });
 
       const res = await request(app)

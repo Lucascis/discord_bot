@@ -5,7 +5,7 @@ import { PaymentService } from '../../application/use-cases/subscription-managem
  * In production, this would integrate with Stripe, PayPal, or similar
  */
 export class StubPaymentService implements PaymentService {
-  async createSubscription(customerId: string, planId: string): Promise<{ subscriptionId: string; paymentUrl: string }> {
+  async createSubscription(_customerId: string, _planId: string): Promise<{ subscriptionId: string; paymentUrl: string }> {
     // Simulate payment processing
     const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const paymentUrl = `https://payments.discord-bot.example.com/checkout/${subscriptionId}`;

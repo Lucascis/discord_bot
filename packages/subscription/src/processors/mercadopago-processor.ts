@@ -8,7 +8,7 @@
  * @status NOT_IMPLEMENTED - Placeholder for future implementation
  */
 
-import { SubscriptionTier, BillingCycle } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import {
   IPaymentProcessor,
@@ -37,7 +37,7 @@ export class MercadoPagoProcessor implements IPaymentProcessor {
   async createCheckoutSession(
     _guildId: string,
     _tier: SubscriptionTier,
-    _billingCycle: BillingCycle,
+    _billingCycle: BillingInterval,
     _successUrl: string,
     _cancelUrl: string
   ): Promise<CheckoutSession> {
@@ -82,7 +82,7 @@ export class MercadoPagoProcessor implements IPaymentProcessor {
     throw new Error('Mercado Pago integration not implemented');
   }
 
-  getPriceId(_tier: SubscriptionTier, _billingCycle: BillingCycle): string | null {
+  getPriceId(_tier: SubscriptionTier, _billingCycle: BillingInterval): string | null {
     throw new Error('Mercado Pago integration not implemented');
   }
 }

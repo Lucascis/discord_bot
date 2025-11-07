@@ -33,7 +33,7 @@ const redis = new Redis(env.REDIS_URL);
 async function requestFromAudio<T>(
   requestType: string,
   payload: Record<string, unknown>,
-  timeoutMs: number = 10000
+  timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 10000
 ): Promise<T> {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 

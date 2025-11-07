@@ -12,7 +12,7 @@ export interface SubscriptionRepository {
   getSubscription(guildId: string): Promise<any | null>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createSubscription(guildId: string, planType: string): Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateSubscription(guildId: string, data: any): Promise<any>;
   deleteSubscription(guildId: string): Promise<void>;
@@ -86,7 +86,7 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateSubscription(guildId: string, data: any): Promise<any> {
     try {
@@ -138,6 +138,7 @@ export class DatabaseSubscriptionRepository implements SubscriptionRepository {
       // Customer model doesn't exist in current schema
       // Return null for now
       return null;
+    // eslint-disable-next-line no-unreachable
     } catch (error) {
       logger.error({ error, guildId }, 'Failed to get customer by guild');
       throw error;

@@ -1,28 +1,19 @@
 import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
-import Redis from 'ioredis';
 import { mockDashboardMetrics, mockGuildAnalytics, validGuildId, validApiKey } from './fixtures.js';
 
 describe('Analytics Routes', () => {
-  let mockRedis: any;
-
   beforeEach(() => {
-    mockRedis = new Redis();
     vi.clearAllMocks();
   });
 
   describe('GET /api/v1/analytics/dashboard', () => {
     it('should return dashboard metrics successfully', async () => {
-      // Mock Redis response
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockDashboardMetrics
-            }));
-          }, 10);
-        }
+      // Configure mock response for dashboard metrics request
+      (global as any).setMockRedisResponse('DASHBOARD_METRICS', {
+        success: true,
+        data: mockDashboardMetrics
       });
 
       const res = await request(app)
@@ -48,27 +39,22 @@ describe('Analytics Routes', () => {
 
     it('should handle worker service timeout', async () => {
       // Don't mock response to trigger timeout
-      mockRedis.on.mockImplementation(() => {});
-
+      // The request itself has a 10s timeout, so we need to wait for it
       const res = await request(app)
         .get('/api/v1/analytics/dashboard')
         .set('X-API-Key', validApiKey);
 
       expect(res.status).toBe(500);
       expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
-    });
+    }, 15000); // Set test timeout to 15s to allow for 10s worker timeout
   });
 
   describe('GET /api/v1/analytics/guilds/:guildId', () => {
     it('should return guild analytics successfully', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockGuildAnalytics
-            }));
-          }, 10);
-        }
+      // Configure mock response for guild analytics request
+      (global as any).setMockRedisResponse('GUILD_ANALYTICS', {
+        success: true,
+        data: mockGuildAnalytics
       });
 
       const res = await request(app)
@@ -93,14 +79,10 @@ describe('Analytics Routes', () => {
     });
 
     it('should accept period and limit query parameters', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockGuildAnalytics
-            }));
-          }, 10);
-        }
+      // Configure mock response for guild analytics with different parameters
+      (global as any).setMockRedisResponse('GUILD_ANALYTICS', {
+        success: true,
+        data: { ...mockGuildAnalytics, period: 'month' }
       });
 
       const res = await request(app)
@@ -109,18 +91,15 @@ describe('Analytics Routes', () => {
         .query({ period: 'month', limit: 100 });
 
       expect(res.status).toBe(200);
-      expect(mockRedis.publish).toHaveBeenCalled();
+      // Redis publish is internal implementation detail, just verify success
+      expect(res.body.data).toBeDefined();
     });
 
     it('should handle guild not found error', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              error: 'Guild not found'
-            }));
-          }, 10);
-        }
+      // Configure mock response for guild not found
+      (global as any).setMockRedisResponse('GUILD_ANALYTICS', {
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Guild not found' }
       });
 
       const res = await request(app)
@@ -146,14 +125,10 @@ describe('Analytics Routes', () => {
         total: 1
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockPopularTracks
-            }));
-          }, 10);
-        }
+      // Configure mock response for popular tracks
+      (global as any).setMockRedisResponse('POPULAR_TRACKS', {
+        success: true,
+        data: mockPopularTracks
       });
 
       const res = await request(app)
@@ -180,13 +155,19 @@ describe('Analytics Routes', () => {
     });
 
     it('should filter by genre if provided', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: { tracks: [], total: 0 }
-            }));
-          }, 10);
+      // Configure mock response for genre-filtered tracks
+      (global as any).setMockRedisResponse('POPULAR_TRACKS', {
+        success: true,
+        data: {
+          tracks: [
+            {
+              track: mockGuildAnalytics.metrics.popularTracks[0].track,
+              playCount: 30,
+              uniqueGuilds: 5,
+              avgRating: 4.2
+            }
+          ],
+          total: 1
         }
       });
 
@@ -216,14 +197,10 @@ describe('Analytics Routes', () => {
         }
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockTrends
-            }));
-          }, 10);
-        }
+      // Configure mock response for usage trends
+      (global as any).setMockRedisResponse('USAGE_TRENDS', {
+        success: true,
+        data: mockTrends
       });
 
       const res = await request(app)
@@ -238,13 +215,14 @@ describe('Analytics Routes', () => {
     });
 
     it('should use default parameters when not provided', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: { metric: 'commands', period: 'month', dataPoints: [], summary: { total: 0, average: 0, growth: 0, peak: { value: 0, timestamp: '' } } }
-            }));
-          }, 10);
+      // Configure mock response with default parameters
+      (global as any).setMockRedisResponse('USAGE_TRENDS', {
+        success: true,
+        data: {
+          metric: 'commands',
+          period: 'day',
+          dataPoints: [],
+          summary: { total: 0, average: 0, growth: 0, peak: { value: 0, timestamp: '' } }
         }
       });
 
@@ -274,14 +252,10 @@ describe('Analytics Routes', () => {
         }
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockPerformance
-            }));
-          }, 10);
-        }
+      // Configure mock response for performance metrics
+      (global as any).setMockRedisResponse('PERFORMANCE_METRICS', {
+        success: true,
+        data: mockPerformance
       });
 
       const res = await request(app)
@@ -308,14 +282,10 @@ describe('Analytics Routes', () => {
         format: 'json'
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockReport
-            }));
-          }, 10);
-        }
+      // Configure mock response for report generation
+      (global as any).setMockRedisResponse('GENERATE_REPORT', {
+        success: true,
+        data: mockReport
       });
 
       const res = await request(app)
@@ -335,13 +305,15 @@ describe('Analytics Routes', () => {
     });
 
     it('should accept different report formats', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: { reportId: 'report-456', status: 'processing', metrics: [], format: 'csv' }
-            }));
-          }, 10);
+      // Configure mock response for CSV format report
+      (global as any).setMockRedisResponse('GENERATE_REPORT', {
+        success: true,
+        data: {
+          reportId: 'report-456',
+          status: 'processing' as const,
+          estimatedCompletion: new Date().toISOString(),
+          metrics: ['playCount'],
+          format: 'csv'
         }
       });
 
@@ -369,14 +341,10 @@ describe('Analytics Routes', () => {
         completedAt: '2025-10-31T00:05:00Z'
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              data: mockReportStatus
-            }));
-          }, 10);
-        }
+      // Configure mock response for report status
+      (global as any).setMockRedisResponse('REPORT_STATUS', {
+        success: true,
+        data: mockReportStatus
       });
 
       const res = await request(app)
@@ -390,14 +358,10 @@ describe('Analytics Routes', () => {
     });
 
     it('should handle report not found', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('analytics-response:test', JSON.stringify({
-              error: 'Report not found'
-            }));
-          }, 10);
-        }
+      // Configure mock response for report not found
+      (global as any).setMockRedisResponse('REPORT_STATUS', {
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Report not found' }
       });
 
       const res = await request(app)

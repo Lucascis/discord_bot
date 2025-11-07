@@ -31,7 +31,8 @@
     "ioredis": "^5.4.1",
     "lavalink-client": "^2.5.9",
     "prom-client": "^15.1.3",
-    "redis": "^5.8.2"
+    "redis": "^5.8.2",
+    "stripe": "^14.25.0"
   },
   "optionalDependencies": {
     "@opentelemetry/resources": "^1.23.0",

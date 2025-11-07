@@ -139,7 +139,7 @@ export function resetDatabaseMetrics(): void {
   totalQueryTime = 0;
 }
 
-export { PrismaClient, SubscriptionTier, BillingCycle } from '@prisma/client';
+export { PrismaClient, SubscriptionTier, BillingInterval } from '@prisma/client';
 export type { Prisma } from '@prisma/client';
 
 // Logger dependency injection

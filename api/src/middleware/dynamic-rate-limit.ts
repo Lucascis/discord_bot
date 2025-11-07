@@ -167,6 +167,14 @@ export class InMemoryRateLimitStore implements RateLimitStore {
     return 1;
   }
 
+  /**
+   * Clear all stored data - useful for tests
+   */
+  clear(): void {
+    this.buckets.clear();
+    this.values.clear();
+  }
+
   private getBucket(key: string): { entries: ScoredMember[]; expireAt?: number } {
     const bucket = this.buckets.get(key);
     if (!bucket) {
@@ -351,14 +359,32 @@ export class DynamicRateLimiter {
         return cached;
       }
 
-      const subscription = await prisma.subscription.findUnique({
-        where: { guildId },
-        select: { tier: true, status: true },
+      // Query customer by discordUserId (using guildId for backward compatibility)
+      const customer = await prisma.customer.findUnique({
+        where: { discordUserId: guildId },
+        include: {
+          subscriptions: {
+            where: {
+              status: {
+                in: ['ACTIVE', 'TRIALING', 'PAST_DUE'],
+              },
+            },
+            include: {
+              plan: true,
+            },
+            take: 1,
+          },
+        },
       });
 
-      const tier = subscription?.tier && isSubscriptionTier(subscription.tier)
-        ? subscription.tier
-        : this.defaultTier;
+      // Get tier from the first active subscription's plan name
+      let tier = this.defaultTier;
+      if (customer?.subscriptions?.[0]?.plan?.name) {
+        const planName = customer.subscriptions[0].plan.name.toUpperCase();
+        if (isSubscriptionTier(planName)) {
+          tier = planName;
+        }
+      }
 
       await this.store.set(cacheKey, tier, 'PX', this.subscriptionCacheTtlMs);
 

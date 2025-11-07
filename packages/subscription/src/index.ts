@@ -7,8 +7,10 @@
  * @packageDocumentation
  */
 
-// Core service
+// Core services
 export { SubscriptionService } from './subscription-service.js';
+export { GuildService } from './guild-service.js';
+export type { GuildInfo } from './guild-service.js';
 
 // Plan definitions
 export {
@@ -94,7 +96,7 @@ export type {
 export {
   SubscriptionTier,
   SubscriptionStatus,
-  BillingCycle,
+  BillingInterval,
   InvoiceStatus,
   FeatureCategory,
   FeatureType,

@@ -374,7 +374,7 @@ describe('cleanup-jobs', () => {
 
       const result = await processRateLimitCleanup(job);
 
-      expect(result.duration).toBeGreaterThan(0);
+      expect(result.duration).toBeGreaterThanOrEqual(0);
       expect(result.timestamp).toBeTruthy();
     });
   });

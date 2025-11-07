@@ -115,7 +115,7 @@ export async function addQueueItemCleanup(
   await cleanupQueue.add('queue_items_cleanup', jobData, {
     priority: jobData.priority,
     delay: options?.delay,
-    repeat: options?.repeat,
+    repeat: options?.cron ? { pattern: options.cron } : options?.repeat,
     removeOnComplete: queueConfig.defaultJobOptions.removeOnComplete,
     removeOnFail: queueConfig.defaultJobOptions.removeOnFail
   });
@@ -145,7 +145,7 @@ export async function addRateLimitCleanup(
   await cleanupQueue.add('rate_limits_cleanup', jobData, {
     priority: jobData.priority,
     delay: options?.delay,
-    repeat: options?.repeat,
+    repeat: options?.cron ? { pattern: options.cron } : options?.repeat,
     removeOnComplete: queueConfig.defaultJobOptions.removeOnComplete,
     removeOnFail: queueConfig.defaultJobOptions.removeOnFail
   });
@@ -177,7 +177,7 @@ export async function addAuditLogsCleanup(
   await cleanupQueue.add('audit_logs_cleanup', jobData, {
     priority: jobData.priority,
     delay: options?.delay,
-    repeat: options?.repeat,
+    repeat: options?.cron ? { pattern: options.cron } : options?.repeat,
     removeOnComplete: queueConfig.defaultJobOptions.removeOnComplete,
     removeOnFail: queueConfig.defaultJobOptions.removeOnFail
   });
@@ -207,7 +207,7 @@ export async function addCacheCleanup(
   await cleanupQueue.add('cache_cleanup', jobData, {
     priority: jobData.priority,
     delay: options?.delay,
-    repeat: options?.repeat,
+    repeat: options?.cron ? { pattern: options.cron } : options?.repeat,
     removeOnComplete: queueConfig.defaultJobOptions.removeOnComplete,
     removeOnFail: queueConfig.defaultJobOptions.removeOnFail
   });
@@ -237,7 +237,7 @@ export async function addTempFilesCleanup(
   await cleanupQueue.add('temp_files_cleanup', jobData, {
     priority: jobData.priority,
     delay: options?.delay,
-    repeat: options?.repeat,
+    repeat: options?.cron ? { pattern: options.cron } : options?.repeat,
     removeOnComplete: queueConfig.defaultJobOptions.removeOnComplete,
     removeOnFail: queueConfig.defaultJobOptions.removeOnFail
   });

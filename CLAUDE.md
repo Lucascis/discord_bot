@@ -44,14 +44,30 @@ This Discord music bot uses a microservices architecture with four main services
 ### Communication
 - **Redis pub/sub** - Primary inter-service communication via channels:
   - `discord-bot:commands` - Gateway → Audio command routing
-  - `discord-bot:to-audio` - Gateway → Audio Discord events & **raw voice events** (Critical Fix: September 24, 2025)
+  - `discord-bot:to-audio` - Gateway → Audio Discord events
   - `discord-bot:to-discord` - Audio → Gateway Lavalink events
   - `discord-bot:ui:now` - Audio → Gateway real-time UI updates
+  - `discord-bot:lavalink-raw-events` - Gateway → Audio raw Discord gateway events (November 2025)
 - **PostgreSQL** - Persistent storage for queues, settings, and feature flags
 - **Lavalink** - External audio processing server
 
-### Critical Voice Connection Fix (September 24, 2025)
-**Raw Discord Events Handler**: Gateway now forwards `VOICE_SERVER_UPDATE` and `VOICE_STATE_UPDATE` events to Audio service, enabling `player.connected = true` and functional audio playback. This resolves the race condition that prevented voice connection establishment.
+### Voice Connection Architecture (November 2025)
+**Critical Implementation**: Lavalink-client requires raw Discord gateway events to establish voice connections. The bot implements a dedicated raw event forwarding system:
+
+#### Gateway Service ([gateway/src/main.ts:2422-2536](gateway/src/main.ts#L2422-L2536))
+- Subscribes to raw Discord gateway events via `client.ws.on(GatewayDispatchEvents.*)`
+- Forwards `VOICE_SERVER_UPDATE`, `VOICE_STATE_UPDATE`, and `CHANNEL_DELETE` events to Audio service
+- Implements deduplication with 1-second window to prevent duplicate processing
+- Uses proper Discord.js v14 pattern (not deprecated `client.on('raw')`)
+- Publishes events to Redis channel `discord-bot:lavalink-raw-events` in Discord gateway packet format: `{t: "EVENT_NAME", d: {...}}`
+
+#### Audio Service ([audio/src/index.ts:1135-1169](audio/src/index.ts#L1135-L1169))
+- Subscribes to `discord-bot:lavalink-raw-events` Redis channel
+- Receives raw Discord gateway events and forwards to `manager.sendRawData(packet)`
+- Enables Lavalink to establish UDP connection to Discord voice servers
+- Results in `player.connected = true` and functional audio playback
+
+**Why This Is Required**: Without raw gateway events, Lavalink cannot establish the WebSocket and UDP connections needed for voice communication. The standard Discord.js events don't provide the low-level data Lavalink needs for voice server connection.
 
 ## Key Technologies
 - **TypeScript + Node.js** with ES modules
@@ -62,7 +78,7 @@ This Discord music bot uses a microservices architecture with four main services
   - **SponsorBlock Plugin** - Automatic sponsor segment skipping for long sets
   - **LavaSrc Plugin v4.8.1** - Multi-platform support (Spotify, YouTube Music)
   - **LavaSearch Plugin v1.0.0** - Advanced search capabilities
-- **lavalink-client v2.5.9** - Unified across all services (Critical Update: September 24, 2025)
+- **lavalink-client v2.5.9** - Unified across all services with raw event forwarding (November 2025)
 - **Prisma** for database ORM
 - **Vitest** for testing
 - **OpenTelemetry** for observability
@@ -109,11 +125,34 @@ All services implement graceful shutdown, health checks, and structured error lo
 
 ### Performance Optimizations
 - Search results cached for 5 minutes
-- Search throttling prevents API abuse  
+- Search throttling prevents API abuse
 - Batch queue updates to reduce database load
 - Memory monitoring for garbage collection
 - **Lavalink optimizations**: High-quality opus encoding (quality: 10), advanced resampling, optimized buffer settings
 - **YouTube bypass**: Multiple client configurations for maximum compatibility
+
+### Scalability & Resource Management (November 2025)
+**Production-ready for thousands of concurrent users with automatic resource cleanup:**
+
+#### Memory Leak Prevention
+- **Automatic Map Cleanup**: Guild-specific data (`previousTracks`, `previousTrackTimestamps`, `mutedVolumes`, `activeFilterPresets`) automatically cleared on player disconnect
+- **Centralized Cleanup Function**: `cleanupGuildMaps()` in [audio/src/index.ts:3218-3248](audio/src/index.ts#L3218-L3248)
+- **Logging**: Comprehensive cleanup metrics track memory usage
+
+#### Timer Management
+- **Global Timer Tracking**: All `setInterval`/`setTimeout` calls registered in `globalTimers` object
+- **Graceful Shutdown**: All timers cleared on SIGINT/SIGTERM to prevent resource leaks
+- **Implementation**: [audio/src/index.ts:340-343](audio/src/index.ts#L340-L343), [audio/src/index.ts:2897-2905](audio/src/index.ts#L2897-L2905)
+
+#### Connection Pooling
+- **PostgreSQL**: 25 connection pool (Prisma default for production)
+- **Redis**: Circuit breaker pattern with automatic reconnection
+- **Lavalink**: HTTP pool size 32, max pending requests 128 (optimized for concurrent operations)
+
+#### Configuration
+- **Audio Service**: 1GB memory limit, 512MB reserved
+- **Lavalink**: 3 CPUs, 2GB memory, optimized for audio processing
+- **Buffer Settings**: 800ms buffer, 10s frame buffer (prevents lag without excessive memory)
 
 ### Autoplay System
 The bot features an advanced autoplay system with multiple recommendation modes:
@@ -157,6 +196,71 @@ The bot uses an optimized Lavalink configuration (`lavalink/application.yml`) wi
 - **Performance tuning**: 400ms buffer, 5s frame buffer, seek ghosting enabled
 - **Multiple YouTube clients**: Ensures maximum compatibility and bypass capabilities
 - **SponsorBlock integration**: Automatically skips sponsor segments in long DJ sets
+
+## SaaS Platform Features (Phase 1 - November 2025)
+
+### Guild-Based Subscription Management
+The bot implements a complete guild-based subscription system that separates Discord servers from user billing:
+
+#### Guild Models
+- **Guild**: Represents a Discord server in the platform database
+  - `discordGuildId`: Unique Discord server ID
+  - `name`, `icon`, `ownerId`: Server metadata
+  - `isTestGuild`: Flag for test/development servers
+- **GuildSubscription**: Manages subscription tier per server
+  - `tier`: FREE, BASIC, PREMIUM, or ENTERPRISE
+  - `status`: ACTIVE, TRIALING, CANCELED, etc.
+  - Support for multiple payment providers (Stripe, MercadoPago, PayPal)
+
+#### Test Guild Auto-Provisioning
+Environment variable `PREMIUM_TEST_GUILD_IDS` enables automatic ENTERPRISE tier for development/testing:
+
+```bash
+# .env
+PREMIUM_TEST_GUILD_IDS=123456789012345678,987654321098765432
+```
+
+**How it works:**
+1. Configure test guild IDs in environment
+2. GuildService reads IDs on initialization
+3. First request to test guild automatically provisions:
+   - Creates Guild record with `isTestGuild=true`
+   - Creates GuildSubscription with tier=ENTERPRISE
+   - All premium features instantly unlocked
+4. Subsequent requests use fast indexed database lookup
+
+#### GuildService API
+Located in `packages/subscription/src/guild-service.ts`:
+
+```typescript
+import { GuildService } from '@discord-bot/subscription';
+
+const guildService = new GuildService(prisma, testGuildIds);
+
+// Get tier (auto-provisions if test guild)
+const tier = await guildService.getGuildTier(guildId);
+
+// Get complete guild info
+const info = await guildService.getGuildInfo(guildId);
+
+// Update subscription tier
+await guildService.updateGuildTier(guildId, SubscriptionTier.PREMIUM);
+
+// Cancel subscription
+await guildService.cancelGuildSubscription(guildId, immediately, reason);
+```
+
+#### Integration Points
+- **Gateway Middleware**: `gateway/src/middleware/subscription-middleware.ts` uses GuildService for tier checks
+- **Database**: Prisma models in `packages/database/prisma/schema.prisma`
+- **Config**: Environment variable parsing in `packages/config/src/index.ts`
+- **Tests**: Comprehensive test suite in `packages/subscription/test/guild-service.test.ts` (15 tests)
+
+#### Migration Path
+Database migration available at:
+- `packages/database/prisma/migrations/20251107000000_add_guild_models/migration.sql`
+
+Run migration: `cd packages/database && pnpm prisma migrate deploy`
 
 ## Code Quality & Security
 

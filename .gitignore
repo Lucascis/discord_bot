@@ -186,3 +186,26 @@ volumes/
 dist/
 build/
 *.tsbuildinfo
+
+# Temporary development files
+nul
+fix-*.sh
+fix-*.js
+**/test-simple.*
+*_SESSION_*.md
+*_TEST_*.md
+*_STATUS.md
+*_SUMMARY.md
+*_STRATEGY.md
+*_COMPLETE.md
+*_CHANGES.md
+*_PLAN.md
+*_APPLIED.md
+TEST_STATUS.md
+test-output.txt
+test_results.txt
+final_test_results.txt
+*-test-results.txt
+temp_*.sql
+*.backup.prisma
+schema-*.prisma

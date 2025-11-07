@@ -277,10 +277,13 @@ export class MetricsCollector {
   /**
    * Get metrics for specific labels
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getMetricsByGuild(guildId: string): Record<string, any> {
     const activeSessionsMetric = this.promActiveSessionsGauge.labels(guildId);
     const queueSizeMetric = this.promQueueSizeGauge.labels(guildId);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
+ 
+ 
 
     return {
       activeSessions: activeSessionsMetric,

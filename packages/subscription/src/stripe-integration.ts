@@ -4,7 +4,7 @@
  */
 
 import Stripe from 'stripe';
-import { PrismaClient, SubscriptionTier, SubscriptionStatus, BillingCycle, InvoiceStatus } from '@prisma/client';
+import { PrismaClient, SubscriptionTier, SubscriptionStatus, BillingInterval, InvoiceStatus } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import { SubscriptionService } from './subscription-service.js';
 import type { StripeWebhookEvent } from './types.js';
@@ -45,28 +45,12 @@ export class StripeIntegration {
   async createCheckoutSession(
     guildId: string,
     tier: SubscriptionTier,
-    billingCycle: BillingCycle,
+    billingCycle: BillingInterval,
     successUrl: string,
     cancelUrl: string
   ): Promise<Stripe.Checkout.Session> {
-    // Get or create customer
-    let subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
-    });
-
-    let customerId = subscription?.stripeCustomerId;
-
-    if (!customerId) {
-      const customer = await this.createCustomer(guildId);
-      customerId = customer.id;
-
-      if (subscription) {
-        await this.prisma.subscription.update({
-          where: { guildId },
-          data: { stripeCustomerId: customerId },
-        });
-      }
-    }
+    // Get or create Stripe customer
+    const stripeCustomerId = await this.getOrCreateStripeCustomer(guildId);
 
     // Get price ID based on tier and billing cycle
     const priceId = this.getPriceId(tier, billingCycle);
@@ -77,7 +61,7 @@ export class StripeIntegration {
 
     // Create checkout session
     const session = await this.stripe.checkout.sessions.create({
-      customer: customerId,
+      customer: stripeCustomerId,
       mode: 'subscription',
       line_items: [
         {
@@ -109,18 +93,16 @@ export class StripeIntegration {
    * Create customer portal session for managing subscription
    */
   async createPortalSession(guildId: string, returnUrl: string): Promise<Stripe.BillingPortal.Session> {
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
-    });
+    // Get or create Stripe customer
+    const stripeCustomerId = await this.getOrCreateStripeCustomer(guildId);
 
-    if (!subscription?.stripeCustomerId) {
-      throw new Error('No Stripe customer found for this guild');
-    }
-
+    // Create billing portal session
     const session = await this.stripe.billingPortal.sessions.create({
-      customer: subscription.stripeCustomerId,
+      customer: stripeCustomerId,
       return_url: returnUrl,
     });
+
+    logger.info({ guildId, sessionId: session.id }, 'Stripe billing portal session created');
 
     return session;
   }
@@ -198,197 +180,339 @@ export class StripeIntegration {
 
   private async handleSubscriptionCreated(event: StripeWebhookEvent): Promise<void> {
     const stripeSubscription = event.data.object as Stripe.Subscription;
-    const guildId = stripeSubscription.metadata?.guildId;
-    const tier = (stripeSubscription.metadata?.tier as SubscriptionTier) || SubscriptionTier.BASIC;
+    const stripeCustomerId = stripeSubscription.customer as string;
+    const stripePriceId = stripeSubscription.items.data[0]?.price.id;
 
-    if (!guildId) {
-      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing guildId in subscription metadata');
+    if (!stripeCustomerId) {
+      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing customer ID in subscription');
       return;
     }
 
-    // Determine billing cycle from price
-    const billingCycle = this.getBillingCycleFromPrice(stripeSubscription);
+    if (!stripePriceId) {
+      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing price ID in subscription');
+      return;
+    }
 
-    // Create or update subscription
+    // Find customer by Stripe customer ID
+    const customer = await this.prisma.customer.findUnique({
+      where: { stripeCustomerId },
+    });
+
+    if (!customer) {
+      logger.warn({ stripeCustomerId, subscriptionId: stripeSubscription.id }, 'Customer not found');
+      return;
+    }
+
+    // Find price to get plan association
+    const price = await this.prisma.subscriptionPrice.findUnique({
+      where: {
+        provider_providerPriceId: {
+          provider: 'stripe',
+          providerPriceId: stripePriceId,
+        },
+      },
+      include: {
+        plan: true,
+      },
+    });
+
+    if (!price) {
+      logger.warn({ stripePriceId, subscriptionId: stripeSubscription.id }, 'Price not found in database');
+      return;
+    }
+
+    // Check if subscription already exists
     const existingSubscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+      where: { providerSubscriptionId: stripeSubscription.id },
     });
 
     if (existingSubscription) {
+      // Update existing subscription
       await this.prisma.subscription.update({
-        where: { guildId },
+        where: { providerSubscriptionId: stripeSubscription.id },
         data: {
-          tier,
           status: this.mapStripeStatus(stripeSubscription.status),
-          billingCycle,
           currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
           currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
-          stripeSubscriptionId: stripeSubscription.id,
-          stripeCustomerId: stripeSubscription.customer as string,
-          isTrialing: stripeSubscription.status === 'trialing',
           trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
           trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
         },
       });
     } else {
-      await this.subscriptionService.createSubscription({
-        guildId,
-        tier,
-        billingCycle,
-        stripeCustomerId: stripeSubscription.customer as string,
-      });
-
-      await this.prisma.subscription.update({
-        where: { guildId },
+      // Create new subscription
+      await this.prisma.subscription.create({
         data: {
-          stripeSubscriptionId: stripeSubscription.id,
+          customerId: customer.id,
+          planId: price.planId,
+          priceId: price.id,
+          provider: 'stripe',
+          providerSubscriptionId: stripeSubscription.id,
+          status: this.mapStripeStatus(stripeSubscription.status),
           currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
           currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+          trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
+          trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
         },
       });
     }
 
-    logger.info({ guildId, tier, subscriptionId: stripeSubscription.id }, 'Subscription created in database');
+    logger.info(
+      {
+        customerId: customer.id,
+        planName: price.plan.name,
+        subscriptionId: stripeSubscription.id
+      },
+      'Subscription created in database'
+    );
   }
 
   private async handleSubscriptionUpdated(event: StripeWebhookEvent): Promise<void> {
     const stripeSubscription = event.data.object as Stripe.Subscription;
-    const guildId = stripeSubscription.metadata?.guildId;
+    const stripeCustomerId = stripeSubscription.customer as string;
+    const stripePriceId = stripeSubscription.items.data[0]?.price.id;
 
-    if (!guildId) {
-      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing guildId in subscription metadata');
+    if (!stripeCustomerId) {
+      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing customer ID in subscription');
       return;
     }
 
+    // Find subscription by provider subscription ID
     const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+      where: { providerSubscriptionId: stripeSubscription.id },
+      include: {
+        customer: true,
+        plan: true,
+        price: true,
+      },
     });
 
     if (!subscription) {
-      logger.warn({ guildId }, 'Subscription not found for update');
+      logger.warn({ subscriptionId: stripeSubscription.id }, 'Subscription not found for update');
       return;
     }
 
+    // Check if plan/price changed
+    let planId = subscription.planId;
+    let priceId = subscription.priceId;
+
+    if (stripePriceId && stripePriceId !== subscription.price.providerPriceId) {
+      const newPrice = await this.prisma.subscriptionPrice.findUnique({
+        where: {
+          provider_providerPriceId: {
+            provider: 'stripe',
+            providerPriceId: stripePriceId,
+          },
+        },
+      });
+
+      if (newPrice) {
+        planId = newPrice.planId;
+        priceId = newPrice.id;
+      }
+    }
+
+    // Update subscription
     await this.prisma.subscription.update({
-      where: { guildId },
+      where: { providerSubscriptionId: stripeSubscription.id },
       data: {
+        planId,
+        priceId,
         status: this.mapStripeStatus(stripeSubscription.status),
         currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
         currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
         cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
+        trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
+        trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
       },
     });
 
-    logger.info({ guildId, subscriptionId: stripeSubscription.id }, 'Subscription updated');
+    logger.info(
+      {
+        customerId: subscription.customerId,
+        subscriptionId: stripeSubscription.id,
+        status: stripeSubscription.status,
+      },
+      'Subscription updated'
+    );
   }
 
   private async handleSubscriptionDeleted(event: StripeWebhookEvent): Promise<void> {
     const stripeSubscription = event.data.object as Stripe.Subscription;
-    const guildId = stripeSubscription.metadata?.guildId;
 
-    if (!guildId) {
-      logger.warn({ subscriptionId: stripeSubscription.id }, 'Missing guildId in subscription metadata');
+    // Find subscription by provider subscription ID
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { providerSubscriptionId: stripeSubscription.id },
+      include: {
+        customer: true,
+      },
+    });
+
+    if (!subscription) {
+      logger.warn({ subscriptionId: stripeSubscription.id }, 'Subscription not found for deletion');
       return;
     }
 
-    // Downgrade to FREE tier
-    await this.subscriptionService.updateSubscription(guildId, {
-      tier: SubscriptionTier.FREE,
-    });
-
+    // Update subscription status to canceled
     await this.prisma.subscription.update({
-      where: { guildId },
+      where: { providerSubscriptionId: stripeSubscription.id },
       data: {
         status: SubscriptionStatus.CANCELED,
         canceledAt: new Date(),
       },
     });
 
-    logger.info({ guildId, subscriptionId: stripeSubscription.id }, 'Subscription canceled');
+    logger.info(
+      {
+        customerId: subscription.customerId,
+        subscriptionId: stripeSubscription.id,
+      },
+      'Subscription canceled'
+    );
   }
 
   private async handleInvoicePaid(event: StripeWebhookEvent): Promise<void> {
     const invoice = event.data.object as Stripe.Invoice;
-    const subscriptionId = invoice.subscription as string;
+    const stripeSubscriptionId = invoice.subscription as string | null;
+    const stripeCustomerId = invoice.customer as string;
 
-    if (!subscriptionId) return;
+    if (!stripeCustomerId) {
+      logger.warn({ invoiceId: invoice.id }, 'Missing customer ID in invoice');
+      return;
+    }
 
-    const stripeSubscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-    const guildId = stripeSubscription.metadata?.guildId;
-
-    if (!guildId) return;
-
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+    // Find customer by Stripe customer ID
+    const customer = await this.prisma.customer.findUnique({
+      where: { stripeCustomerId },
     });
 
-    if (!subscription) return;
+    if (!customer) {
+      logger.warn({ stripeCustomerId, invoiceId: invoice.id }, 'Customer not found');
+      return;
+    }
+
+    // Find subscription if present
+    let subscription = null;
+    if (stripeSubscriptionId) {
+      subscription = await this.prisma.subscription.findUnique({
+        where: { providerSubscriptionId: stripeSubscriptionId },
+        include: { plan: true },
+      });
+    }
 
     // Create invoice record
     await this.prisma.invoice.create({
       data: {
-        subscriptionId: subscription.id,
-        invoiceNumber: invoice.number || `INV-${invoice.id}`,
+        customerId: customer.id,
+        subscriptionId: subscription?.id,
+        provider: 'stripe',
+        providerInvoiceId: invoice.id,
+        number: invoice.number || `INV-${invoice.id}`,
         status: InvoiceStatus.PAID,
-        amountDue: invoice.amount_due,
-        amountPaid: invoice.amount_paid,
-        currency: invoice.currency,
-        periodStart: new Date(invoice.period_start * 1000),
-        periodEnd: new Date(invoice.period_end * 1000),
-        stripeInvoiceId: invoice.id,
-        paymentIntentId: invoice.payment_intent as string,
-        paymentMethod: 'stripe',
+        subtotal: invoice.subtotal || 0,
+        tax: invoice.tax || 0,
+        total: invoice.total || 0,
+        amountPaid: invoice.amount_paid || 0,
+        amountDue: invoice.amount_due || 0,
+        currency: invoice.currency.toUpperCase(),
+        periodStart: invoice.period_start ? new Date(invoice.period_start * 1000) : null,
+        periodEnd: invoice.period_end ? new Date(invoice.period_end * 1000) : null,
         paidAt: invoice.status_transitions.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : null,
+        hostedInvoiceUrl: invoice.hosted_invoice_url,
+        invoicePdfUrl: invoice.invoice_pdf,
       },
     });
 
-    // Log event
-    await this.prisma.subscriptionEvent.create({
+    // Log billing event
+    await this.prisma.billingHistory.create({
       data: {
-        guildId,
-        eventType: 'PAYMENT_SUCCEEDED',
-        tier: subscription.tier,
+        customerId: customer.id,
+        subscriptionId: subscription?.id,
+        eventType: 'INVOICE_PAID',
+        provider: 'stripe',
+        description: `Invoice ${invoice.number || invoice.id} paid successfully`,
+        amount: invoice.amount_paid || 0,
+        currency: invoice.currency.toUpperCase(),
+        actor: 'webhook',
       },
     });
 
-    logger.info({ guildId, invoiceId: invoice.id }, 'Invoice paid');
+    logger.info(
+      {
+        customerId: customer.id,
+        subscriptionId: subscription?.id,
+        invoiceId: invoice.id,
+        amount: invoice.amount_paid,
+      },
+      'Invoice paid'
+    );
   }
 
   private async handleInvoicePaymentFailed(event: StripeWebhookEvent): Promise<void> {
     const invoice = event.data.object as Stripe.Invoice;
-    const subscriptionId = invoice.subscription as string;
+    const stripeSubscriptionId = invoice.subscription as string | null;
+    const stripeCustomerId = invoice.customer as string;
 
-    if (!subscriptionId) return;
+    if (!stripeCustomerId) {
+      logger.warn({ invoiceId: invoice.id }, 'Missing customer ID in invoice');
+      return;
+    }
 
-    const stripeSubscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-    const guildId = stripeSubscription.metadata?.guildId;
-
-    if (!guildId) return;
-
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { guildId },
+    // Find customer by Stripe customer ID
+    const customer = await this.prisma.customer.findUnique({
+      where: { stripeCustomerId },
     });
 
-    if (!subscription) return;
+    if (!customer) {
+      logger.warn({ stripeCustomerId, invoiceId: invoice.id }, 'Customer not found');
+      return;
+    }
 
-    // Update subscription status
-    await this.prisma.subscription.update({
-      where: { guildId },
+    // Find subscription if present
+    let subscription = null;
+    if (stripeSubscriptionId) {
+      subscription = await this.prisma.subscription.findUnique({
+        where: { providerSubscriptionId: stripeSubscriptionId },
+        include: { plan: true },
+      });
+
+      if (subscription) {
+        // Update subscription status to past due
+        await this.prisma.subscription.update({
+          where: { providerSubscriptionId: stripeSubscriptionId },
+          data: {
+            status: SubscriptionStatus.PAST_DUE,
+          },
+        });
+      }
+    }
+
+    // Log billing event
+    await this.prisma.billingHistory.create({
       data: {
-        status: SubscriptionStatus.PAST_DUE,
+        customerId: customer.id,
+        subscriptionId: subscription?.id,
+        eventType: 'INVOICE_PAYMENT_FAILED',
+        provider: 'stripe',
+        description: `Invoice ${invoice.number || invoice.id} payment failed`,
+        amount: invoice.amount_due || 0,
+        currency: invoice.currency.toUpperCase(),
+        actor: 'webhook',
+        metadata: {
+          invoiceId: invoice.id,
+          attemptCount: invoice.attempt_count,
+        },
       },
     });
 
-    // Log event
-    await this.prisma.subscriptionEvent.create({
-      data: {
-        guildId,
-        eventType: 'PAYMENT_FAILED',
-        tier: subscription.tier,
+    logger.warn(
+      {
+        customerId: customer.id,
+        subscriptionId: subscription?.id,
+        invoiceId: invoice.id,
+        amountDue: invoice.amount_due,
       },
-    });
-
-    logger.warn({ guildId, invoiceId: invoice.id }, 'Invoice payment failed');
+      'Invoice payment failed'
+    );
   }
 
   private async handleTrialWillEnd(event: StripeWebhookEvent): Promise<void> {
@@ -406,20 +530,104 @@ export class StripeIntegration {
   // HELPER METHODS
   // ========================================
 
-  private getPriceId(tier: SubscriptionTier, billingCycle: BillingCycle): string | undefined {
+  /**
+   * Get active subscription by guild ID
+   * @param guildId - Discord guild ID
+   * @returns Active subscription or null
+   */
+  private async getSubscriptionByGuildId(guildId: string) {
+    // Find customer by Discord user ID (using guildId)
+    const customer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+      include: {
+        subscriptions: {
+          include: {
+            plan: true,
+            price: true,
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      return null;
+    }
+
+    // Filter for active subscriptions
+    const activeSubscription = customer.subscriptions.find(
+      (sub) => sub.status === SubscriptionStatus.ACTIVE || sub.status === SubscriptionStatus.TRIALING
+    );
+
+    return activeSubscription || null;
+  }
+
+  /**
+   * Get or create Stripe customer for a guild
+   * @param guildId - Discord guild ID
+   * @param email - Optional email address
+   * @returns Stripe customer ID
+   */
+  private async getOrCreateStripeCustomer(guildId: string, email?: string): Promise<string> {
+    // Check if customer already exists
+    const existingCustomer = await this.prisma.customer.findUnique({
+      where: { discordUserId: guildId },
+    });
+
+    if (existingCustomer?.stripeCustomerId) {
+      return existingCustomer.stripeCustomerId;
+    }
+
+    // Use placeholder email if none provided
+    const customerEmail = email || `guild-${guildId}@placeholder.local`;
+
+    // Create Stripe customer
+    const stripeCustomer = await this.stripe.customers.create({
+      email: customerEmail,
+      metadata: {
+        guildId,
+      },
+    });
+
+    // Save or update customer in database
+    if (existingCustomer) {
+      // Update existing customer with Stripe customer ID
+      await this.prisma.customer.update({
+        where: { discordUserId: guildId },
+        data: {
+          stripeCustomerId: stripeCustomer.id,
+          email: customerEmail,
+        },
+      });
+    } else {
+      // Create new customer record
+      await this.prisma.customer.create({
+        data: {
+          discordUserId: guildId,
+          email: customerEmail,
+          stripeCustomerId: stripeCustomer.id,
+        },
+      });
+    }
+
+    logger.info({ guildId, stripeCustomerId: stripeCustomer.id }, 'Stripe customer created');
+
+    return stripeCustomer.id;
+  }
+
+  private getPriceId(tier: SubscriptionTier, billingCycle: BillingInterval): string | undefined {
     const envKey = `STRIPE_PRICE_${tier}_${billingCycle}`.toUpperCase();
     return process.env[envKey];
   }
 
-  private getBillingCycleFromPrice(subscription: Stripe.Subscription): BillingCycle {
+  private getBillingCycleFromPrice(subscription: Stripe.Subscription): BillingInterval {
     const price = subscription.items.data[0]?.price;
-    if (!price) return BillingCycle.MONTHLY;
+    if (!price) return BillingInterval.MONTH;
 
     if (price.recurring?.interval === 'year') {
-      return BillingCycle.YEARLY;
+      return BillingInterval.YEAR;
     }
 
-    return BillingCycle.MONTHLY;
+    return BillingInterval.MONTH;
   }
 
   private mapStripeStatus(status: Stripe.Subscription.Status): SubscriptionStatus {

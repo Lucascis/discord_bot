@@ -324,7 +324,7 @@ export class RedisStreamsManager {
    */
   async disconnect(): Promise<void> {
     // Stop all consumers
-    for (const [key, controller] of this.consumers) {
+    for (const [_key, controller] of this.consumers) {
       controller.abort();
     }
     this.consumers.clear();

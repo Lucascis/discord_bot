@@ -560,7 +560,7 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     return uniqueUsers.size > 0 ? totalRevenue / uniqueUsers.size : 0;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private calculateChurnRate(churnRecords: any[], revenueRecords: any[]): number {
     const uniqueUsers = new Set(revenueRecords.map(record => record.userId).filter(Boolean));
@@ -569,7 +569,7 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     return uniqueUsers.size > 0 ? (churnedUsers / uniqueUsers.size) * 100 : 0;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private calculatePaymentFailureRate(failures: any[], revenue: any[]): number {
     const totalTransactions = revenue.length + failures.length;
@@ -586,20 +586,21 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     };
 
     revenueRecords.forEach(record => {
-      if (record.tier && revenueByTier[record.tier] !== undefined) {
-        revenueByTier[record.tier] += record.amount || 0;
+      const tier = record.tier as SubscriptionTier;
+      if (tier && revenueByTier[tier] !== undefined) {
+        revenueByTier[tier] += record.amount || 0;
       }
     });
 
     return revenueByTier;
   }
 
-  private calculateRevenueGrowth(timeframe: 'day' | 'week' | 'month'): number {
+  private calculateRevenueGrowth(_timeframe: 'day' | 'week' | 'month'): number {
     // Simplified growth calculation - would compare with previous period
     return Math.random() * 20 - 5; // -5% to +15% random for demonstration
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private calculateCLV(revenueRecords: any[], churnRecords: any[]): number {
     // Simplified Customer Lifetime Value calculation

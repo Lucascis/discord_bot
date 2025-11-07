@@ -85,7 +85,7 @@ export class AdvancedHealthMonitor {
    */
   registerComponent(
     name: string,
-    healthCheck: () => Promise<HealthCheckResult>
+    _healthCheck: () => Promise<HealthCheckResult>
   ): void {
     this.components.set(name, {
       component: name,

@@ -145,15 +145,8 @@ describe('Monitoring Endpoints Integration Tests', () => {
       expect(businessData).toMatch(/usage_\w+/);
       expect(businessData).toMatch(/performance_\w+/);
 
-      // Validate engagement metrics
-      if (businessData.engagement) {
-        expect(businessData.engagement).toHaveProperty('dau');
-        expect(businessData.engagement).toHaveProperty('mau');
-      }
-
-      // Validate technical metrics
-      expect(businessData.technical).toHaveProperty('cachePerformance');
-      expect(businessData.technical).toHaveProperty('redis');
+      // Note: businessData is a text string (Prometheus format), not JSON
+      // So we don't check for engagement.dau properties - they're in the text format
     });
   });
 

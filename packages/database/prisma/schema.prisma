@@ -4,9 +4,13 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
+
+// ============================================================================
+// CORE MODELS - Discord Bot Functionality
+// ============================================================================
 
 model GuildConfig {
   id        String   @id @default(cuid())
@@ -17,12 +21,12 @@ model GuildConfig {
 }
 
 model Queue {
-  id        String   @id @default(cuid())
-  guildId   String
-  createdAt DateTime @default(now())
+  id             String      @id @default(cuid())
+  guildId        String
+  createdAt      DateTime    @default(now())
   voiceChannelId String?
   textChannelId  String?
-  items     QueueItem[]
+  items          QueueItem[]
 
   @@index([guildId])
   @@index([guildId, createdAt])
@@ -57,7 +61,7 @@ model AuditLog {
   userId    String
   action    String
   createdAt DateTime @default(now())
-  
+
   @@index([guildId])
   @@index([userId])
   @@index([guildId, createdAt])
@@ -68,65 +72,71 @@ model RateLimit {
   key       String   @unique
   count     Int      @default(0)
   expiresAt DateTime
-  
+
   @@index([expiresAt])
 }
 
 model FeatureFlag {
-  id        String   @id @default(cuid())
-  guildId   String
-  name      String
-  enabled   Boolean  @default(false)
+  id      String  @id @default(cuid())
+  guildId String
+  name    String
+  enabled Boolean @default(false)
+
   @@unique([guildId, name])
   @@index([guildId])
   @@index([name])
 }
 
-// Premium Features and Configuration
+// ============================================================================
+// SERVER CONFIGURATION & SETTINGS
+// ============================================================================
+
 model ServerConfiguration {
-  id                    String   @id @default(cuid())
-  guildId              String   @unique
-  subscriptionTier     String   @default("free") // free, basic, premium, enterprise
+  id               String @id @default(cuid())
+  guildId          String @unique
+  subscriptionTier String @default("free") // free, basic, premium, enterprise
+
+  // NOTE: subscriptionExpiresAt is deprecated in favor of Subscription model
   subscriptionExpiresAt DateTime?
 
   // Plugin feature toggles
-  spotifyEnabled       Boolean  @default(false)
-  appleMusicEnabled    Boolean  @default(false)
-  deezerEnabled        Boolean  @default(false)
-  lyricsEnabled        Boolean  @default(false)
-  sponsorBlockEnabled  Boolean  @default(true)
+  spotifyEnabled        Boolean @default(false)
+  appleMusicEnabled     Boolean @default(false)
+  deezerEnabled         Boolean @default(false)
+  lyricsEnabled         Boolean @default(false)
+  sponsorBlockEnabled   Boolean @default(true)
   advancedSearchEnabled Boolean @default(false)
 
   // Audio quality settings
-  maxAudioQuality      String   @default("medium") // low, medium, high, lossless
-  volumeLimit          Int      @default(200) // 0-200%
+  maxAudioQuality String @default("medium") // low, medium, high, lossless
+  volumeLimit     Int    @default(200) // 0-200%
 
   // Queue settings
-  maxQueueSize         Int      @default(100)
-  maxSongDuration      Int      @default(3600) // seconds
-  allowExplicitContent Boolean  @default(true)
+  maxQueueSize         Int     @default(100)
+  maxSongDuration      Int     @default(3600) // seconds
+  allowExplicitContent Boolean @default(true)
 
   // DJ and permission settings
-  djRoleId             String?
-  djOnlyMode           Boolean  @default(false)
-  voteSkipEnabled      Boolean  @default(true)
-  voteSkipThreshold    Float    @default(0.5) // 50%
+  djRoleId          String?
+  djOnlyMode        Boolean @default(false)
+  voteSkipEnabled   Boolean @default(true)
+  voteSkipThreshold Float   @default(0.5) // 50%
 
   // Autoplay settings
-  autoplayEnabled      Boolean  @default(false)
-  autoplayMode         String   @default("similar") // similar, artist, genre, mixed
-  autoplayQueueSize    Int      @default(10) // number of tracks to add when queue is low
+  autoplayEnabled   Boolean @default(false)
+  autoplayMode      String  @default("similar") // similar, artist, genre, mixed
+  autoplayQueueSize Int     @default(10) // number of tracks to add when queue is low
 
   // UI settings
-  ephemeralMessages    Boolean  @default(false) // make button interaction messages ephemeral
+  ephemeralMessages Boolean @default(false) // make button interaction messages ephemeral
 
   // Premium features
-  persistentConnection Boolean  @default(false) // 24/7 voice connection (premium only)
+  persistentConnection Boolean @default(false) // 24/7 voice connection (premium only)
 
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  channels             ChannelConfiguration[]
+  channels ChannelConfiguration[]
 
   @@index([guildId])
   @@index([subscriptionTier])
@@ -134,43 +144,45 @@ model ServerConfiguration {
 }
 
 model ChannelConfiguration {
-  id                    String   @id @default(cuid())
-  guildId              String
-  channelId            String
+  id        String @id @default(cuid())
+  guildId   String
+  channelId String
 
   // Channel-specific overrides
-  musicEnabled         Boolean  @default(true)
-  playlistsEnabled     Boolean  @default(true)
-  spotifyEnabled       Boolean?  // null = inherit from server
-  appleMusicEnabled    Boolean?
-  deezerEnabled        Boolean?
-  lyricsEnabled        Boolean?
-  sponsorBlockEnabled  Boolean?
+  musicEnabled        Boolean  @default(true)
+  playlistsEnabled    Boolean  @default(true)
+  spotifyEnabled      Boolean? // null = inherit from server
+  appleMusicEnabled   Boolean?
+  deezerEnabled       Boolean?
+  lyricsEnabled       Boolean?
+  sponsorBlockEnabled Boolean?
 
   // Volume and quality overrides
-  volumeLimit          Int?     // null = inherit from server
-  maxQueueSize         Int?
-  maxSongDuration      Int?
+  volumeLimit     Int? // null = inherit from server
+  maxQueueSize    Int?
+  maxSongDuration Int?
 
   // Channel-specific permissions
   djOnlyMode           Boolean? // null = inherit from server
   allowExplicitContent Boolean?
 
-  serverConfig         ServerConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  serverConfig ServerConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([guildId, channelId])
   @@index([guildId])
   @@index([channelId])
 }
 
+// NOTE: UserSubscription model is being phased out in favor of Customer + Subscription
+// Keep for backward compatibility during migration
 model UserSubscription {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  tier            String   @default("free") // free, basic, premium, enterprise
-  expiresAt       DateTime?
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  tier      String    @default("free") // free, basic, premium, enterprise
+  expiresAt DateTime?
 
   // Payment information
   stripeCustomerId     String?
@@ -178,37 +190,41 @@ model UserSubscription {
   paymentMethod        String? // stripe, paypal, crypto
 
   // Usage tracking
-  monthlyPlayTime      Int     @default(0) // minutes
-  monthlyRequests      Int     @default(0)
+  monthlyPlayTime Int @default(0) // minutes
+  monthlyRequests Int @default(0)
 
   // Premium features granted
-  premiumServers       Int     @default(0) // number of servers they can upgrade
-  customBotEnabled     Boolean @default(false)
-  prioritySupport      Boolean @default(false)
+  premiumServers   Int     @default(0) // number of servers they can upgrade
+  customBotEnabled Boolean @default(false)
+  prioritySupport  Boolean @default(false)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([tier])
   @@index([expiresAt])
 }
 
+// ============================================================================
+// MUSIC & PLAYBACK FEATURES
+// ============================================================================
+
 model LyricsCache {
-  id         String   @id @default(cuid())
-  trackId    String   // unique identifier for track (title + artist hash)
-  title      String
-  artist     String
-  lyrics     String   // full lyrics text
-  source     String   // lyrics provider (genius, musixmatch, etc.)
-  language   String   @default("en")
+  id       String @id @default(cuid())
+  trackId  String // unique identifier for track (title + artist hash)
+  title    String
+  artist   String
+  lyrics   String // full lyrics text
+  source   String // lyrics provider (genius, musixmatch, etc.)
+  language String @default("en")
 
   // Timed lyrics support
-  timedLyrics Boolean  @default(false)
-  lyricsData  String?  // JSON with timed lyrics if available
+  timedLyrics Boolean @default(false)
+  lyricsData  String? // JSON with timed lyrics if available
 
-  createdAt  DateTime @default(now())
-  expiresAt  DateTime // lyrics cache expiration
+  createdAt DateTime @default(now())
+  expiresAt DateTime // lyrics cache expiration
 
   @@unique([trackId])
   @@index([title, artist])
@@ -216,22 +232,22 @@ model LyricsCache {
 }
 
 model PlaybackHistory {
-  id           String   @id @default(cuid())
-  guildId      String
-  userId       String
-  channelId    String
+  id        String @id @default(cuid())
+  guildId   String
+  userId    String
+  channelId String
 
   // Track information
-  title        String
-  artist       String
-  url          String
-  duration     Int
-  source       String   // youtube, spotify, deezer, etc.
+  title    String
+  artist   String
+  url      String
+  duration Int
+  source   String // youtube, spotify, deezer, etc.
 
   // Playback metadata
-  playedAt     DateTime @default(now())
-  playedFully  Boolean  @default(false) // if track was played to completion
-  skipReason   String?  // manual, vote, error, etc.
+  playedAt    DateTime @default(now())
+  playedFully Boolean  @default(false) // if track was played to completion
+  skipReason  String? // manual, vote, error, etc.
 
   // Analytics data
   playbackQuality String? // audio quality used
@@ -243,26 +259,29 @@ model PlaybackHistory {
   @@index([source])
 }
 
-// Event Store Tables for Event Sourcing
-model EventStoreEvent {
-  id                Int      @id @default(autoincrement())
-  eventId           String   @unique
-  eventType         String
-  aggregateId       String
-  aggregateType     String
-  aggregateVersion  Int
-  eventData         String   // JSON
-  metadata          String   // JSON
-  timestamp         DateTime
-  createdAt         DateTime @default(now())
-  globalPosition    Int      @default(autoincrement())
+// ============================================================================
+// EVENT SOURCING & WEBHOOKS
+// ============================================================================
 
+model EventStoreEvent {
+  id               Int      @id @default(autoincrement())
+  eventId          String   @unique
+  eventType        String
+  aggregateId      String
+  aggregateType    String
+  aggregateVersion Int
+  eventData        String // JSON
+  metadata         String // JSON
+  timestamp        DateTime
+  createdAt        DateTime @default(now())
+  globalPosition   Int      @default(autoincrement())
+
+  @@unique([aggregateId, aggregateType, aggregateVersion])
   @@index([aggregateId, aggregateType])
   @@index([aggregateId, aggregateType, aggregateVersion])
   @@index([eventType])
   @@index([timestamp])
   @@index([globalPosition])
-  @@unique([aggregateId, aggregateType, aggregateVersion])
 }
 
 model EventStoreSnapshot {
@@ -270,7 +289,7 @@ model EventStoreSnapshot {
   aggregateId   String
   aggregateType String
   version       Int
-  data          String   // JSON
+  data          String // JSON
   timestamp     DateTime
   createdAt     DateTime @default(now())
 
@@ -293,114 +312,29 @@ model WebhookSubscription {
   @@index([isActive])
 }
 
-// ========================================
-// SUBSCRIPTION SYSTEM MODELS
-// ========================================
+// ============================================================================
+// LEGACY SUBSCRIPTION SYSTEM (Deprecated - Use Customer/Subscription below)
+// ============================================================================
 
-model Subscription {
-  id        String   @id @default(cuid())
-  guildId   String   @unique
-
-  // Subscription details
-  tier      SubscriptionTier @default(FREE)
-  status    SubscriptionStatus @default(ACTIVE)
-
-  // Billing cycle
-  billingCycle BillingCycle? // null for FREE tier
-  currentPeriodStart DateTime?
-  currentPeriodEnd   DateTime?
-
-  // Payment integration
-  stripeCustomerId      String?
-  stripeSubscriptionId  String?
-  stripeProductId       String?
-  stripePriceId         String?
-
-  // Trial management
-  trialStart   DateTime?
-  trialEnd     DateTime?
-  isTrialing   Boolean  @default(false)
-
-  // Cancellation
-  cancelAtPeriodEnd Boolean  @default(false)
-  canceledAt        DateTime?
-  cancellationReason String?
-
-  // Metadata
-  metadata  String?  // JSON for additional data
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  invoices      Invoice[]
-  usageLimits   UsageLimit[]
-  usageTracking UsageTracking?
-
-  @@index([guildId])
-  @@index([tier])
-  @@index([status])
-  @@index([stripeCustomerId])
-  @@index([stripeSubscriptionId])
-  @@index([currentPeriodEnd])
-}
-
-model Invoice {
-  id             String   @id @default(cuid())
-  subscriptionId String
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-
-  // Invoice details
-  invoiceNumber  String   @unique
-  status         InvoiceStatus @default(PENDING)
-
-  // Amounts (in cents)
-  amountDue      Int
-  amountPaid     Int      @default(0)
-  currency       String   @default("usd")
-
-  // Billing period
-  periodStart    DateTime
-  periodEnd      DateTime
-
-  // Payment details
-  stripeInvoiceId    String?  @unique
-  paymentIntentId    String?
-  paymentMethod      String?  // stripe, paypal, crypto
-
-  // Dates
-  dueDate        DateTime?
-  paidAt         DateTime?
-
-  // Metadata
-  description    String?
-  metadata       String?  // JSON
-
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([subscriptionId])
-  @@index([status])
-  @@index([stripeInvoiceId])
-  @@index([periodStart, periodEnd])
-}
+// NOTE: These models are kept for backward compatibility during migration
+// New implementation should use Customer + Subscription models below
 
 model Feature {
-  id          String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // Feature identification
-  key         String   @unique  // e.g., "concurrent_playbacks", "audio_quality"
+  key         String          @unique // e.g., "concurrent_playbacks", "audio_quality"
   name        String
   description String
   category    FeatureCategory
 
   // Feature type
-  type        FeatureType  // boolean, numeric, string
+  type FeatureType // boolean, numeric, string
 
   // Tier availability
-  availableInFree      Boolean @default(false)
-  availableInBasic     Boolean @default(false)
-  availableInPremium   Boolean @default(false)
+  availableInFree       Boolean @default(false)
+  availableInBasic      Boolean @default(false)
+  availableInPremium    Boolean @default(false)
   availableInEnterprise Boolean @default(true)
 
   // Default values per tier (JSON)
@@ -410,11 +344,11 @@ model Feature {
   enterpriseValue String?
 
   // Metadata
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([key])
   @@index([category])
@@ -422,27 +356,27 @@ model Feature {
 }
 
 model UsageLimit {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   subscriptionId String
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   // Limit identification
-  limitType      String   // e.g., "concurrent_playbacks", "monthly_tracks", "queue_size"
+  limitType String // e.g., "concurrent_playbacks", "monthly_tracks", "queue_size"
 
   // Limit values
-  maxValue       Int      // Maximum allowed
-  currentValue   Int      @default(0)
+  maxValue     Int // Maximum allowed
+  currentValue Int @default(0)
 
   // Reset period
-  resetPeriod    ResetPeriod? // null for non-resetting limits
-  lastReset      DateTime?
-  nextReset      DateTime?
+  resetPeriod ResetPeriod? // null for non-resetting limits
+  lastReset   DateTime?
+  nextReset   DateTime?
 
   // Metadata
-  metadata       String?  // JSON
+  metadata String? // JSON
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  Subscription Subscription @relation(fields: [subscriptionId], references: [id])
 
   @@unique([subscriptionId, limitType])
   @@index([subscriptionId])
@@ -451,15 +385,14 @@ model UsageLimit {
 }
 
 model UsageTracking {
-  id             String   @id @default(cuid())
-  subscriptionId String   @unique
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  id             String @id @default(cuid())
+  subscriptionId String @unique
 
   // Current billing period usage
-  tracksPlayed       Int @default(0)
-  playbackMinutes    Int @default(0)
-  apiRequests        Int @default(0)
-  activeGuilds       Int @default(0)
+  tracksPlayed    Int @default(0)
+  playbackMinutes Int @default(0)
+  apiRequests     Int @default(0)
+  activeGuilds    Int @default(0)
 
   // All-time usage
   totalTracksPlayed    Int @default(0)
@@ -471,42 +404,665 @@ model UsageTracking {
   currentPeriodEnd   DateTime
 
   // Last activity
-  lastActivity       DateTime @default(now())
+  lastActivity DateTime @default(now())
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  Subscription Subscription[]
 
   @@index([subscriptionId])
   @@index([currentPeriodEnd])
 }
 
 model SubscriptionEvent {
-  id             String   @id @default(cuid())
-  guildId        String
+  id      String @id @default(cuid())
+  guildId String
 
   // Event details
-  eventType      SubscriptionEventType
-  tier           SubscriptionTier?
-  previousTier   SubscriptionTier?
+  eventType    SubscriptionEventType
+  tier         SubscriptionTier?
+  previousTier SubscriptionTier?
 
   // Event data
-  description    String?
-  metadata       String?  // JSON
+  description String?
+  metadata    String? // JSON
 
   // User who triggered (if applicable)
-  userId         String?
+  userId String?
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([guildId])
   @@index([eventType])
   @@index([createdAt])
 }
 
-// ========================================
-// ENUMS FOR SUBSCRIPTION SYSTEM
-// ========================================
+// ============================================================================
+// ENTERPRISE BILLING SYSTEM (NEW)
+// ============================================================================
 
+/**
+ * Enterprise customer record with full billing details
+ * Replaces UserSubscription for new billing implementation
+ */
+model Customer {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Discord user association
+  discordUserId        String  @unique
+  discordUsername      String?
+  discordDiscriminator String?
+
+  // Customer details
+  email String  @unique
+  name  String?
+  phone String?
+
+  // Billing address
+  address Json? // { line1, line2, city, state, country, postalCode }
+
+  // Tax information
+  taxId     String? // VAT, CPF, CUIT, etc.
+  taxIdType String? // 'vat', 'cpf', 'cuit', etc.
+  country   String? // ISO country code for regional routing
+
+  // Provider-specific IDs
+  stripeCustomerId      String? @unique
+  mercadopagoCustomerId String? @unique
+  paypalCustomerId      String? @unique
+
+  // Customer metadata
+  metadata Json? // Custom data: { source, referralCode, notes }
+
+  // Status
+  status CustomerStatus @default(ACTIVE)
+
+  // Relations
+  subscriptions  Subscription[]
+  paymentMethods PaymentMethod[]
+  invoices       Invoice[]
+  payments       Payment[]
+  refunds        Refund[]
+  billingHistory BillingHistory[]
+
+  @@index([discordUserId])
+  @@index([email])
+  @@index([stripeCustomerId])
+  @@index([mercadopagoCustomerId])
+  @@map("customers")
+}
+
+/// Stored payment methods (cards, bank accounts, wallets)
+model PaymentMethod {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Provider details
+  provider                String // 'stripe', 'mercadopago', 'paypal'
+  providerPaymentMethodId String // Provider's ID for this payment method
+
+  // Payment method type
+  type PaymentMethodType
+
+  // Card details (if applicable)
+  cardBrand    String? // 'visa', 'mastercard', 'amex', etc.
+  cardLast4    String?
+  cardExpMonth Int?
+  cardExpYear  Int?
+
+  // Bank account details (if applicable)
+  bankName  String?
+  bankLast4 String?
+
+  // Status
+  isDefault Boolean             @default(false)
+  status    PaymentMethodStatus @default(ACTIVE)
+
+  // Relations
+  payments      Payment[]
+  subscriptions Subscription[]
+
+  @@unique([provider, providerPaymentMethodId])
+  @@index([customerId])
+  @@map("payment_methods")
+}
+
+/// Subscription plan definitions (Premium, Pro, Enterprise)
+model SubscriptionPlan {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Plan identification
+  name        String  @unique // 'premium', 'pro', 'enterprise'
+  displayName String // 'Premium', 'Professional', 'Enterprise'
+  description String?
+
+  // Pricing
+  prices SubscriptionPrice[]
+
+  // Features
+  features Json // Array of feature flags
+  limits   Json // { maxGuilds, maxQueueSize, maxSessions, etc. }
+
+  // Status
+  active Boolean @default(true)
+
+  // Relations
+  subscriptions Subscription[]
+
+  @@map("subscription_plans")
+}
+
+/// Pricing for subscription plans (supports multiple currencies and intervals)
+model SubscriptionPrice {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Plan association
+  planId String
+  plan   SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  // Provider-specific price IDs
+  provider        String // 'stripe', 'mercadopago', 'paypal'
+  providerPriceId String // Provider's price ID
+
+  // Pricing details
+  amount        Int // Amount in smallest currency unit (cents)
+  currency      String // 'USD', 'EUR', 'ARS', 'BRL', 'MXN'
+  interval      BillingInterval
+  intervalCount Int             @default(1) // For bi-weekly, quarterly, etc.
+
+  // Trial
+  trialPeriodDays Int?
+
+  // Status
+  active Boolean @default(true)
+
+  // Relations
+  subscriptions Subscription[]
+
+  @@unique([provider, providerPriceId])
+  @@index([planId])
+  @@map("subscription_prices")
+}
+
+/// Active subscriptions (enhanced enterprise version)
+model Subscription {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Plan and pricing
+  planId String
+  plan   SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  priceId String
+  price   SubscriptionPrice @relation(fields: [priceId], references: [id])
+
+  // Provider details
+  provider               String // 'stripe', 'mercadopago', 'paypal'
+  providerSubscriptionId String @unique
+
+  // Payment method
+  paymentMethodId String?
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+
+  // Subscription status
+  status SubscriptionStatus
+
+  // Billing cycle
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean   @default(false)
+  canceledAt         DateTime?
+  cancelReason       String?
+
+  // Trial
+  trialStart DateTime?
+  trialEnd   DateTime?
+
+  // Metadata
+  metadata Json?
+
+  // Relations
+  invoices        Invoice[]
+  billingHistory  BillingHistory[]
+  usageLimits     UsageLimit[]
+  usageTracking   UsageTracking?   @relation(fields: [usageTrackingId], references: [id])
+  usageTrackingId String?
+
+  @@index([customerId])
+  @@index([status])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+/// Invoice records for billing cycles
+model Invoice {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Subscription association (optional - could be one-time payment)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  // Provider details
+  provider          String // 'stripe', 'mercadopago', 'paypal'
+  providerInvoiceId String @unique
+
+  // Invoice details
+  number String @unique // Human-readable invoice number
+
+  // Amounts
+  subtotal   Int // Before tax
+  tax        Int // Tax amount
+  total      Int // Total amount due
+  amountPaid Int    @default(0)
+  amountDue  Int // Remaining amount
+  currency   String
+
+  // Status
+  status InvoiceStatus
+
+  // Dates
+  periodStart DateTime?
+  periodEnd   DateTime?
+  dueDate     DateTime?
+  paidAt      DateTime?
+  voidedAt    DateTime?
+
+  // Invoice URL
+  hostedInvoiceUrl String?
+  invoicePdfUrl    String?
+
+  // Line items
+  lineItems InvoiceLineItem[]
+
+  // Relations
+  payments Payment[]
+
+  @@index([customerId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+/// Individual line items on invoices
+model InvoiceLineItem {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Invoice association
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Provider details
+  provider           String
+  providerLineItemId String?
+
+  // Item details
+  description String
+  quantity    Int    @default(1)
+  unitAmount  Int // Price per unit
+  amount      Int // Total (quantity * unitAmount)
+  currency    String
+
+  // Metadata
+  metadata Json?
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+/// Payment transaction records
+model Payment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Invoice association (if applicable)
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  // Provider details
+  provider          String // 'stripe', 'mercadopago', 'paypal'
+  providerPaymentId String  @unique
+  providerIntentId  String? // Payment intent ID (Stripe)
+
+  // Payment method
+  paymentMethodId String?
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+
+  // Amount details
+  amount         Int
+  currency       String
+  amountRefunded Int    @default(0)
+
+  // Status
+  status PaymentStatus
+
+  // Error details (if failed)
+  failureCode    String?
+  failureMessage String?
+
+  // Metadata
+  description String?
+  metadata    Json?
+
+  // Relations
+  refunds        Refund[]
+  billingHistory BillingHistory[]
+
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([status])
+  @@map("payments")
+}
+
+/// Refund records
+model Refund {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Payment association
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  // Provider details
+  provider         String
+  providerRefundId String @unique
+
+  // Refund details
+  amount     Int
+  currency   String
+  reason     RefundReason?
+  reasonNote String? // Additional details for audit trail
+
+  // Status
+  status RefundStatus
+
+  // Error details (if failed)
+  failureReason String?
+
+  // Audit
+  processedBy String? // User/admin who initiated refund
+
+  // Relations
+  billingHistory BillingHistory[]
+
+  @@index([customerId])
+  @@index([paymentId])
+  @@index([status])
+  @@map("refunds")
+}
+
+/// Comprehensive audit trail for all billing events
+model BillingHistory {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Customer association
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Related entities
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+
+  refundId String?
+  refund   Refund? @relation(fields: [refundId], references: [id])
+
+  // Event details
+  eventType   BillingEventType
+  provider    String?
+  description String
+
+  // Amounts (if applicable)
+  amount   Int?
+  currency String?
+
+  // Metadata
+  metadata Json?
+
+  // Actor (who/what triggered this event)
+  actor String? // 'system', 'user', 'admin', 'webhook'
+
+  @@index([customerId])
+  @@index([subscriptionId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("billing_history")
+}
+
+/// Daily revenue and metrics aggregation
+model BillingMetrics {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Time dimension
+  date DateTime @unique @db.Date
+
+  // Revenue metrics
+  totalRevenue     Int    @default(0) // Total revenue for the day
+  recurringRevenue Int    @default(0) // MRR contribution
+  oneTimeRevenue   Int    @default(0) // One-time payments
+  currency         String @default("USD")
+
+  // Customer metrics
+  newCustomers         Int @default(0)
+  churnedCustomers     Int @default(0)
+  totalActiveCustomers Int @default(0)
+
+  // Subscription metrics
+  newSubscriptions         Int @default(0)
+  canceledSubscriptions    Int @default(0)
+  upgrades                 Int @default(0)
+  downgrades               Int @default(0)
+  totalActiveSubscriptions Int @default(0)
+
+  // Payment metrics
+  successfulPayments Int @default(0)
+  failedPayments     Int @default(0)
+  refunds            Int @default(0)
+  refundedAmount     Int @default(0)
+
+  // Provider breakdown
+  stripeRevenue      Int @default(0)
+  mercadopagoRevenue Int @default(0)
+  paypalRevenue      Int @default(0)
+
+  @@index([date])
+  @@map("billing_metrics")
+}
+
+/// Customer lifetime value tracking
+model CustomerLifetimeValue {
+  id        String   @id @default(cuid())
+  updatedAt DateTime @updatedAt
+
+  // Customer association
+  customerId String @unique
+
+  // Lifetime metrics
+  totalRevenue  Int @default(0)
+  totalPayments Int @default(0)
+  totalRefunds  Int @default(0)
+  netRevenue    Int @default(0) // totalRevenue - totalRefunds
+
+  // Subscription metrics
+  monthsSubscribed Int @default(0)
+  upgrades         Int @default(0)
+  downgrades       Int @default(0)
+
+  // Calculated metrics
+  averageMonthlyValue Int  @default(0) // netRevenue / monthsSubscribed
+  predictedLtv        Int? // ML-based prediction (future enhancement)
+
+  // Dates
+  firstPurchaseDate DateTime?
+  lastPurchaseDate  DateTime?
+
+  @@index([netRevenue])
+  @@map("customer_lifetime_value")
+}
+
+// ============================================================================
+// SAAS PLATFORM MODELS (Phase 1 - November 2025)
+// ============================================================================
+
+/**
+ * Guild (Discord Server) record for platform management
+ * Separates guild/server from user/customer for proper multi-tenancy
+ */
+model Guild {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Discord guild identification
+  discordGuildId String  @unique
+  name           String
+  icon           String?
+  ownerId        String? // Discord user ID of guild owner
+
+  // Test guild flag (for PREMIUM_TEST_GUILD_IDS)
+  isTestGuild Boolean @default(false)
+
+  // Relations
+  subscription GuildSubscription?
+
+  @@index([discordGuildId])
+  @@index([isTestGuild])
+  @@map("guilds")
+}
+
+/**
+ * Guild-specific subscription (separates from user billing)
+ * Each guild has its own subscription tier and limits
+ */
+model GuildSubscription {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Guild association
+  guildId String @unique
+  guild   Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  // Subscription tier
+  tier   SubscriptionTier   @default(FREE)
+  status SubscriptionStatus @default(ACTIVE)
+
+  // Billing period (for paid tiers)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  // Provider subscription ID (if paid)
+  stripeSubscriptionId      String?
+  mercadopagoSubscriptionId String?
+  paypalSubscriptionId      String?
+
+  // Cancellation
+  cancelAtPeriodEnd Boolean   @default(false)
+  canceledAt        DateTime?
+  cancelReason      String?
+
+  // Trial
+  trialStart DateTime?
+  trialEnd   DateTime?
+
+  @@index([guildId])
+  @@index([tier])
+  @@index([status])
+  @@map("guild_subscriptions")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+// Customer & Payment Enums
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum PaymentMethodType {
+  CARD
+  BANK_ACCOUNT
+  WALLET
+  OTHER
+}
+
+enum PaymentMethodStatus {
+  ACTIVE
+  EXPIRED
+  FAILED
+  REMOVED
+}
+
+enum PaymentStatus {
+  PENDING
+  REQUIRES_ACTION
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundReason {
+  DUPLICATE
+  FRAUDULENT
+  REQUESTED_BY_CUSTOMER
+  SERVICE_NOT_PROVIDED
+  TECHNICAL_ISSUE
+  BILLING_ERROR
+  OTHER
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+// Subscription Enums
 enum SubscriptionTier {
   FREE
   BASIC
@@ -522,22 +1078,26 @@ enum SubscriptionStatus {
   INCOMPLETE_EXPIRED
   TRIALING
   UNPAID
+  PAUSED
 }
 
-enum BillingCycle {
-  MONTHLY
-  YEARLY
-  CUSTOM
+enum BillingInterval {
+  DAY
+  WEEK
+  MONTH
+  YEAR
 }
 
+// Invoice Enums
 enum InvoiceStatus {
-  PENDING
+  DRAFT
+  OPEN
   PAID
-  FAILED
-  CANCELED
-  REFUNDED
+  VOID
+  UNCOLLECTIBLE
 }
 
+// Feature & Usage Enums
 enum FeatureCategory {
   PLAYBACK
   AUDIO_QUALITY
@@ -572,4 +1132,56 @@ enum SubscriptionEventType {
   PAYMENT_SUCCEEDED
   TRIAL_STARTED
   TRIAL_ENDED
+}
+
+// Billing Event Types
+enum BillingEventType {
+  // Customer events
+  CUSTOMER_CREATED
+  CUSTOMER_UPDATED
+  CUSTOMER_DELETED
+
+  // Subscription events
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_STARTED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_UPGRADED
+  SUBSCRIPTION_DOWNGRADED
+  SUBSCRIPTION_PAUSED
+  SUBSCRIPTION_RESUMED
+  SUBSCRIPTION_CANCELED
+  SUBSCRIPTION_EXPIRED
+  SUBSCRIPTION_TRIAL_STARTED
+  SUBSCRIPTION_TRIAL_ENDED
+
+  // Payment events
+  PAYMENT_METHOD_ADDED
+  PAYMENT_METHOD_UPDATED
+  PAYMENT_METHOD_REMOVED
+  PAYMENT_METHOD_FAILED
+
+  // Invoice events
+  INVOICE_CREATED
+  INVOICE_FINALIZED
+  INVOICE_SENT
+  INVOICE_PAID
+  INVOICE_PAYMENT_FAILED
+  INVOICE_VOIDED
+
+  // Payment events
+  PAYMENT_PENDING
+  PAYMENT_PROCESSING
+  PAYMENT_SUCCEEDED
+  PAYMENT_FAILED
+  PAYMENT_REFUNDED
+
+  // Refund events
+  REFUND_REQUESTED
+  REFUND_PROCESSED
+  REFUND_FAILED
+
+  // Misc
+  CREDIT_APPLIED
+  DISPUTE_CREATED
+  DISPUTE_RESOLVED
 }

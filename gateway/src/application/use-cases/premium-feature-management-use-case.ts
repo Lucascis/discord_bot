@@ -464,7 +464,7 @@ export class PremiumFeatureManagementUseCase {
     }>;
   }> {
     const subscription = await this.subscriptionRepository.findByUserAndGuild(userId, guildId);
-    const currentTier = subscription?.tier || 'free';
+    const _currentTier = subscription?.tier || 'free';
 
     // Simplified recommendation logic
     const recommendations = [

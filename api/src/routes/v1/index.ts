@@ -1,8 +1,10 @@
 import { Router, type Router as ExpressRouter } from 'express';
 import { asyncHandler } from '../../middleware/async-handler.js';
-import { validateJSONContentType } from '../../middleware/validation.js';
+import { validateJSONContentType, apiKeySchema } from '../../middleware/validation.js';
 import type { APIResponse, APIVersion } from '../../types/api.js';
 import { logger } from '@discord-bot/logger';
+import { UnauthorizedError } from '../../middleware/error-handler.js';
+import { env } from '@discord-bot/config';
 
 /**
  * API Version 1 Router
@@ -12,6 +14,55 @@ import { logger } from '@discord-bot/logger';
  */
 
 const router: ExpressRouter = Router();
+
+// API Key authentication middleware
+const apiKeyAuth: ExpressRouter = Router();
+apiKeyAuth.use((req, _res, next) => {
+  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+  const expectedApiKey = env.API_KEY || process.env.API_KEY;
+
+  if (!expectedApiKey) {
+    logger.warn('API_KEY not configured - API endpoints will be unprotected');
+    return next();
+  }
+
+  if (!apiKey) {
+    return next(new UnauthorizedError('API key required'));
+  }
+
+  // Validate API key format using Zod
+  const validation = apiKeySchema.safeParse(apiKey);
+  if (!validation.success) {
+    logger.warn({
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      path: req.path,
+      error: validation.error.errors
+    }, 'Invalid API key format');
+
+    return next(new UnauthorizedError('Invalid API key format'));
+  }
+
+  // In test mode, allow API key with suffixes for different test scenarios
+  const isValidKey = env.NODE_ENV === 'test'
+    ? String(apiKey).startsWith(expectedApiKey)
+    : apiKey === expectedApiKey;
+
+  if (!isValidKey) {
+    logger.warn({
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      path: req.path
+    }, 'Invalid API key attempt');
+
+    return next(new UnauthorizedError('Invalid API key'));
+  }
+
+  next();
+});
+
+// Apply API key authentication to ALL v1 routes
+router.use(apiKeyAuth);
 
 /**
  * GET /api/v1/

@@ -6,13 +6,13 @@
     "allowImportingTsExtensions": false,
     "lib": ["ES2020", "DOM"],
 
-    // Strict type checking - temporarily relaxed for compilation
-    "strict": false,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
-    "strictFunctionTypes": false,
-    "noImplicitReturns": false,
-    "noFallthroughCasesInSwitch": false,
+    // Strict type checking
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
 
     // Module resolution and interop
     "esModuleInterop": true,
@@ -29,9 +29,7 @@
 
     // Code quality
     "skipLibCheck": true,
-    "noEmit": false,
-    "noErrorTruncation": false,
-    "forceConsistentCasingInFileNames": false,
+    "forceConsistentCasingInFileNames": true,
     "removeComments": false,
     "types": ["node"],
 

@@ -8,7 +8,7 @@
  */
 
 import Stripe from 'stripe';
-import { SubscriptionTier, BillingCycle } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@prisma/client';
 import { logger } from '@discord-bot/logger';
 import {
   IPaymentProcessor,
@@ -53,7 +53,7 @@ export class StripeProcessor implements IPaymentProcessor {
   async createCheckoutSession(
     guildId: string,
     tier: SubscriptionTier,
-    billingCycle: BillingCycle,
+    billingCycle: BillingInterval,
     successUrl: string,
     cancelUrl: string
   ): Promise<CheckoutSession> {
@@ -167,14 +167,14 @@ export class StripeProcessor implements IPaymentProcessor {
     };
   }
 
-  getPriceId(tier: SubscriptionTier, billingCycle: BillingCycle): string | null {
+  getPriceId(tier: SubscriptionTier, billingCycle: BillingInterval): string | null {
     const plan = PLANS[tier];
 
     if (!plan?.stripePriceIds) {
       return null;
     }
 
-    return billingCycle === 'MONTHLY'
+    return billingCycle === 'MONTH'
       ? plan.stripePriceIds.monthly || null
       : plan.stripePriceIds.yearly || null;
   }

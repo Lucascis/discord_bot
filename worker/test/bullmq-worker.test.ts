@@ -33,9 +33,12 @@ class MockWorker {
   isPaused = mockWorkerIsPaused;
 }
 
-vi.mock('bullmq', () => ({
-  Worker: MockWorker
-}));
+// Mock bullmq - must return constructor as named export
+vi.mock('bullmq', () => {
+  return {
+    Worker: MockWorker
+  };
+});
 
 vi.mock('../src/utils/redis-client.js', () => ({
   redisClient: {

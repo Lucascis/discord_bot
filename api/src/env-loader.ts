@@ -2,14 +2,20 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load from project root .env file
-const rootPath = path.resolve(process.cwd(), '..', '.env');
-const localPath = path.resolve('.env');
+// In test environment, load .env.test from project root
+if (process.env.NODE_ENV === 'test') {
+  const testEnvPath = path.resolve(process.cwd(), '..', '.env.test');
+  dotenv.config({ path: testEnvPath });
+} else {
+  // Load from project root .env file
+  const rootPath = path.resolve(process.cwd(), '..', '.env');
+  const localPath = path.resolve('.env');
 
-// Try root path first
-dotenv.config({ path: rootPath });
-// Also try local path as fallback
-dotenv.config({ path: localPath });
+  // Try root path first
+  dotenv.config({ path: rootPath });
+  // Also try local path as fallback
+  dotenv.config({ path: localPath });
+}
 
 console.log('✅ Environment variables loaded successfully');
 console.log('DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? 'SET' : 'MISSING');

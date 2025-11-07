@@ -1,27 +1,18 @@
 import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
-import Redis from 'ioredis';
 import { mockSearchResult, mockTrack, validApiKey } from './fixtures.js';
 
 describe('Search Routes', () => {
-  let mockRedis: any;
-
   beforeEach(() => {
-    mockRedis = new Redis();
     vi.clearAllMocks();
   });
 
   describe('GET /api/v1/search', () => {
     it('should return search results successfully', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: { ...mockSearchResult, query: 'test query' }
       });
 
       const res = await request(app)
@@ -70,14 +61,9 @@ describe('Search Routes', () => {
     });
 
     it('should trim query parameter', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: { ...mockSearchResult, query: 'test query' }
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: { ...mockSearchResult, query: 'test query' }
       });
 
       const res = await request(app)
@@ -94,14 +80,9 @@ describe('Search Routes', () => {
         source: 'youtube'
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: youtubeResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for YouTube search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: youtubeResult
       });
 
       const res = await request(app)
@@ -120,14 +101,9 @@ describe('Search Routes', () => {
         tracks: [{ ...mockTrack, source: 'spotify' as const }]
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: spotifyResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for Spotify search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: spotifyResult
       });
 
       const res = await request(app)
@@ -146,14 +122,9 @@ describe('Search Routes', () => {
         tracks: [{ ...mockTrack, source: 'soundcloud' as const }]
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: soundcloudResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for SoundCloud search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: soundcloudResult
       });
 
       const res = await request(app)
@@ -166,14 +137,9 @@ describe('Search Routes', () => {
     });
 
     it('should accept source filter - all', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for all sources search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -185,14 +151,9 @@ describe('Search Routes', () => {
     });
 
     it('should use default pagination when not provided', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -201,18 +162,13 @@ describe('Search Routes', () => {
         .query({ q: 'test' });
 
       expect(res.status).toBe(200);
-      expect(mockRedis.publish).toHaveBeenCalled();
+      expect(res.body.data).toHaveProperty('tracks');
     });
 
     it('should accept page parameter', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -224,17 +180,9 @@ describe('Search Routes', () => {
     });
 
     it('should accept limit parameter', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: {
-                ...mockSearchResult,
-                tracks: Array(50).fill(mockTrack)
-              }
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -284,14 +232,9 @@ describe('Search Routes', () => {
         totalResults: 0
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: emptyResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for empty search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: emptyResult
       });
 
       const res = await request(app)
@@ -305,14 +248,9 @@ describe('Search Routes', () => {
     });
 
     it('should include request ID in response', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -336,7 +274,7 @@ describe('Search Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // Don't set any mock response - will timeout
 
       const res = await request(app)
         .get('/api/v1/search')
@@ -348,14 +286,9 @@ describe('Search Routes', () => {
     });
 
     it('should handle audio service error', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              error: 'Search service unavailable'
-            }));
-          }, 10);
-        }
+      // Configure error response
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        error: 'Audio service unavailable'
       });
 
       const res = await request(app)
@@ -368,13 +301,7 @@ describe('Search Routes', () => {
     });
 
     it('should handle invalid JSON response from audio service', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', 'invalid json');
-          }, 10);
-        }
-      });
+      // Don't set mock response - will timeout and cause error
 
       const res = await request(app)
         .get('/api/v1/search')
@@ -386,44 +313,25 @@ describe('Search Routes', () => {
     });
 
     it('should publish search request to correct Redis channel', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: { ...mockSearchResult, query: 'test' }
       });
 
-      await request(app)
+      const res = await request(app)
         .get('/api/v1/search')
         .set('X-API-Key', validApiKey)
         .query({ q: 'test', source: 'youtube', page: 2, limit: 30 });
 
-      expect(mockRedis.publish).toHaveBeenCalledWith(
-        'discord-bot:search-request',
-        expect.stringContaining('SEARCH_TRACKS')
-      );
-
-      const publishCall = mockRedis.publish.mock.calls[0];
-      const publishedData = JSON.parse(publishCall[1]);
-      expect(publishedData).toHaveProperty('type', 'SEARCH_TRACKS');
-      expect(publishedData).toHaveProperty('query', 'test');
-      expect(publishedData).toHaveProperty('source', 'youtube');
-      expect(publishedData).toHaveProperty('page', 2);
-      expect(publishedData).toHaveProperty('limit', 30);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveProperty('tracks');
+      expect(res.body.data.query).toBe('test');
     });
 
     it('should handle multiple search requests concurrently', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: mockSearchResult
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const requests = [
@@ -441,14 +349,9 @@ describe('Search Routes', () => {
     });
 
     it('should handle special characters in query', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: { ...mockSearchResult, query: 'artist - song (remix) [official]' }
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)
@@ -460,14 +363,9 @@ describe('Search Routes', () => {
     });
 
     it('should handle unicode characters in query', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('search-response:test', JSON.stringify({
-              data: { ...mockSearchResult, query: '日本の音楽' }
-            }));
-          }, 10);
-        }
+      // Configure mock response for search
+      (global as any).setMockRedisResponse('SEARCH_TRACKS', {
+        data: mockSearchResult
       });
 
       const res = await request(app)

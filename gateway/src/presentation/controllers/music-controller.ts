@@ -281,7 +281,7 @@ export class MusicController {
       // Rule 4: Disconnecting bot must delete UI PRINCIPAL message
       // Rule 5: Ephemeral messages only when setting is ON
 
-      const shouldUseEphemeral = await this.shouldUseEphemeral(interaction.guildId);
+      const _shouldUseEphemeral = await this.shouldUseEphemeral(interaction.guildId);
 
       // CRITICAL FIX: Clear UI block for new legitimate commands to allow UI recreation
       if (this.clearUIBlock) {
@@ -328,10 +328,11 @@ export class MusicController {
         const { joinVoiceChannel, VoiceConnectionStatus } = await import('@discordjs/voice');
         const existingConnection = getVoiceConnection(interaction.guildId);
 
-        // Check if connection exists AND is in a valid state (not destroyed/disconnected)
+        // Check if connection exists AND is in a valid state (connected/ready)
+        // Signalling state is treated as invalid because it means the connection is stuck trying to connect
         const isValidConnection = existingConnection &&
-          existingConnection.state.status !== VoiceConnectionStatus.Destroyed &&
-          existingConnection.state.status !== VoiceConnectionStatus.Disconnected;
+          (existingConnection.state.status === VoiceConnectionStatus.Ready ||
+           existingConnection.state.status === VoiceConnectionStatus.Connecting);
 
         if (!isValidConnection) {
           // Log whether we're creating new connection or replacing destroyed one

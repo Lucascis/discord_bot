@@ -57,7 +57,12 @@ async function requestFromWorker<T>(
         try {
           const response = JSON.parse(message);
           if (response.error) {
-            reject(new Error(response.error));
+            // Create error with code property for proper error handling
+            const error: Error & { code?: string } = new Error(response.error.message || response.error);
+            if (response.error.code) {
+              error.code = response.error.code;
+            }
+            reject(error);
           } else {
             resolve(response.data);
           }
@@ -141,7 +146,8 @@ router.get('/guilds/:guildId',
 
       res.json(response);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('not found')) {
+      const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : undefined;
+      if (errorCode === 'NOT_FOUND' || (error instanceof Error && error.message.includes('not found'))) {
         throw new NotFoundError(`Analytics for guild ${guildId}`);
       }
 
@@ -164,7 +170,9 @@ router.get('/guilds/:guildId',
 router.get('/music/popular',
   validatePagination,
   asyncHandler(async (req, res) => {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
+    // validatePagination coerces these to numbers, but TypeScript doesn't know that
+    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : (Number(req.query.page) || 1);
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : (Number(req.query.limit) || 20);
     const { period = 'week', genre } = req.query as { period?: string; genre?: string };
 
     try {
@@ -460,7 +468,8 @@ router.get('/reports/:reportId', asyncHandler(async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    if (error instanceof Error && error.message.includes('not found')) {
+    const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : undefined;
+    if (errorCode === 'NOT_FOUND' || (error instanceof Error && error.message.includes('not found'))) {
       throw new NotFoundError(`Report ${reportId}`);
     }
 

@@ -498,7 +498,7 @@ export class MultiLevelCache<T = any> {
       (this.stats.avgResponseTimeMs + responseTime) / 2;
   }
 
-  private recordMetrics(operation: string, key: string): void {
+  private recordMetrics(operation: string, _key: string): void {
     if (this.metrics) {
       this.metrics.recordCustomMetric(
         'cache_operations_total',

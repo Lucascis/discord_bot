@@ -134,7 +134,7 @@ export class AudioMetricsCollector {
     userId?: string
   ): void {
     try {
-      this.businessMetrics.trackSongSkip(guildId, playedDuration, track.duration);
+      this.businessMetrics.trackSongSkip(guildId, track, playedDuration, skipReason);
 
       // Track user activity if userId provided
       if (userId) {

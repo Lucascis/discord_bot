@@ -345,23 +345,30 @@ export class AudioQualityManagementUseCase {
         switch (adjustment.type) {
           case 'quality_downgrade': {
             const currentQuality = await this.audioStreamingService.getCurrentQuality(sessionId);
-            await this.audioStreamingService.setQuality(sessionId, adjustment.newQuality);
-            autoAdjustments.push({
-              action: 'Quality downgraded due to performance',
-              previousValue: currentQuality,
-              newValue: adjustment.newQuality
-            });
+            const newQuality = adjustment.newQuality;
+            if (newQuality) {
+              await this.audioStreamingService.setQuality(sessionId, newQuality);
+              autoAdjustments.push({
+                action: 'Quality downgraded due to performance',
+                previousValue: currentQuality,
+                newValue: newQuality
+              });
+            }
             break;
           }
 
-          case 'buffer_adjustment':
+          case 'buffer_adjustment': {
             // This would adjust buffer settings if the streaming service supports it
-            autoAdjustments.push({
-              action: 'Buffer size adjusted',
-              previousValue: 'auto',
-              newValue: adjustment.bufferSize
-            });
+            const bufferSize = adjustment.bufferSize;
+            if (bufferSize !== undefined) {
+              autoAdjustments.push({
+                action: 'Buffer size adjusted',
+                previousValue: 'auto',
+                newValue: bufferSize
+              });
+            }
             break;
+          }
         }
       }
     }

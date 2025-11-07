@@ -319,7 +319,7 @@ export class AudioQualityTier {
     worse: string[];
     same: string[];
   } {
-    const comparison = { better: [], worse: [], same: [] };
+    const comparison: { better: string[]; worse: string[]; same: string[] } = { better: [], worse: [], same: [] };
 
     // Compare bitrate
     if (this._configuration.bitrate > other._configuration.bitrate) {

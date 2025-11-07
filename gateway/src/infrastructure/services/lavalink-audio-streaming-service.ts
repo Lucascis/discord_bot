@@ -7,7 +7,7 @@ import { AudioQualityLevel } from '../../domain/value-objects/audio-quality.js';
 import { AudioStreamingService, StreamingPerformance, AdaptiveConfig } from '../../application/use-cases/audio-quality-management-use-case.js';
 
 interface LavalinkNode {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   send(data: any): Promise<any>;
   stats: LavalinkStats;
@@ -359,12 +359,12 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     };
   }
 
-  private async storeAdaptiveConfig(sessionId: string, config: AdaptiveConfig): Promise<void> {
+  private async storeAdaptiveConfig(_sessionId: string, _config: AdaptiveConfig): Promise<void> {
     // Store configuration in memory or cache
     // Implementation would depend on storage mechanism
   }
 
-  private async removeAdaptiveConfig(sessionId: string): Promise<void> {
+  private async removeAdaptiveConfig(_sessionId: string): Promise<void> {
     // Remove stored configuration
     // Implementation would depend on storage mechanism
   }
@@ -456,18 +456,18 @@ export class LavalinkAudioStreamingService implements AudioStreamingService {
     }
   }
 
-  private storeMonitoringInterval(sessionId: string, interval: NodeJS.Timeout): void {
+  private storeMonitoringInterval(_sessionId: string, _interval: NodeJS.Timeout): void {
     // Store interval reference for cleanup
     // Implementation would use a Map or similar storage
   }
 
-  private getStoredMonitoringInterval(sessionId: string): NodeJS.Timeout | null {
+  private getStoredMonitoringInterval(_sessionId: string): NodeJS.Timeout | null {
     // Retrieve stored interval reference
     // Implementation would use a Map or similar storage
     return null;
   }
 
-  private removeMonitoringInterval(sessionId: string): void {
+  private removeMonitoringInterval(_sessionId: string): void {
     // Remove stored interval reference
     // Implementation would use a Map or similar storage
   }

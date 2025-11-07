@@ -218,7 +218,7 @@ export class EventSourcedMusicSession extends EventSourcedAggregateRoot {
   }
 
   // Event Handlers
-  protected applyEvent(event: DomainEvent, isNew: boolean): void {
+  protected applyEvent(event: DomainEvent, _isNew: boolean): void {
     switch (event.eventType) {
       case 'MusicSessionStarted':
         this.onMusicSessionStarted(event);
@@ -276,19 +276,19 @@ export class EventSourcedMusicSession extends EventSourcedAggregateRoot {
     this._position = (event.eventData.currentPosition as number) ?? this._position;
   }
 
-  private onMusicSessionResumed(event: DomainEvent): void {
+  private onMusicSessionResumed(_event: DomainEvent): void {
     this._state = 'playing';
     this._isPaused = false;
   }
 
-  private onMusicSessionStopped(event: DomainEvent): void {
+  private onMusicSessionStopped(_event: DomainEvent): void {
     this._state = 'stopped';
     this._currentTrack = null;
     this._position = 0;
     this._isPaused = false;
   }
 
-  private onMusicSessionDisconnected(event: DomainEvent): void {
+  private onMusicSessionDisconnected(_event: DomainEvent): void {
     this._state = 'idle';
     this._currentTrack = null;
     this._voiceChannelId = null;
@@ -310,11 +310,11 @@ export class EventSourcedMusicSession extends EventSourcedAggregateRoot {
     this._loopMode = event.eventData.newMode as LoopMode;
   }
 
-  private onTrackAddedToQueue(event: DomainEvent): void {
+  private onTrackAddedToQueue(_event: DomainEvent): void {
     this._queueLength += 1;
   }
 
-  private onTrackSkipped(event: DomainEvent): void {
+  private onTrackSkipped(_event: DomainEvent): void {
     this._queueLength = Math.max(0, this._queueLength - 1);
     this._position = 0;
   }

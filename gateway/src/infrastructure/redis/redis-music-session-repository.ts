@@ -90,7 +90,7 @@ export class RedisMusicSessionRepository implements MusicSessionRepository {
               if (session.isActive) {
                 sessions.push(session);
               }
-            } catch (parseError) {
+            } catch {
               // Skip invalid session data
               continue;
             }

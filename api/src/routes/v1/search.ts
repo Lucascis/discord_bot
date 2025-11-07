@@ -28,7 +28,7 @@ async function requestSearch(
   source?: string,
   page: number = 1,
   limit: number = 20,
-  timeoutMs: number = 15000
+  timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 15000
 ): Promise<SearchResult> {
   const requestId = `search_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 

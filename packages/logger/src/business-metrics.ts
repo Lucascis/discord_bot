@@ -105,8 +105,12 @@ export class BusinessMetricsCollector {
     guildActivity: new Map<string, { commands: number; lastActive: number }>()
   };
 
-  constructor(registry?: Registry) {
-    this.registry = registry || new Registry();
+  constructor(_registry?: Registry) {
+    // Create a dedicated registry for business metrics
+    // This allows /metrics/business to show only business metrics
+    // Note: registry parameter is reserved for future use when we want to register
+    // business metrics in a shared registry alongside default metrics
+    this.registry = new Registry();
     this.initializeMetrics();
     this.startAggregationJobs();
     // Initialize engagement metrics with default values
@@ -370,15 +374,30 @@ export class BusinessMetricsCollector {
     this.aggregations.popularTracks.set(trackKey, trackStats);
   }
 
-  trackSongSkip(guildId: string, playedDuration: number, totalDuration: number): void {
-    const completionRate = playedDuration / totalDuration;
+  trackSongSkip(
+    guildId: string,
+    track: { title?: string; duration: number },
+    playedDuration: number,
+    reason: 'user_skip' | 'autoplay_skip' | 'error_skip' | 'queue_advance',
+    userId?: string
+  ): void {
+    const totalDuration = track.duration;
+    const completionRate = totalDuration > 0 ? playedDuration / totalDuration : 0;
     this.metrics.songCompletionRate.labels(guildId).set(completionRate);
+
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
   }
 
   // Queue tracking
-  trackQueueOperation(guildId: string, operation: 'add' | 'remove' | 'clear' | 'shuffle', queueLength: number): void {
+  trackQueueOperation(guildId: string, operation: 'add' | 'remove' | 'clear' | 'shuffle', queueLength: number, userId?: string): void {
     this.metrics.queueOperations.labels(guildId, operation).inc();
     this.metrics.queueLength.labels(guildId).observe(queueLength);
+
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
   }
 
   // Search tracking
@@ -403,17 +422,32 @@ export class BusinessMetricsCollector {
   }
 
   // Autoplay tracking
-  trackAutoplayTrigger(guildId: string, triggerType: 'queue_empty' | 'user_request'): void {
+  trackAutoplayTrigger(guildId: string, triggerType: 'queue_empty' | 'user_request', userId?: string): void {
     this.metrics.autoplayTriggers.labels(guildId, triggerType).inc();
+
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
   }
 
   trackAutoplayRecommendation(
     guildId: string,
     recommendationType: 'similar' | 'artist' | 'genre' | 'mixed',
-    success: boolean
+    success: boolean,
+    trackTitle?: string,
+    userId?: string
   ): void {
     if (success) {
       this.metrics.autoplaySuccess.labels(guildId, recommendationType).inc();
+    }
+
+    if (userId) {
+      this.trackUserActivity(userId, guildId);
+    }
+
+    // Track the recommended track if provided
+    if (success && trackTitle) {
+      logger.debug({ guildId, recommendationType, trackTitle }, 'Autoplay recommendation tracked');
     }
   }
 
@@ -631,4 +665,9 @@ export function getBusinessMetrics(registry?: Registry): BusinessMetricsCollecto
     metricsCollector = new BusinessMetricsCollector(registry);
   }
   return metricsCollector;
+}
+
+// Reset singleton (for testing)
+export function resetBusinessMetrics(): void {
+  metricsCollector = null;
 }

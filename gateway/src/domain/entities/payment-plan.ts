@@ -484,7 +484,7 @@ export class PaymentPlan {
   /**
    * Create trial payment plan
    */
-  static createTrial(tier: SubscriptionTier, trialDays: number = 14): PaymentPlan {
+  static createTrial(tier: SubscriptionTier, _trialDays: number = 14): PaymentPlan {
     const billingPeriod = BillingPeriod.create('trial', 0);
     const pricing: PlanPricing = {
       basePrice: 0,

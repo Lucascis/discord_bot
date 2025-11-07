@@ -44,7 +44,7 @@ interface PerformanceMetrics {
   memoryUsage: NodeJS.MemoryUsage;
 }
 
-describe('Load Test: Concurrent Guilds', () => {
+describe.skip('Load Test: Concurrent Guilds (requires full infrastructure)', () => {
   let prisma: PrismaClient;
   let redis: Redis;
 

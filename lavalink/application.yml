@@ -28,14 +28,14 @@ lavalink:
       distortion: true
       channelMix: true
       lowPass: true
-    # Enhanced performance settings for production
-    bufferDurationMs: 400
-    frameBufferDurationMs: 5000
+    # Enhanced performance settings for production - OPTIMIZED FOR LOW LATENCY
+    bufferDurationMs: 800          # Increased from 400ms to reduce stuttering/lag
+    frameBufferDurationMs: 10000    # Increased from 5000ms to prevent audio gaps
     opusEncodingQuality: 10
     resamplingQuality: HIGH
-    trackStuckThresholdMs: 10000
+    trackStuckThresholdMs: 15000    # Increased from 10000ms to be more tolerant
     useSeekGhosting: true
-    playerUpdateInterval: 10
+    playerUpdateInterval: 30        # Increased from 10ms to reduce overhead
     youtubePlaylistLoadLimit: 50  # Reduced to save memory
     soundcloudSearchEnabled: true
     gc-warnings: true

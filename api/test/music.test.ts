@@ -1,27 +1,15 @@
 import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
-import Redis from 'ioredis';
 import { mockTrack, mockQueue, validGuildId, validApiKey } from './fixtures.js';
 
 describe('Music Routes', () => {
-  let mockRedis: any;
-
-  beforeEach(() => {
-    mockRedis = new Redis();
-    vi.clearAllMocks();
-  });
+  // Note: beforeEach is handled by global setup in api/test/setup.ts
 
   describe('GET /api/v1/guilds/:guildId/queue', () => {
     it('should return queue successfully', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockQueue
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('GET_QUEUE', {
+        data: mockQueue
       });
 
       const res = await request(app)
@@ -56,7 +44,7 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // Don't set any mock response - will cause timeout
 
       const res = await request(app)
         .get(`/api/v1/guilds/${validGuildId}/queue`)
@@ -67,14 +55,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service error', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              error: 'Audio service unavailable'
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('GET_QUEUE', {
+        error: 'Audio service unavailable'
       });
 
       const res = await request(app)
@@ -86,14 +68,8 @@ describe('Music Routes', () => {
     });
 
     it('should include request ID in response', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockQueue
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('GET_QUEUE', {
+        data: mockQueue
       });
 
       const res = await request(app)
@@ -120,14 +96,9 @@ describe('Music Routes', () => {
         queue: mockQueue
       };
 
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockAddResponse
-            }));
-          }, 10);
-        }
+      // Use setMockRedisResponse to work with automatic pub/sub simulation
+      (global as any).setMockRedisResponse('ADD_TRACK', {
+        data: mockAddResponse
       });
 
       const res = await request(app)
@@ -195,13 +166,12 @@ describe('Music Routes', () => {
     });
 
     it('should accept optional position field', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { track: mockTrack, position: 1, queue: mockQueue }
-            }));
-          }, 10);
+      // Use setMockRedisResponse to work with automatic pub/sub simulation
+      (global as any).setMockRedisResponse('ADD_TRACK', {
+        data: {
+          track: mockTrack,
+          position: 1,
+          queue: mockQueue
         }
       });
 
@@ -223,7 +193,7 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // Don't set any mock response - will cause timeout naturally
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/tracks`)
@@ -241,15 +211,8 @@ describe('Music Routes', () => {
         removedTrack: mockTrack,
         queue: mockQueue
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockRemoveResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('REMOVE_TRACK', {
+        data: mockRemoveResponse
       });
 
       const res = await request(app)
@@ -272,14 +235,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle track not found error', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              error: 'Track not found at position 5'
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('REMOVE_TRACK', {
+        error: 'Track not found'
       });
 
       const res = await request(app)
@@ -299,7 +256,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .delete(`/api/v1/guilds/${validGuildId}/queue/tracks/0`)
@@ -317,15 +275,8 @@ describe('Music Routes', () => {
         currentTrack: mockTrack,
         message: 'Playback started'
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockPlayResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('PLAY_MUSIC', {
+        data: mockPlayResponse
       });
 
       const res = await request(app)
@@ -339,13 +290,11 @@ describe('Music Routes', () => {
     });
 
     it('should accept optional userId and voiceChannelId', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, message: 'Playback resumed' }
-            }));
-          }, 10);
+      // Configure mock response for play music
+      (global as any).setMockRedisResponse('PLAY_MUSIC', {
+        data: {
+          success: true,
+          message: 'Playback started'
         }
       });
 
@@ -377,7 +326,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/play`)
@@ -395,15 +345,8 @@ describe('Music Routes', () => {
         success: true,
         message: 'Playback paused'
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockPauseResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('PAUSE_MUSIC', {
+        data: mockPauseResponse
       });
 
       const res = await request(app)
@@ -417,13 +360,11 @@ describe('Music Routes', () => {
     });
 
     it('should accept empty body', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, message: 'Paused' }
-            }));
-          }, 10);
+      // Configure mock response for pause music
+      (global as any).setMockRedisResponse('PAUSE_MUSIC', {
+        data: {
+          success: true,
+          message: 'Playback paused'
         }
       });
 
@@ -455,7 +396,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/pause`)
@@ -475,15 +417,8 @@ describe('Music Routes', () => {
         nextTrack: { ...mockTrack, title: 'Next Track' },
         message: 'Track skipped'
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockSkipResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('SKIP_MUSIC', {
+        data: mockSkipResponse
       });
 
       const res = await request(app)
@@ -498,13 +433,11 @@ describe('Music Routes', () => {
     });
 
     it('should handle skip when queue is empty', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, message: 'Queue is empty', skippedTrack: mockTrack }
-            }));
-          }, 10);
+      // Configure mock response for skip music
+      (global as any).setMockRedisResponse('SKIP_MUSIC', {
+        data: {
+          success: true,
+          message: 'Queue is empty'
         }
       });
 
@@ -537,7 +470,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/skip`)
@@ -556,15 +490,8 @@ describe('Music Routes', () => {
         message: 'Playback stopped',
         queueCleared: false
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockStopResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('STOP_MUSIC', {
+        data: mockStopResponse
       });
 
       const res = await request(app)
@@ -584,15 +511,8 @@ describe('Music Routes', () => {
         message: 'Playback stopped and queue cleared',
         queueCleared: true
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockStopResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('STOP_MUSIC', {
+        data: mockStopResponse
       });
 
       const res = await request(app)
@@ -605,13 +525,12 @@ describe('Music Routes', () => {
     });
 
     it('should accept empty body', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, message: 'Stopped' }
-            }));
-          }, 10);
+      // Configure mock response for stop music
+      (global as any).setMockRedisResponse('STOP_MUSIC', {
+        data: {
+          success: true,
+          message: 'Playback stopped',
+          queueCleared: false
         }
       });
 
@@ -643,7 +562,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/stop`)
@@ -662,15 +582,8 @@ describe('Music Routes', () => {
         volume: 75,
         message: 'Volume set to 75'
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockVolumeResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('SET_VOLUME', {
+        data: mockVolumeResponse
       });
 
       const res = await request(app)
@@ -725,13 +638,12 @@ describe('Music Routes', () => {
     });
 
     it('should accept volume 0', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, volume: 0, message: 'Volume muted' }
-            }));
-          }, 10);
+      // Configure mock response for volume 0
+      (global as any).setMockRedisResponse('SET_VOLUME', {
+        data: {
+          success: true,
+          volume: 0,
+          message: 'Volume set to 0'
         }
       });
 
@@ -745,13 +657,12 @@ describe('Music Routes', () => {
     });
 
     it('should accept volume 200', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, volume: 200, message: 'Volume max' }
-            }));
-          }, 10);
+      // Configure mock response for volume 200
+      (global as any).setMockRedisResponse('SET_VOLUME', {
+        data: {
+          success: true,
+          volume: 200,
+          message: 'Volume set to 200'
         }
       });
 
@@ -784,7 +695,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .put(`/api/v1/guilds/${validGuildId}/queue/volume`)
@@ -803,15 +715,8 @@ describe('Music Routes', () => {
         queue: mockQueue,
         message: 'Queue shuffled'
       };
-
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: mockShuffleResponse
-            }));
-          }, 10);
-        }
+      (global as any).setMockRedisResponse('SHUFFLE_QUEUE', {
+        data: mockShuffleResponse
       });
 
       const res = await request(app)
@@ -826,13 +731,12 @@ describe('Music Routes', () => {
     });
 
     it('should accept empty body', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: { success: true, queue: mockQueue, message: 'Shuffled' }
-            }));
-          }, 10);
+      // Configure mock response for shuffle queue
+      (global as any).setMockRedisResponse('SHUFFLE_QUEUE', {
+        data: {
+          success: true,
+          queue: mockQueue,
+          message: 'Queue shuffled'
         }
       });
 
@@ -864,7 +768,8 @@ describe('Music Routes', () => {
     });
 
     it('should handle audio service timeout', async () => {
-      mockRedis.on.mockImplementation(() => {});
+      // No mock response set - will timeout naturally
+
 
       const res = await request(app)
         .post(`/api/v1/guilds/${validGuildId}/queue/shuffle`)
@@ -876,17 +781,16 @@ describe('Music Routes', () => {
     });
 
     it('should handle empty queue shuffle', async () => {
-      mockRedis.on.mockImplementation((event: string, callback: Function) => {
-        if (event === 'message') {
-          setTimeout(() => {
-            callback('audio-response:test', JSON.stringify({
-              data: {
-                success: true,
-                queue: { ...mockQueue, tracks: [], size: 0, empty: true },
-                message: 'Queue is empty'
-              }
-            }));
-          }, 10);
+      // Configure mock response for empty queue shuffle
+      (global as any).setMockRedisResponse('SHUFFLE_QUEUE', {
+        data: {
+          success: true,
+          queue: {
+            ...mockQueue,
+            empty: true,
+            tracks: []
+          },
+          message: 'Queue is empty'
         }
       });
 

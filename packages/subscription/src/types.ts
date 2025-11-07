@@ -3,7 +3,7 @@
  * Complete type definitions for the Discord Music Bot subscription system
  */
 
-import type { SubscriptionTier, SubscriptionStatus, BillingCycle, FeatureCategory } from '@prisma/client';
+import type { SubscriptionTier, SubscriptionStatus, BillingInterval, FeatureCategory } from '@prisma/client';
 
 // ========================================
 // PLAN TYPES
@@ -126,14 +126,14 @@ export interface StripeWebhookEvent {
 export interface CreateSubscriptionParams {
   guildId: string;
   tier: SubscriptionTier;
-  billingCycle: BillingCycle;
+  billingCycle: BillingInterval;
   stripeCustomerId?: string;
   trialDays?: number;
 }
 
 export interface UpdateSubscriptionParams {
   tier?: SubscriptionTier;
-  billingCycle?: BillingCycle;
+  billingCycle?: BillingInterval;
   cancelAtPeriodEnd?: boolean;
 }
 
@@ -212,4 +212,4 @@ export interface FeatureFlag {
 // EXPORT TYPES
 // ========================================
 
-export type { SubscriptionTier, SubscriptionStatus, BillingCycle, FeatureCategory };
+export type { SubscriptionTier, SubscriptionStatus, BillingInterval, FeatureCategory };

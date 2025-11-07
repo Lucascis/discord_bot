@@ -624,8 +624,8 @@ export class AudioQualityDomainService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: any,
     tier: SubscriptionTier,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deviceCapabilities: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+    deviceCapabilities: any // TODO: [ADAPTIVE-STREAMING] Use deviceCapabilities to validate against device limits. See TECHNICAL_DEBT_AND_DECISIONS.md
   ): { isValid: boolean; errors: string[] } {
     const errors: string[] = [];
 

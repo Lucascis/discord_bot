@@ -94,9 +94,10 @@ function createWorkerOptions(queueName: string): WorkerOptions {
 /**
  * Generic job processor wrapper with metrics
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-unsafe-function-type
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function createJobProcessor<T extends JobData>(
   queueName: string,
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   processors: Record<string, Function>
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
