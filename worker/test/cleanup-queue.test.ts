@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach, MockedFunction } from 'vitest';
-import type { Queue, Job } from 'bullmq';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Queue as _Queue, Job as _Job } from 'bullmq';
 
 /**
  * Cleanup Queue Test Suite

@@ -13,14 +13,14 @@ import { vi } from 'vitest';
  * Global registry for mock responses
  * Tests can set expected responses using setMockRedisResponse()
  */
-const globalMockResponseRegistry = new Map<string, any>();
+const globalMockResponseRegistry = new Map<string, unknown>();
 
 /**
  * Mock Redis client class
  * Implements all commonly used Redis methods with in-memory storage
  */
 class MockRedis {
-  private listeners = new Map<string, Set<Function>>();
+  private listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   private subscriptions = new Set<string>();
   private storage = new Map<string, string>();
   public status: string = 'ready';
@@ -123,21 +123,21 @@ class MockRedis {
           }
         });
       }
-    } catch (e) {
+    } catch {
       // Ignore invalid JSON
     }
 
     return 1; // Number of subscribers that received the message
   });
 
-  subscribe = vi.fn().mockImplementation((channel: string | string[], callback?: Function) => {
+  subscribe = vi.fn().mockImplementation((channel: string | string[], callback?: (...args: unknown[]) => void) => {
     const channels = Array.isArray(channel) ? channel : [channel];
     channels.forEach(ch => this.subscriptions.add(ch));
     if (callback) setImmediate(() => callback(null));
     return Promise.resolve(channels.length);
   });
 
-  unsubscribe = vi.fn().mockImplementation((channel?: string | string[], callback?: Function) => {
+  unsubscribe = vi.fn().mockImplementation((channel?: string | string[], callback?: (...args: unknown[]) => void) => {
     if (channel) {
       const channels = Array.isArray(channel) ? channel : [channel];
       channels.forEach(ch => this.subscriptions.delete(ch));
@@ -155,7 +155,7 @@ class MockRedis {
   // Event Emitter
   // ============================================
 
-  on = vi.fn().mockImplementation((event: string, handler: Function) => {
+  on = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
@@ -163,8 +163,8 @@ class MockRedis {
     return this;
   });
 
-  once = vi.fn().mockImplementation((event: string, handler: Function) => {
-    const wrappedHandler = (...args: any[]) => {
+  once = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+    const wrappedHandler = (...args: unknown[]) => {
       handler(...args);
       this.listeners.get(event)?.delete(wrappedHandler);
     };
@@ -175,12 +175,12 @@ class MockRedis {
     return this;
   });
 
-  off = vi.fn().mockImplementation((event: string, handler: Function) => {
+  off = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
     this.listeners.get(event)?.delete(handler);
     return this;
   });
 
-  removeListener = vi.fn().mockImplementation((event: string, handler: Function) => {
+  removeListener = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
     this.listeners.get(event)?.delete(handler);
     return this;
   });
@@ -308,7 +308,7 @@ class MockRedis {
  * @example
  * setMockRedisResponse('PLAY_TRACK', { success: true, track: {...} });
  */
-export function setMockRedisResponse(requestType: string, response: any): void {
+export function setMockRedisResponse(requestType: string, response: unknown): void {
   globalMockResponseRegistry.set(requestType, response);
 }
 
@@ -330,7 +330,7 @@ export default MockRedis;
  * Named export for Cluster (not commonly used in this project)
  */
 export class Cluster extends MockRedis {
-  constructor(..._args: any[]) {
+  constructor(..._args: unknown[]) {
     super();
   }
 }
@@ -340,9 +340,9 @@ export class Cluster extends MockRedis {
  */
 export class Command {
   name: string;
-  args: any[];
+  args: unknown[];
 
-  constructor(name: string, args: any[]) {
+  constructor(name: string, args: unknown[]) {
     this.name = name;
     this.args = args;
   }

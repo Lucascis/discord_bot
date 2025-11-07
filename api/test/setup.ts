@@ -6,7 +6,7 @@ import { vi, beforeAll, afterAll, beforeEach } from 'vitest';
 // This ensures mocks are set up BEFORE app.ts imports and creates Redis connections
 
 // Create mocks in hoisted scope
-const { MockRedisClass, globalMockResponseRegistry, setMockRedisResponse, clearMockRedisResponses } = vi.hoisted(() => {
+const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoisted(() => {
   const mockResponseRegistry = new Map<string, unknown>();
 
   class MockRedis {

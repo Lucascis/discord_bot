@@ -241,7 +241,7 @@ vi.mock('@discord-bot/logger', () => ({
       lastCheck: new Date().toISOString()
     }),
   },
-  getBusinessMetrics: vi.fn().mockImplementation((registry: unknown) => ({
+  getBusinessMetrics: vi.fn().mockImplementation((_registry: unknown) => ({
     trackUserActivity: vi.fn(),
     trackSessionStart: vi.fn(),
     trackSessionEnd: vi.fn(),

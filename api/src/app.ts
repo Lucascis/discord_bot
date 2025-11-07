@@ -69,7 +69,7 @@ const dynamicRateLimiter = new DynamicRateLimiter({
   // In test mode, use much higher limits EXCEPT for rate-limiting tests
   // (detected by special test API key suffix)
   ...(env.NODE_ENV === 'test' && {
-    limitResolver: (tier) => {
+    limitResolver: (_tier) => {
       // If it's a rate-limiting test (detected by API key pattern), use normal limits
       // Otherwise use high limit for other tests
       return 1000;

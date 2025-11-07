@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { logger } from '@discord-bot/logger';
 
+// Define SearchResultLike type
+interface SearchResultLike {
+  tracks: Array<{ info: { title: string; uri: string } }>;
+}
+
 // Mock audio metrics
 vi.mock('../audio/src/services/metrics.js', () => ({
   audioMetrics: {
@@ -64,7 +69,7 @@ const mockPerformanceTracker = {
 };
 
 // Create a mock smartSearch that actually calls player.search when needed
-const mockSmartSearch = vi.fn(async (player: any, query: string, userId: string, guildId: string) => {
+const mockSmartSearch = vi.fn(async (player: unknown, query: string, _userId: string, _guildId: string) => {
   // Call the actual player.search to ensure mock is invoked
   if (player && player.search) {
     await player.search(query);

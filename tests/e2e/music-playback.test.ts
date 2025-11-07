@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { Client, GatewayIntentBits, VoiceChannel, TextChannel, Guild } from 'discord.js';
+import type { Client as _Client, GatewayIntentBits as _GatewayIntentBits, VoiceChannel as _VoiceChannel, TextChannel as _TextChannel, Guild as _Guild } from 'discord.js';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import { LavalinkManager } from 'lavalink-client';
@@ -24,7 +24,7 @@ const LAVALINK_PORT = process.env.LAVALINK_PORT || '2333';
 const LAVALINK_PASSWORD = process.env.LAVALINK_PASSWORD || 'youshallnotpass';
 
 // Mock Discord bot token (use test bot in CI)
-const DISCORD_TOKEN = process.env.DISCORD_TEST_TOKEN || 'test-token';
+const _DISCORD_TOKEN = process.env.DISCORD_TEST_TOKEN || 'test-token';
 
 // Test fixtures
 const TEST_YOUTUBE_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rick Astley - Never Gonna Give You Up

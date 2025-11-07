@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   initializeCleanupWorker,
   initializeAllWorkers,
@@ -357,7 +357,7 @@ describe('bullmq-worker', () => {
   describe('event handlers', () => {
     it('should handle ready event', async () => {
       const { logger } = await import('@discord-bot/logger');
-      const worker = initializeCleanupWorker();
+      const _worker = initializeCleanupWorker();
 
       // Find the ready handler
       const readyCall = mockWorkerOn.mock.calls.find(call => call[0] === 'ready');
@@ -376,7 +376,7 @@ describe('bullmq-worker', () => {
 
     it('should handle error event', async () => {
       const { logger } = await import('@discord-bot/logger');
-      const worker = initializeCleanupWorker();
+      const _worker = initializeCleanupWorker();
 
       const errorCall = mockWorkerOn.mock.calls.find(call => call[0] === 'error');
       expect(errorCall).toBeDefined();
@@ -397,7 +397,7 @@ describe('bullmq-worker', () => {
 
     it('should handle stalled event', async () => {
       const { logger } = await import('@discord-bot/logger');
-      const worker = initializeCleanupWorker();
+      const _worker = initializeCleanupWorker();
 
       const stalledCall = mockWorkerOn.mock.calls.find(call => call[0] === 'stalled');
       expect(stalledCall).toBeDefined();

@@ -905,9 +905,9 @@ export class StripePaymentProvider implements IPaymentProvider {
         data: {
           object: this.mapWebhookObject(stripeEvent.data.object),
         },
-        previousAttributes: stripeEvent.data.previous_attributes as any,
+        previousAttributes: stripeEvent.data.previous_attributes as unknown,
       };
-    } catch (error) {
+    } catch {
       throw new StripeProviderError(
         'Failed to parse webhook event',
         'invalid_webhook_payload'
@@ -1182,8 +1182,8 @@ export class StripePaymentProvider implements IPaymentProvider {
   /**
    * Map webhook object based on type
    */
-  private mapWebhookObject(obj: Stripe.Event.Data.Object): any {
-    const type = (obj as any).object;
+  private mapWebhookObject(obj: Stripe.Event.Data.Object): unknown {
+    const type = (obj as unknown as { object: string }).object;
 
     switch (type) {
       case 'payment_intent':

@@ -166,11 +166,11 @@ export class CustomerManagementService {
         email: data.email,
         name: data.name,
         phone: data.phone,
-        address: data.address as any,
+        address: data.address as unknown,
         taxId: data.taxId,
         taxIdType: data.taxIdType,
         country: data.country,
-        metadata: data.metadata as any,
+        metadata: data.metadata as unknown,
         ...providerFields,
       },
     });
@@ -187,7 +187,7 @@ export class CustomerManagementService {
           discordUserId: data.discordUserId,
           provider: provider.name,
           providerCustomerId: providerCustomer.id,
-        } as any,
+        } as unknown,
       },
     });
 
@@ -251,11 +251,11 @@ export class CustomerManagementService {
         email: data.email,
         name: data.name,
         phone: data.phone,
-        address: data.address as any,
+        address: data.address as unknown,
         taxId: data.taxId,
         taxIdType: data.taxIdType,
         country: data.country,
-        metadata: data.metadata as any,
+        metadata: data.metadata as unknown,
         discordUsername: data.discordUsername,
         discordDiscriminator: data.discordDiscriminator,
       }
@@ -319,7 +319,7 @@ export class CustomerManagementService {
 
     // Retrieve payment method details from provider
     const paymentMethods = await provider.listPaymentMethods(providerCustomerId);
-    const paymentMethodDetails = paymentMethods.find((pm: any) => pm.id === paymentMethodId);
+    const paymentMethodDetails = paymentMethods.find((pm: unknown) => (pm as { id: string }).id === paymentMethodId);
 
     // Store payment method in database
     await this.database.paymentMethod.create({
@@ -327,7 +327,7 @@ export class CustomerManagementService {
         customerId,
         provider: provider.name,
         providerPaymentMethodId: paymentMethodId,
-        type: (paymentMethodDetails?.type?.toUpperCase() || 'OTHER') as any,
+        type: (paymentMethodDetails?.type?.toUpperCase() || 'OTHER') as unknown,
         cardBrand: paymentMethodDetails?.card?.brand,
         cardLast4: paymentMethodDetails?.card?.last4,
         cardExpMonth: paymentMethodDetails?.card?.expMonth,
@@ -347,7 +347,7 @@ export class CustomerManagementService {
         metadata: {
           paymentMethodId,
           isDefault: setAsDefault,
-        } as any,
+        } as unknown,
       },
     });
 
@@ -416,8 +416,8 @@ export class CustomerManagementService {
         data: {
           name: data.planId,
           displayName: data.planId.charAt(0).toUpperCase() + data.planId.slice(1),
-          features: [] as any,
-          limits: {} as any,
+          features: [] as unknown,
+          limits: {} as unknown,
         }
       });
     }
@@ -453,13 +453,13 @@ export class CustomerManagementService {
         priceId: price.id,
         provider: provider.name,
         providerSubscriptionId: subscription.id,
-        status: subscription.status as any,
+        status: subscription.status as unknown,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
         paymentMethodId: data.paymentMethodId,
         trialStart: data.trialPeriodDays ? new Date() : null,
         trialEnd: data.trialPeriodDays ? new Date(Date.now() + data.trialPeriodDays * 24 * 60 * 60 * 1000) : null,
-        metadata: data.metadata as any,
+        metadata: data.metadata as unknown,
       },
     });
 
@@ -477,7 +477,7 @@ export class CustomerManagementService {
           priceId: data.priceId,
           providerSubscriptionId: subscription.id,
           trialPeriodDays: data.trialPeriodDays,
-        } as any,
+        } as unknown,
       },
     });
 
@@ -508,7 +508,7 @@ export class CustomerManagementService {
       throw new Error(`Subscription ${subscriptionId} does not belong to customer ${customerId}`);
     }
 
-    const provider = this.paymentFactory.getProvider(subscription.provider as any);
+    const provider = this.paymentFactory.getProvider(subscription.provider as unknown);
     const providerSubscriptionId = subscription.providerSubscriptionId;
 
     // Cancel in provider
@@ -541,7 +541,7 @@ export class CustomerManagementService {
           cancelImmediately,
           reason,
           canceledAt: new Date(),
-        } as any,
+        } as unknown,
       },
     });
 
@@ -570,7 +570,7 @@ export class CustomerManagementService {
     const invoices = await this.database.invoice.findMany({
       where: {
         customerId,
-        ...(options?.status ? { status: options.status as any } : {}),
+        ...(options?.status ? { status: options.status as unknown } : {}),
       },
       include: {
         subscription: {
@@ -623,7 +623,7 @@ export class CustomerManagementService {
       throw new Error(`Payment ${paymentIntentId} not found for customer ${customerId}`);
     }
 
-    const provider = this.paymentFactory.getProvider(payment.provider as any);
+    const provider = this.paymentFactory.getProvider(payment.provider as unknown);
 
     // Create refund in provider
     const refund = await provider.createRefund({
@@ -645,9 +645,9 @@ export class CustomerManagementService {
         providerRefundId: refund.id,
         amount: amount || payment.amount,
         currency: payment.currency,
-        reason: reason as any,
+        reason: reason as unknown,
         reasonNote: reason,
-        status: refund.status as any,
+        status: refund.status as unknown,
         processedBy: 'system',
       },
     });
@@ -681,7 +681,7 @@ export class CustomerManagementService {
           refundAmount: amount || payment.amount,
           reason,
           providerRefundId: refund.id,
-        } as any,
+        } as unknown,
       },
     });
 
@@ -840,7 +840,7 @@ export class CustomerManagementService {
   /**
    * Get appropriate payment provider for customer
    */
-  private getProviderForCustomer(customer: any): IPaymentProvider {
+  private getProviderForCustomer(customer: unknown): IPaymentProvider {
     // If customer has Stripe ID, use Stripe
     if (customer.stripeCustomerId) {
       return this.paymentFactory.getProvider('stripe');
@@ -863,7 +863,7 @@ export class CustomerManagementService {
   /**
    * Get provider-specific customer ID
    */
-  private getProviderCustomerId(customer: any, providerName: string): string | undefined {
+  private getProviderCustomerId(customer: unknown, providerName: string): string | undefined {
     switch (providerName) {
       case 'stripe':
         return customer.stripeCustomerId;

@@ -474,7 +474,7 @@ export class BillingAnalyticsService {
     });
 
     // Get customer details for each LTV record
-    const customerIds = topLtvRecords.map((ltv: any) => ltv.customerId);
+    const customerIds = topLtvRecords.map((ltv: unknown) => (ltv as { customerId: string }).customerId);
     const customers = await this.database.customer.findMany({
       where: {
         id: { in: customerIds }
@@ -486,16 +486,19 @@ export class BillingAnalyticsService {
     });
 
     // Create a map for quick lookup
-    const customerMap = new Map(customers.map((c: any) => [c.id, c.email]));
+    const customerMap = new Map(customers.map((c: unknown) => [(c as { id: string }).id, (c as { email: string }).email]));
 
     // Combine the data
-    const result = topLtvRecords.map((ltv: any) => ({
-      customerId: ltv.customerId,
-      email: customerMap.get(ltv.customerId) || 'unknown',
-      ltv: ltv.netRevenue,
-      totalPayments: ltv.totalPayments,
-      monthsSubscribed: ltv.monthsSubscribed
-    }));
+    const result = topLtvRecords.map((ltv: unknown) => {
+      const ltvRecord = ltv as { customerId: string; netRevenue: number; totalPayments: number; monthsSubscribed: number };
+      return {
+        customerId: ltvRecord.customerId,
+        email: customerMap.get(ltvRecord.customerId) || 'unknown',
+        ltv: ltvRecord.netRevenue,
+        totalPayments: ltvRecord.totalPayments,
+        monthsSubscribed: ltvRecord.monthsSubscribed
+      };
+    });
 
     console.log(`[BillingAnalytics] Fetching top ${limit} customers`);
 
@@ -625,17 +628,17 @@ export class BillingAnalyticsService {
     const performance: PlanPerformance[] = [];
 
     for (const plan of plans) {
-      const activeSubscriptions = plan.subscriptions.filter((s: any) =>
-        s.status === 'ACTIVE' || s.status === 'TRIALING'
+      const activeSubscriptions = plan.subscriptions.filter((s: unknown) =>
+        (s as { status: string }).status === 'ACTIVE' || (s as { status: string }).status === 'TRIALING'
       );
-      const canceledSubscriptions = plan.subscriptions.filter((s: any) =>
-        s.status === 'CANCELED'
+      const canceledSubscriptions = plan.subscriptions.filter((s: unknown) =>
+        (s as { status: string }).status === 'CANCELED'
       );
 
       // Count new subscriptions (created in last 30 days)
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const newSubscriptions = plan.subscriptions.filter((s: any) =>
-        s.createdAt >= thirtyDaysAgo
+      const newSubscriptions = plan.subscriptions.filter((s: unknown) =>
+        (s as { createdAt: Date }).createdAt >= thirtyDaysAgo
       );
 
       // Calculate total revenue for this plan
@@ -659,7 +662,7 @@ export class BillingAnalyticsService {
       }
 
       // Get unique customers for this plan
-      const customerIds = new Set(activeSubscriptions.map((s: any) => s.customerId));
+      const customerIds = new Set(activeSubscriptions.map((s: unknown) => (s as { customerId: string }).customerId));
       const customerCount = customerIds.size;
 
       // Calculate average revenue per user (ARPU)
@@ -739,7 +742,7 @@ export class BillingAnalyticsService {
       }
     }
 
-    const totalPayments = payments.reduce((sum: number, p: any) => sum + p._count, 0);
+    const totalPayments = payments.reduce((sum: number, p: unknown) => sum + (p as { _count: number })._count, 0);
 
     // Calculate success rate
     const successRate = totalPayments > 0
@@ -802,11 +805,14 @@ export class BillingAnalyticsService {
       _sum: { amount: true }
     });
 
-    const result = failureAnalysis.map((failure: any) => ({
-      failureCode: failure.failureCode || 'UNKNOWN',
-      count: failure._count,
-      totalAmount: failure._sum.amount || 0
-    }));
+    const result = failureAnalysis.map((failure: unknown) => {
+      const f = failure as { failureCode?: string; _count: number; _sum: { amount: number | null } };
+      return {
+        failureCode: f.failureCode || 'UNKNOWN',
+        count: f._count,
+        totalAmount: f._sum.amount || 0
+      };
+    });
 
     console.log('[BillingAnalytics] Analyzing payment failures');
 
@@ -841,7 +847,7 @@ export class BillingAnalyticsService {
     });
 
     const customersJoined = cohortCustomers.length;
-    const customerIds = cohortCustomers.map((c: any) => c.id);
+    const customerIds = cohortCustomers.map((c: unknown) => (c as { id: string }).id);
 
     // Track retention for up to 12 months
     const retention = [];

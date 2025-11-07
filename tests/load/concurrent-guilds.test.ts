@@ -9,7 +9,7 @@
  * @group performance
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import { performance } from 'perf_hooks';
@@ -572,7 +572,7 @@ async function runGuildOperations(
       }
 
       metrics.successfulRequests++;
-    } catch (error) {
+    } catch {
       metrics.failedRequests++;
     } finally {
       metrics.latencies.push(performance.now() - startTime);

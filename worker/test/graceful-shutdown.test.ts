@@ -415,7 +415,7 @@ describe('graceful-shutdown', () => {
     });
 
     it('should prevent duplicate shutdowns', async () => {
-      const { triggerShutdown, isShuttingDown } =
+      const { triggerShutdown, isShuttingDown: _isShuttingDown } =
         await import('../src/utils/graceful-shutdown.js');
       const { logger } = await import('@discord-bot/logger');
 

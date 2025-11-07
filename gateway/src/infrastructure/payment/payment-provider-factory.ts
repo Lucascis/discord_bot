@@ -150,7 +150,7 @@ export class PaymentProviderFactory {
 
     try {
       return this.getProvider(preferredProvider);
-    } catch (error) {
+    } catch {
       // Fallback to default if preferred provider not available
       console.warn(`[PaymentFactory] Provider '${preferredProvider}' not available for ${country}, using default`);
       return this.getProvider();
@@ -162,7 +162,7 @@ export class PaymentProviderFactory {
    */
   getProviderForCurrency(currency: string): IPaymentProvider {
     // Find a provider that supports this currency
-    for (const [name, provider] of this.providers.entries()) {
+    for (const [_name, provider] of this.providers.entries()) {
       if (provider.supportsCurrency(currency)) {
         return provider;
       }
@@ -309,7 +309,7 @@ class PaymentTransactionContext {
  */
 export function createPaymentFactoryFromEnv(): PaymentProviderFactory {
   const config: PaymentFactoryConfig = {
-    defaultProvider: (process.env.PAYMENT_PROVIDER as any) || 'stub',
+    defaultProvider: (process.env.PAYMENT_PROVIDER as unknown) || 'stub',
     providers: {},
     fallbackProvider: 'stub'
   };
