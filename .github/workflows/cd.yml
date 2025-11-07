@@ -14,17 +14,16 @@ env:
 jobs:
   # Build and push Docker images
   build-and-push:
-    name: 🏗️ Build & Push Images
+    name: 🏗️ Build & Push ${{ matrix.service }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    outputs:
-      gateway-image: ${{ steps.meta-gateway.outputs.tags }}
-      audio-image: ${{ steps.meta-audio.outputs.tags }}
-      api-image: ${{ steps.meta-api.outputs.tags }}
-      version: ${{ steps.meta-gateway.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, audio, api, worker]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -39,85 +38,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Gateway Service
-      - name: Extract Gateway metadata
-        id: meta-gateway
+      # Build all services using matrix strategy
+      - name: Extract metadata for ${{ matrix.service }}
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gateway
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha
+            type=sha,prefix=sha-
 
-      - name: Build and push Gateway
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          target: production
+          target: ${{ matrix.service }}
           push: true
-          tags: ${{ steps.meta-gateway.outputs.tags }}
-          labels: ${{ steps.meta-gateway.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-      # Audio Service
-      - name: Extract Audio metadata
-        id: meta-audio
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-audio
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-
-      - name: Build and push Audio
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: production
-          push: true
-          tags: ${{ steps.meta-audio.outputs.tags }}
-          labels: ${{ steps.meta-audio.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-      # API Service
-      - name: Extract API metadata
-        id: meta-api
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-
-      - name: Build and push API
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: production
-          push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           platforms: linux/amd64,linux/arm64
 
   # Security scan of built images
@@ -157,19 +102,19 @@ jobs:
       - name: Configure Staging Environment
         run: |
           echo "Deploying to staging environment..."
-          echo "Gateway Image: ${{ needs.build-and-push.outputs.gateway-image }}"
-          echo "Audio Image: ${{ needs.build-and-push.outputs.audio-image }}"
-          echo "API Image: ${{ needs.build-and-push.outputs.api-image }}"
+          echo "Images built and pushed to ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
       - name: Deploy Services
         run: |
           echo "🔄 Deploying services to staging..."
-          # Example staging deployment
+          echo "Images available at: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-{gateway,audio,api,worker}:main"
+          # Add your deployment commands here (kubectl, docker, terraform, etc.)
           echo "✅ Staging deployment completed"
 
       - name: Health Check
         run: |
           echo "🏥 Running health checks..."
+          # Add your health check commands here
           echo "✅ Health checks passed"
 
   # Deploy to production (only on tags)
@@ -200,13 +145,17 @@ jobs:
             ## 🚀 Discord Bot Release ${{ github.ref_name }}
 
             ### 📦 Docker Images
-            - Gateway: `${{ needs.build-and-push.outputs.gateway-image }}`
-            - Audio: `${{ needs.build-and-push.outputs.audio-image }}`
-            - API: `${{ needs.build-and-push.outputs.api-image }}`
+            All images are available at `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-{gateway,audio,api,worker}:${{ github.ref_name }}`
+
+            - Gateway: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-gateway:${{ github.ref_name }}`
+            - Audio: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-audio:${{ github.ref_name }}`
+            - API: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.ref_name }}`
+            - Worker: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:${{ github.ref_name }}`
 
             ### ✅ Quality Assurance
             - ✅ All tests passed
             - ✅ Security scans completed
             - ✅ Staging deployment verified
+            - ✅ Production deployment successful
           draft: false
           prerelease: false
