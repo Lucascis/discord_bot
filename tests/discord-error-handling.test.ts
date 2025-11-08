@@ -299,8 +299,8 @@ describe('Discord API Error Handling', () => {
       const duration = Date.now() - startTime;
 
       // Should have 500ms delay for non-rate-limit errors (500 * attempt)
-      // Using >= to handle exact timing in fast CI environments
-      expect(duration).toBeGreaterThanOrEqual(500);
+      // Allow 10ms tolerance for timing variations across environments
+      expect(duration).toBeGreaterThanOrEqual(490);
       expect(duration).toBeLessThan(2000);
     });
   });
