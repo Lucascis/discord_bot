@@ -166,9 +166,13 @@ jobs:
 
       - name: Test container starts
         run: |
-          # Start container
+          # Start container with minimal env vars for startup test
           docker run -d --name test-${{ matrix.service }} \
             -e NODE_ENV=test \
+            -e DISCORD_TOKEN=test_token_ci \
+            -e DATABASE_URL=postgresql://test:test@localhost:5432/test_db \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e LAVALINK_PASSWORD=test_pass \
             discord-bot-${{ matrix.service }}:test
 
           # Wait for startup
