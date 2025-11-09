@@ -279,6 +279,45 @@ Run migration: `cd packages/database && pnpm prisma migrate deploy`
 - **Discord API Resilience**: Automatic retry logic and fallback strategies prevent service disruptions
 
 ### CI/CD Pipeline
-- **Continuous Integration**: Automated testing, linting, and building
-- **Security Scanning**: Dependency vulnerability checks
-- **Docker Multi-stage**: Optimized container builds with proper security practices
+
+The project uses GitHub Actions for comprehensive CI/CD automation:
+
+#### CI Pipeline (`.github/workflows/ci.yml`)
+- **Code Quality**: TypeScript type checking + ESLint with compact formatting
+- **Testing**: Vitest with coverage tracking (80% threshold)
+- **Coverage Reporting**: Automatic upload to Codecov
+- **Docker Build**: Multi-service image verification with security scanning
+- **Concurrency Control**: Auto-cancel outdated runs on new pushes
+
+#### Key Features
+- **Environment Validation**: Pre-flight checks for PostgreSQL and Redis connectivity
+- **Database Migrations**: Fail-fast migration deployment with proper error handling
+- **Test Coverage**: JSON summary parsing with threshold warnings
+- **Security Scanning**: Trivy vulnerability scanning (CRITICAL + HIGH severity)
+- **Docker Verification**: CMD/ENTRYPOINT validation, size checks, layer counting
+- **GitHub Step Summaries**: Rich markdown summaries for all jobs
+
+#### Required Environment Variables for Tests
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/discord_bot_test
+REDIS_URL=redis://localhost:6379
+NODE_ENV=test
+DISCORD_TOKEN=test_token_for_ci_pipeline
+DISCORD_APPLICATION_ID=123456789012345678
+LAVALINK_HOST=localhost
+LAVALINK_PORT=2333
+LAVALINK_PASSWORD=youshallnotpass
+```
+
+#### Local Testing
+```bash
+# Run tests with coverage
+pnpm test:coverage
+
+# Run specific test file
+pnpm test tests/discord-error-handling.test.ts
+
+# Database operations
+pnpm db:seed  # Seed test database
+pnpm --filter @discord-bot/database prisma migrate deploy  # Run migrations
+```

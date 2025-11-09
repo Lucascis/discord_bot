@@ -128,16 +128,20 @@ jobs:
         run: |
           echo "Validating test environment setup..."
 
+          # Install PostgreSQL client tools
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client > /dev/null
+
           # Validate PostgreSQL connection
           echo "Testing PostgreSQL connection..."
-          if ! timeout 10 bash -c 'until pg_isready -h localhost -p 5432; do sleep 1; done'; then
+          if ! timeout 10 bash -c 'until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done'; then
             echo "::error::Cannot connect to PostgreSQL!"
             exit 1
           fi
 
-          # Validate Redis connection
+          # Validate Redis connection (using netcat as it's pre-installed)
           echo "Testing Redis connection..."
-          if ! timeout 10 bash -c 'until redis-cli -h localhost ping; do sleep 1; done'; then
+          if ! timeout 10 bash -c 'until nc -z localhost 6379; do sleep 1; done'; then
             echo "::error::Cannot connect to Redis!"
             exit 1
           fi
@@ -157,7 +161,7 @@ jobs:
           fi
 
           echo "Seeding test database..."
-          if ! pnpm --filter @discord-bot/database prisma db seed; then
+          if ! pnpm db:seed; then
             echo "::warning::Database seeding failed (non-critical)"
             echo "⚠️ Seeding failed but continuing..." >> $GITHUB_STEP_SUMMARY
           fi
@@ -169,49 +173,65 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
           REDIS_URL: redis://localhost:6379
           NODE_ENV: test
-        run: pnpm test --coverage
+          DISCORD_TOKEN: test_token_for_ci_pipeline
+          DISCORD_APPLICATION_ID: '123456789012345678'
+          LAVALINK_HOST: localhost
+          LAVALINK_PORT: '2333'
+          LAVALINK_PASSWORD: youshallnotpass
+        run: pnpm test:coverage
 
       - name: Generate coverage summary
         if: always()
         run: |
           echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "⚠️ No coverage data available (tests may have been skipped)" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
           echo "Tests completed for commit ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f coverage/coverage-summary.json ]; then
-            echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
-            LINES_PCT=$(jq -r '.total.lines.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
-            STATEMENTS_PCT=$(jq -r '.total.statements.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
-            FUNCTIONS_PCT=$(jq -r '.total.functions.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
-            BRANCHES_PCT=$(jq -r '.total.branches.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
+          echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
+          LINES_PCT=$(jq -r '.total.lines.pct' coverage/coverage-summary.json 2>/dev/null)
+          STATEMENTS_PCT=$(jq -r '.total.statements.pct' coverage/coverage-summary.json 2>/dev/null)
+          FUNCTIONS_PCT=$(jq -r '.total.functions.pct' coverage/coverage-summary.json 2>/dev/null)
+          BRANCHES_PCT=$(jq -r '.total.branches.pct' coverage/coverage-summary.json 2>/dev/null)
 
-            echo "| Metric | Coverage |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Lines | ${LINES_PCT}% |" >> $GITHUB_STEP_SUMMARY
-            echo "| Statements | ${STATEMENTS_PCT}% |" >> $GITHUB_STEP_SUMMARY
-            echo "| Functions | ${FUNCTIONS_PCT}% |" >> $GITHUB_STEP_SUMMARY
-            echo "| Branches | ${BRANCHES_PCT}% |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+          # Validate parsed values
+          [ -z "$LINES_PCT" ] || [ "$LINES_PCT" = "null" ] && LINES_PCT="N/A"
+          [ -z "$STATEMENTS_PCT" ] || [ "$STATEMENTS_PCT" = "null" ] && STATEMENTS_PCT="N/A"
+          [ -z "$FUNCTIONS_PCT" ] || [ "$FUNCTIONS_PCT" = "null" ] && FUNCTIONS_PCT="N/A"
+          [ -z "$BRANCHES_PCT" ] || [ "$BRANCHES_PCT" = "null" ] && BRANCHES_PCT="N/A"
 
-            # Check coverage threshold (80%)
-            if [ "$LINES_PCT" != "N/A" ] && (( $(echo "$LINES_PCT < 80" | bc -l 2>/dev/null || echo 0) )); then
-              echo "⚠️ Coverage below 80% threshold" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lines | ${LINES_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Statements | ${STATEMENTS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Functions | ${FUNCTIONS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branches | ${BRANCHES_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check coverage threshold (80%) using awk instead of bc
+          if [ "$LINES_PCT" != "N/A" ]; then
+            if awk -v coverage="$LINES_PCT" 'BEGIN { exit !(coverage < 80) }'; then
+              echo "⚠️ Coverage below 80% threshold (${LINES_PCT}%)" >> $GITHUB_STEP_SUMMARY
             else
-              echo "✅ Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
+              echo "✅ Coverage meets threshold (${LINES_PCT}%)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
-        if: always()
+        if: always() && hashFiles('coverage/lcov.info') != ''
         with:
           files: ./coverage/lcov.info
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # Docker build verification
   docker-build:
@@ -231,7 +251,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build ${{ matrix.service }} service
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -279,8 +299,8 @@ jobs:
             echo "✅ Image size acceptable" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Count layers
-          LAYER_COUNT=$(docker history discord-bot-${{ matrix.service }}:test --no-trunc | wc -l)
+          # Count layers (excluding header line)
+          LAYER_COUNT=$(docker history discord-bot-${{ matrix.service }}:test --no-trunc --format "{{.ID}}" | wc -l)
           echo "**Layers:** $LAYER_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
