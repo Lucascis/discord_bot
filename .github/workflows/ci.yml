@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Cancel in-progress runs on same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '22'
   PNPM_VERSION: '10.16.1'
@@ -44,7 +49,12 @@ jobs:
         run: pnpm typecheck
 
       - name: ESLint
-        run: pnpm lint
+        run: |
+          pnpm lint --format compact || {
+            echo "::error::ESLint found issues"
+            echo "## ❌ ESLint Issues Found" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -111,30 +121,97 @@ jobs:
       - name: Build packages
         run: pnpm build
 
+      - name: Validate test environment
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          echo "Validating test environment setup..."
+
+          # Validate PostgreSQL connection
+          echo "Testing PostgreSQL connection..."
+          if ! timeout 10 bash -c 'until pg_isready -h localhost -p 5432; do sleep 1; done'; then
+            echo "::error::Cannot connect to PostgreSQL!"
+            exit 1
+          fi
+
+          # Validate Redis connection
+          echo "Testing Redis connection..."
+          if ! timeout 10 bash -c 'until redis-cli -h localhost ping; do sleep 1; done'; then
+            echo "::error::Cannot connect to Redis!"
+            exit 1
+          fi
+
+          echo "✅ Environment validation passed" >> $GITHUB_STEP_SUMMARY
+
       - name: Setup test database
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
           REDIS_URL: redis://localhost:6379
         run: |
           echo "Deploying database migrations..."
-          pnpm --filter @discord-bot/database prisma migrate deploy || true
+          if ! pnpm --filter @discord-bot/database prisma migrate deploy; then
+            echo "::error::Database migration failed!"
+            echo "## ❌ Database Migration Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
 
           echo "Seeding test database..."
-          pnpm --filter @discord-bot/database prisma db seed || true
+          if ! pnpm --filter @discord-bot/database prisma db seed; then
+            echo "::warning::Database seeding failed (non-critical)"
+            echo "⚠️ Seeding failed but continuing..." >> $GITHUB_STEP_SUMMARY
+          fi
 
-      - name: Run tests
+          echo "✅ Database setup completed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Run tests with coverage
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/discord_bot_test
           REDIS_URL: redis://localhost:6379
           NODE_ENV: test
-        run: pnpm test
+        run: pnpm test --coverage
 
-      - name: Generate test summary
+      - name: Generate coverage summary
         if: always()
         run: |
           echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Tests completed for commit ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f coverage/coverage-summary.json ]; then
+            echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
+            LINES_PCT=$(jq -r '.total.lines.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
+            STATEMENTS_PCT=$(jq -r '.total.statements.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
+            FUNCTIONS_PCT=$(jq -r '.total.functions.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
+            BRANCHES_PCT=$(jq -r '.total.branches.pct' coverage/coverage-summary.json 2>/dev/null || echo "N/A")
+
+            echo "| Metric | Coverage |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Lines | ${LINES_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Statements | ${STATEMENTS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Functions | ${FUNCTIONS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| Branches | ${BRANCHES_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Check coverage threshold (80%)
+            if [ "$LINES_PCT" != "N/A" ] && (( $(echo "$LINES_PCT < 80" | bc -l 2>/dev/null || echo 0) )); then
+              echo "⚠️ Coverage below 80% threshold" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # Docker build verification
   docker-build:
@@ -164,23 +241,66 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           load: true
 
-      - name: Verify container image
+      - name: Verify container image configuration
         run: |
-          # Verify the image was built and can be inspected
-          echo "🔍 Inspecting docker image..."
-          docker image inspect discord-bot-${{ matrix.service }}:test
+          echo "🔍 Inspecting docker image configuration..."
 
-          # Verify the CMD/ENTRYPOINT is set correctly
-          echo "✅ Image built successfully: discord-bot-${{ matrix.service }}:test"
+          # Extract image metadata
+          CMD=$(docker image inspect discord-bot-${{ matrix.service }}:test --format='{{json .Config.Cmd}}')
+          ENTRYPOINT=$(docker image inspect discord-bot-${{ matrix.service }}:test --format='{{json .Config.Entrypoint}}')
+          USER=$(docker image inspect discord-bot-${{ matrix.service }}:test --format='{{.Config.User}}')
+          WORKDIR=$(docker image inspect discord-bot-${{ matrix.service }}:test --format='{{.Config.WorkingDir}}')
 
-          # Verify image size is reasonable (not bloated)
+          # Generate summary
+          echo "## 🐳 Docker Image: ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**CMD:** \`$CMD\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Entrypoint:** \`$ENTRYPOINT\`" >> $GITHUB_STEP_SUMMARY
+          echo "**User:** \`$USER\`" >> $GITHUB_STEP_SUMMARY
+          echo "**WorkDir:** \`$WORKDIR\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Verify CMD is set
+          if [ "$CMD" = "null" ] && [ "$ENTRYPOINT" = "null" ]; then
+            echo "::error::No CMD or ENTRYPOINT defined!"
+            echo "❌ **Error:** No CMD/ENTRYPOINT" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          # Verify image size
           SIZE=$(docker image inspect discord-bot-${{ matrix.service }}:test --format='{{.Size}}')
           SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "📦 Image size: ${SIZE_MB}MB"
+          echo "**Image Size:** ${SIZE_MB}MB" >> $GITHUB_STEP_SUMMARY
 
           if [ $SIZE_MB -gt 2000 ]; then
-            echo "⚠️  Warning: Image size is large (${SIZE_MB}MB > 2000MB)"
+            echo "::warning::Image size is large (${SIZE_MB}MB > 2000MB)"
+            echo "⚠️ **Warning:** Large image size" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Image size acceptable" >> $GITHUB_STEP_SUMMARY
           fi
+
+          # Count layers
+          LAYER_COUNT=$(docker history discord-bot-${{ matrix.service }}:test --no-trunc | wc -l)
+          echo "**Layers:** $LAYER_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: discord-bot-${{ matrix.service }}:test
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Generate security summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "Scanned for CRITICAL and HIGH severity vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "See workflow logs for detailed Trivy report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
   # Final validation
   ci-success:
