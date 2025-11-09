@@ -50,7 +50,7 @@ jobs:
 
       - name: ESLint
         run: |
-          pnpm lint --format compact || {
+          pnpm lint --format stylish || {
             echo "::error::ESLint found issues"
             echo "## ❌ ESLint Issues Found" >> $GITHUB_STEP_SUMMARY
             exit 1
@@ -154,7 +154,7 @@ jobs:
           REDIS_URL: redis://localhost:6379
         run: |
           echo "Deploying database migrations..."
-          if ! pnpm --filter @discord-bot/database prisma migrate deploy; then
+          if ! pnpm --filter @discord-bot/database prisma:deploy; then
             echo "::error::Database migration failed!"
             echo "## ❌ Database Migration Failed" >> $GITHUB_STEP_SUMMARY
             exit 1
