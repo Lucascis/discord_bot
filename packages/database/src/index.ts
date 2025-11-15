@@ -2,10 +2,39 @@ import { PrismaClient } from '@prisma/client';
 import { getLogger } from './logger-interface.js';
 
 // Enhanced Prisma Client with optimized connection pooling
+function buildOptimizedDatabaseUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const { searchParams } = parsed;
+
+    const ensureParam = (key: string, value: string) => {
+      if (!searchParams.has(key)) {
+        searchParams.set(key, value);
+      }
+    };
+
+    ensureParam('connection_limit', '25');
+    ensureParam('pool_timeout', '20');
+    ensureParam('socket_timeout', '60');
+
+    parsed.search = searchParams.toString();
+    return parsed.toString();
+  } catch (error) {
+    getLogger().warn({
+      error: error instanceof Error ? error.message : String(error),
+    }, 'Failed to parse DATABASE_URL - using raw value');
+    return rawUrl;
+  }
+}
+
+const datasourceUrl = process.env.DATABASE_URL
+  ? buildOptimizedDatabaseUrl(process.env.DATABASE_URL)
+  : process.env.DATABASE_URL;
+
 export const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.DATABASE_URL + '?connection_limit=25&pool_timeout=20&socket_timeout=60'
+      url: datasourceUrl
     }
   },
   log: [

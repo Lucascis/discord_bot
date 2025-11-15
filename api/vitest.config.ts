@@ -27,6 +27,7 @@ export default defineConfig({
       '@discord-bot/database': path.resolve(__dirname, '../packages/database/src/index.ts'),
       '@discord-bot/logger': path.resolve(__dirname, '../packages/logger/src/index.ts'),
       '@discord-bot/config': path.resolve(__dirname, '../packages/config/src/index.ts'),
+      '@discord-bot/subscription': path.resolve(__dirname, '../packages/subscription/src/index.ts')
     },
   },
 });

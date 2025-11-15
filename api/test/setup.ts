@@ -1,4 +1,5 @@
 import { vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { setPlanOverrides, PLAN_TEMPLATES } from '@discord-bot/subscription';
 
 // ===================================================================
 // CRITICAL: HOIST MOCKS BEFORE ANY MODULE IMPORTS
@@ -181,8 +182,16 @@ process.env.REDIS_URL = 'redis://localhost:6379';
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
 process.env.WEBHOOK_SECRET = 'test-webhook-secret';
 process.env.API_RATE_LIMIT_IN_MEMORY = 'true';
+setPlanOverrides(PLAN_TEMPLATES);
 
 // mockRedisInstance is already created above
+
+const fetchMock = vi.fn();
+Object.defineProperty(globalThis, 'fetch', {
+  value: fetchMock,
+  configurable: true,
+  writable: true
+});
 
 // Mock @discord-bot/database with PROPER factory functions
 vi.mock('@discord-bot/database', () => {
@@ -193,9 +202,28 @@ vi.mock('@discord-bot/database', () => {
     prisma: {
       serverConfiguration: {
         findUnique: createMockFn(),
+        findMany: createMockFn(),
         upsert: createMockFn(),
         create: createMockFn(),
         update: createMockFn(),
+        count: createMockFn(),
+      },
+      queue: {
+        findFirst: createMockFn(),
+        create: createMockFn(),
+      },
+      queueItem: {
+        create: createMockFn(),
+        delete: createMockFn(),
+      },
+      subscriptionPlan: {
+        findMany: createMockFn(),
+        findUnique: createMockFn(),
+        update: createMockFn(),
+      },
+      subscriptionPrice: {
+        update: createMockFn(),
+        create: createMockFn(),
       },
       webhookSubscription: {
         upsert: createMockFn(),
@@ -206,6 +234,7 @@ vi.mock('@discord-bot/database', () => {
       },
       $connect: vi.fn().mockResolvedValue(undefined),
       $disconnect: vi.fn().mockResolvedValue(undefined),
+      $transaction: vi.fn(),
     }
   };
 });

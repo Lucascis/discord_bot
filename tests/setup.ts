@@ -1,5 +1,6 @@
 import { vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { config } from 'dotenv';
+import { setPlanOverrides, PLAN_TEMPLATES } from '@discord-bot/subscription';
 
 // Load test environment variables
 config({ path: '.env.test' });
@@ -14,6 +15,9 @@ process.env.LAVALINK_PASSWORD = 'youshallnotpass';
 process.env.API_KEY = 'test-api-key-12345678901234567890123456789012';
 process.env.WEBHOOK_SECRET = 'test-webhook-secret';
 process.env.API_RATE_LIMIT_IN_MEMORY = 'true';
+
+// Ensure subscription plan cache is populated for tests
+setPlanOverrides(PLAN_TEMPLATES);
 
 // ===================================================================
 // PROFESSIONAL MOCK INFRASTRUCTURE - Enterprise Testing Best Practices
@@ -173,6 +177,14 @@ vi.mock('ioredis', () => ({
   Redis: MockRedisClass
 }));
 
+// Provide a controllable fetch implementation for tests that hit HTTP integrations
+const fetchMock = vi.fn();
+Object.defineProperty(globalThis, 'fetch', {
+  value: fetchMock,
+  configurable: true,
+  writable: true
+});
+
 // Mock @discord-bot/database with PROPER factory functions
 vi.mock('@discord-bot/database', () => {
   // Factory function that creates a NEW mock for each test
@@ -187,14 +199,30 @@ vi.mock('@discord-bot/database', () => {
       },
       queue: {
         findMany: createMockFn(),
+        findFirst: createMockFn(),
         create: createMockFn(),
         deleteMany: createMockFn(),
       },
+      queueItem: {
+        create: createMockFn(),
+        delete: createMockFn(),
+      },
       serverConfiguration: {
         findUnique: createMockFn(),
+        findMany: createMockFn(),
+        count: createMockFn(),
         upsert: createMockFn(),
         create: createMockFn(),
         update: createMockFn(),
+      },
+      subscriptionPlan: {
+        findMany: createMockFn(),
+        findUnique: createMockFn(),
+        update: createMockFn(),
+      },
+      subscriptionPrice: {
+        update: createMockFn(),
+        create: createMockFn(),
       },
       webhookSubscription: {
         upsert: createMockFn(),

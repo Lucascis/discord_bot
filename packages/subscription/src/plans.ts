@@ -3,13 +3,14 @@
  * Defines all available subscription tiers and their features
  */
 
-import { SubscriptionTier } from '@prisma/client';
-import type { PlanDefinition } from './types.js';
+import { SubscriptionTier, Prisma } from '@prisma/client';
+import type { PlanDefinition, PlanFeatures, PlanLimits } from './types.js';
+import type { PrismaClient, BillingInterval } from '@prisma/client';
 
 /**
- * Complete plan definitions for all subscription tiers
+ * Default plan definitions used when the database has no overrides.
  */
-export const PLANS: Record<SubscriptionTier, PlanDefinition> = {
+const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
   FREE: {
     tier: SubscriptionTier.FREE,
     name: 'free',
@@ -169,18 +170,36 @@ export const PLANS: Record<SubscriptionTier, PlanDefinition> = {
   },
 };
 
+let planCache: Partial<Record<SubscriptionTier, PlanDefinition>> | null = null;
+
+function getPlanCache(): Partial<Record<SubscriptionTier, PlanDefinition>> {
+  if (!planCache) {
+    throw new Error('Subscription plans have not been loaded from the database');
+  }
+  return planCache;
+}
+
+function resolvePlan(tier: SubscriptionTier): PlanDefinition {
+  const cache = getPlanCache();
+  const plan = cache[tier];
+  if (!plan) {
+    throw new Error(`Subscription plan "${tier}" is not configured in the database`);
+  }
+  return plan;
+}
+
 /**
  * Get plan definition by tier
  */
 export function getPlanByTier(tier: SubscriptionTier): PlanDefinition {
-  return PLANS[tier];
+  return resolvePlan(tier);
 }
 
 /**
  * Get all available plans
  */
 export function getAllPlans(): PlanDefinition[] {
-  return Object.values(PLANS);
+  return Object.values(getPlanCache());
 }
 
 /**
@@ -247,3 +266,130 @@ export function calculateYearlySavings(plan: PlanDefinition): number {
   const monthlyAnnual = plan.price.monthly * 12;
   return monthlyAnnual - plan.price.yearly;
 }
+
+type SubscriptionPlanRecord = Prisma.SubscriptionPlanGetPayload<{ include: { prices: true } }>;
+
+function isJsonObject(value: Prisma.JsonValue | null | undefined): value is Prisma.JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function mergeFeatures(defaults: PlanFeatures, raw: Prisma.JsonValue | null): PlanFeatures {
+  if (!isJsonObject(raw)) {
+    return defaults;
+  }
+  return {
+    ...defaults,
+    ...(raw as Partial<PlanFeatures>)
+  };
+}
+
+function mergeLimits(defaults: PlanLimits, raw: Prisma.JsonValue | null): PlanLimits {
+  if (!isJsonObject(raw)) {
+    return defaults;
+  }
+  return {
+    ...defaults,
+    ...(raw as Partial<PlanLimits>)
+  };
+}
+
+function normalizeTier(name: string): SubscriptionTier | null {
+  const normalized = name.trim().toUpperCase();
+  if (normalized in SubscriptionTier) {
+    return normalized as SubscriptionTier;
+  }
+  return null;
+}
+
+function selectPriceAmount(
+  prices: SubscriptionPlanRecord['prices'],
+  interval: BillingInterval
+): number | undefined {
+  const entry = prices.find((price) => price.interval === interval);
+  return entry?.amount;
+}
+
+function selectStripePriceId(
+  prices: SubscriptionPlanRecord['prices'],
+  interval: BillingInterval
+): string | undefined {
+  const entry = prices.find(
+    (price) => price.provider === 'stripe' && price.interval === interval
+  );
+  return entry?.providerPriceId;
+}
+
+function mapDatabasePlan(record: SubscriptionPlanRecord): { tier: SubscriptionTier; plan: PlanDefinition } | null {
+  const tier = normalizeTier(record.name);
+  if (!tier) {
+    return null;
+  }
+
+  const template = DEFAULT_PLAN_TEMPLATES[tier];
+  if (!template) {
+    return null;
+  }
+
+  const monthlyAmount = selectPriceAmount(record.prices, 'MONTH') ?? template.price.monthly;
+  const yearlyAmount = selectPriceAmount(record.prices, 'YEAR') ?? template.price.yearly;
+  const stripeMonthly = selectStripePriceId(record.prices, 'MONTH');
+  const stripeYearly = selectStripePriceId(record.prices, 'YEAR');
+
+  const plan: PlanDefinition = {
+    tier,
+    name: record.name,
+    displayName: record.displayName || template.displayName,
+    description: record.description ?? template.description,
+    price: {
+      monthly: monthlyAmount,
+      yearly: yearlyAmount
+    },
+    features: mergeFeatures(template.features, record.features),
+    limits: mergeLimits(template.limits, record.limits),
+    stripePriceIds: stripeMonthly || stripeYearly
+      ? {
+          monthly: stripeMonthly,
+          yearly: stripeYearly
+        }
+      : template.stripePriceIds,
+    stripeProductId: template.stripeProductId
+  };
+
+  return { tier, plan };
+}
+
+export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.subscriptionPlan.findMany({
+    where: { active: true },
+    include: {
+      prices: {
+        where: { active: true }
+      }
+    }
+  });
+
+  if (rows.length === 0) {
+    throw new Error('No subscription plans found in the database');
+  }
+
+  const mapped: Partial<Record<SubscriptionTier, PlanDefinition>> = {};
+  for (const row of rows) {
+    const mappedPlan = mapDatabasePlan(row);
+    if (mappedPlan) {
+      mapped[mappedPlan.tier] = mappedPlan.plan;
+    }
+  }
+
+  if (Object.keys(mapped).length === 0) {
+    throw new Error('Failed to map subscription plans from the database');
+  }
+
+  planCache = mapped;
+  console.info(`[Subscription] Loaded ${Object.keys(mapped).length} subscription plan definitions from database`);
+}
+
+export function setPlanOverrides(overrides: Partial<Record<SubscriptionTier, PlanDefinition>> | null): void {
+  planCache = overrides;
+}
+
+export const PLAN_TEMPLATES = DEFAULT_PLAN_TEMPLATES;

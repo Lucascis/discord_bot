@@ -14,6 +14,7 @@ import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
+import { loadPlansFromDatabase } from '@discord-bot/subscription';
 
 // Infrastructure Layer
 import { PrismaGuildSettingsRepository } from './infrastructure/database/prisma-guild-settings-repository.js';
@@ -55,7 +56,7 @@ import { SubscriptionManagementUseCase } from './application/use-cases/subscript
 
 // Commercial Infrastructure
 import { InMemoryCustomerRepository } from './infrastructure/repositories/in-memory-customer-repository.js';
-import { StubPaymentService } from './infrastructure/payment/stub-payment-service.js';
+import { ActivePaymentService } from './infrastructure/payment/active-payment-service.js';
 import { StubNotificationService } from './infrastructure/notifications/stub-notification-service.js';
 
 // Enterprise Health Monitoring
@@ -116,6 +117,9 @@ class GatewayApplication {
 
     // Inject logger dependency for database package
     injectLogger(logger);
+
+    // Load subscription plan overrides from database if available
+    await loadPlansFromDatabase(prisma);
 
     // Initialize external services
     await this.initializeClients();
@@ -456,7 +460,7 @@ class GatewayApplication {
 
     // Commercial Infrastructure
     const customerRepository = new InMemoryCustomerRepository();
-    const paymentService = new StubPaymentService();
+    const paymentService = new ActivePaymentService();
     const notificationService = new StubNotificationService();
 
     // Domain Layer (Business Logic)

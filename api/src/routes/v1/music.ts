@@ -13,6 +13,8 @@ import type {
 import { logger } from '@discord-bot/logger';
 import Redis from 'ioredis';
 import { env } from '@discord-bot/config';
+import { prisma } from '@discord-bot/database';
+import { searchTracksViaLavalink } from '../../services/lavalink-search-service.js';
 
 /**
  * Music Queue API Router
@@ -23,8 +25,88 @@ import { env } from '@discord-bot/config';
 
 const router: ExpressRouter = Router();
 
-// Redis client for inter-service communication
+// Redis client for inter-service communication (legacy playback control)
 const redis = new Redis(env.REDIS_URL);
+
+type QueueItemRecord = {
+  id: string;
+  queueId: string;
+  title: string;
+  url: string;
+  requestedBy: string;
+  duration: number;
+  createdAt: Date;
+};
+
+function inferSourceFromUrl(url: string): Track['source'] {
+  const normalized = url.toLowerCase();
+  if (normalized.includes('spotify.com')) return 'spotify';
+  if (normalized.includes('soundcloud.com')) return 'soundcloud';
+  if (normalized.includes('twitch.tv')) return 'twitch';
+  if (normalized.includes('bandcamp.com')) return 'bandcamp';
+  if (normalized.includes('vimeo.com')) return 'vimeo';
+  if (normalized.startsWith('http')) return 'http';
+  return 'youtube';
+}
+
+function mapItemsToTracks(items: QueueItemRecord[]): Track[] {
+  return items.map((item, index) => ({
+    title: item.title,
+    author: 'Unknown',
+    uri: item.url,
+    identifier: item.id,
+    duration: item.duration,
+    isSeekable: true,
+    isStream: false,
+    thumbnail: undefined,
+    source: inferSourceFromUrl(item.url),
+    requester: {
+      id: item.requestedBy,
+      username: item.requestedBy
+    },
+    position: index
+  }));
+}
+
+function buildQueueResponse(guildId: string, items: QueueItemRecord[]): Queue {
+  const tracks = mapItemsToTracks(items);
+  return {
+    guildId,
+    tracks,
+    currentTrack: tracks[0],
+    position: 0,
+    duration: tracks.reduce((total, track) => total + track.duration, 0),
+    size: tracks.length,
+    empty: tracks.length === 0
+  };
+}
+
+async function fetchQueueWithItems(guildId: string) {
+  return prisma.queue.findFirst({
+    where: { guildId },
+    include: {
+      items: {
+        orderBy: {
+          createdAt: 'asc'
+        }
+      }
+    }
+  });
+}
+
+async function ensureQueue(guildId: string) {
+  const existing = await prisma.queue.findFirst({
+    where: { guildId }
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.queue.create({
+    data: { guildId }
+  });
+}
 
 /**
  * Helper function to request data from Audio service via Redis
@@ -36,48 +118,62 @@ async function requestFromAudio<T>(
   timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 10000
 ): Promise<T> {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  const responseChannel = `audio-response:${requestId}`;
 
-  // Create response listener
-  const responsePromise = new Promise<T>((resolve, reject) => {
+  await redis.subscribe(responseChannel);
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+      const cleanup = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        void redis.unsubscribe(responseChannel).catch(() => undefined);
+        if (typeof redis.off === 'function') {
+          redis.off('message', onMessage);
+        } else {
+          redis.removeListener('message', onMessage);
+        }
+        clearTimeout(timeout);
+      };
+
     const timeout = setTimeout(() => {
-      redis.unsubscribe(`audio-response:${requestId}`);
+      cleanup();
       reject(new Error('Audio service timeout'));
     }, timeoutMs);
 
-    redis.subscribe(`audio-response:${requestId}`, (err) => {
-      if (err) {
-        clearTimeout(timeout);
-        reject(err);
+    const onMessage = (channel: string, message: string) => {
+      if (channel !== responseChannel) {
+        return;
       }
-    });
 
-    redis.on('message', (channel, message) => {
-      if (channel === `audio-response:${requestId}`) {
-        clearTimeout(timeout);
-        redis.unsubscribe(`audio-response:${requestId}`);
+      cleanup();
 
-        try {
-          const response = JSON.parse(message);
-          if (response.error) {
-            reject(new Error(response.error));
-          } else {
-            resolve(response.data);
-          }
-        } catch {
-          reject(new Error('Invalid response format'));
+      try {
+        const response = JSON.parse(message);
+        if (response.error) {
+          reject(new Error(response.error));
+        } else {
+          resolve(response.data);
         }
+      } catch {
+        reject(new Error('Invalid response format'));
       }
+    };
+
+    redis.on('message', onMessage);
+
+    redis.publish('discord-bot:audio-request', JSON.stringify({
+      requestId,
+      type: requestType,
+      ...payload
+    })).catch((error) => {
+      cleanup();
+      reject(error);
     });
   });
-
-  // Send request to audio service
-  await redis.publish('discord-bot:audio-request', JSON.stringify({
-    requestId,
-    type: requestType,
-    ...payload
-  }));
-
-  return responsePromise;
 }
 
 /**
@@ -88,13 +184,8 @@ router.get('/:guildId/queue', validateGuildId, asyncHandler(async (req, res) => 
   const { guildId } = req.params;
 
   try {
-    logger.info({
-      requestId: req.headers['x-request-id'],
-      guildId
-    }, 'Fetching queue from audio service');
-
-    // Request queue data from audio service
-    const queueData = await requestFromAudio<Queue>('GET_QUEUE', { guildId });
+    const queueRecord = await fetchQueueWithItems(guildId);
+    const queueData = buildQueueResponse(guildId, queueRecord?.items ?? []);
 
     const response: APIResponse<Queue> = {
       data: queueData,
@@ -126,18 +217,37 @@ router.post('/:guildId/queue/tracks',
     const addTrackData: AddTrackRequest = req.body;
 
     try {
-      logger.info({
-        requestId: req.headers['x-request-id'],
-        guildId,
-        query: addTrackData.query,
-        position: addTrackData.position
-      }, 'Adding track to queue via audio service');
+      const queue = await ensureQueue(guildId);
+      const searchResult = await searchTracksViaLavalink(
+        addTrackData.query,
+        addTrackData.source ?? 'all',
+        1,
+        1
+      );
 
-      // Request to add track via audio service
-      const result = await requestFromAudio<AddTrackResponse>('ADD_TRACK', {
-        guildId,
-        ...addTrackData
+      if (!searchResult.tracks.length) {
+        throw new NotFoundError('Track');
+      }
+
+      const track = searchResult.tracks[0];
+
+      await prisma.queueItem.create({
+        data: {
+          queueId: queue.id,
+          title: track.title,
+          url: track.uri,
+          requestedBy: addTrackData.requestedBy,
+          duration: track.duration
+        }
       });
+
+      const updatedQueue = await fetchQueueWithItems(guildId);
+
+      const result: AddTrackResponse = {
+        track,
+        position: Math.max(0, (updatedQueue?.items.length ?? 1) - 1),
+        queue: buildQueueResponse(guildId, updatedQueue?.items ?? [])
+      };
 
       const response: APIResponse<AddTrackResponse> = {
         data: result,
@@ -145,15 +255,12 @@ router.post('/:guildId/queue/tracks',
         requestId: req.headers['x-request-id'] as string
       };
 
-      logger.info({
-        requestId: req.headers['x-request-id'],
-        guildId,
-        trackTitle: result.track.title,
-        position: result.position
-      }, 'Track added to queue successfully');
-
       res.json(response);
     } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+
       logger.error({
         error: error instanceof Error ? error.message : String(error),
         requestId: req.headers['x-request-id'],
@@ -177,17 +284,44 @@ router.delete('/:guildId/queue/tracks/:position',
     const trackPosition = parseInt(position, 10);
 
     try {
-      logger.info({
-        requestId: req.headers['x-request-id'],
-        guildId,
-        position: trackPosition
-      }, 'Removing track from queue via audio service');
+      const queueRecord = await fetchQueueWithItems(guildId);
 
-      // Request to remove track via audio service
-      const result = await requestFromAudio<RemoveTrackResponse>('REMOVE_TRACK', {
-        guildId,
-        position: trackPosition
+      if (!queueRecord || !queueRecord.items.length) {
+        throw new NotFoundError('Queue');
+      }
+
+      if (trackPosition < 0 || trackPosition >= queueRecord.items.length) {
+        throw new NotFoundError('Track');
+      }
+
+      const targetItem = queueRecord.items[trackPosition];
+
+      await prisma.queueItem.delete({
+        where: { id: targetItem.id }
       });
+
+      const updatedQueue = await fetchQueueWithItems(guildId);
+
+      const removedTrack: Track = {
+        title: targetItem.title,
+        author: 'Unknown',
+        uri: targetItem.url,
+        identifier: targetItem.id,
+        duration: targetItem.duration,
+        isSeekable: true,
+        isStream: false,
+        thumbnail: undefined,
+        source: inferSourceFromUrl(targetItem.url),
+        requester: {
+          id: targetItem.requestedBy,
+          username: targetItem.requestedBy
+        }
+      };
+
+      const result: RemoveTrackResponse = {
+        removedTrack,
+        queue: buildQueueResponse(guildId, updatedQueue?.items ?? [])
+      };
 
       const response: APIResponse<RemoveTrackResponse> = {
         data: result,
@@ -195,17 +329,10 @@ router.delete('/:guildId/queue/tracks/:position',
         requestId: req.headers['x-request-id'] as string
       };
 
-      logger.info({
-        requestId: req.headers['x-request-id'],
-        guildId,
-        removedTrack: result.removedTrack.title,
-        position: trackPosition
-      }, 'Track removed from queue successfully');
-
       res.json(response);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('not found')) {
-        throw new NotFoundError(`Track at position ${trackPosition}`);
+      if (error instanceof NotFoundError) {
+        throw error;
       }
 
       logger.error({

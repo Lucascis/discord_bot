@@ -175,27 +175,70 @@ function handleUnhandledRejection(reason: unknown, _promise: Promise<unknown>): 
   process.exit(1);
 }
 
+type ProcessEvent = NodeJS.Signals | 'uncaughtException' | 'unhandledRejection' | 'exit';
+type ProcessListener = (...args: unknown[]) => void;
+type HandlerRegistration = { event: ProcessEvent; handler: ProcessListener };
+
+const registeredHandlers: HandlerRegistration[] = [];
+let handlersInstalled = false;
+
+function attachProcessHandler(event: ProcessEvent, handler: HandlerRegistration['handler']): void {
+  process.addListener(event, handler as ProcessListener);
+  registeredHandlers.push({ event, handler });
+}
+
+function detachProcessHandler(event: ProcessEvent, handler: HandlerRegistration['handler']): void {
+  if (typeof process.off === 'function') {
+    process.off(event, handler as ProcessListener);
+  } else {
+    process.removeListener(event, handler as ProcessListener);
+  }
+}
+
 /**
  * Initialize graceful shutdown handlers
  */
 export function initializeGracefulShutdown(): void {
-  // Handle shutdown signals
-  process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
-  process.on('SIGINT', () => handleShutdownSignal('SIGINT'));
+  if (handlersInstalled) {
+    return;
+  }
 
-  // Handle process errors
-  process.on('uncaughtException', handleUncaughtException);
-  process.on('unhandledRejection', handleUnhandledRejection);
+  attachProcessHandler('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+  attachProcessHandler('SIGINT', () => handleShutdownSignal('SIGINT'));
 
-  // Handle exit event
-  process.on('exit', (code) => {
+  attachProcessHandler('uncaughtException', handleUncaughtException);
+  attachProcessHandler('unhandledRejection', handleUnhandledRejection);
+  attachProcessHandler('exit', (code: number) => {
     logger.info({ exitCode: code }, 'Worker process exiting');
   });
+
+  handlersInstalled = true;
 
   logger.info({
     gracefulTimeout: GRACEFUL_SHUTDOWN_TIMEOUT,
     forceTimeout: FORCE_SHUTDOWN_TIMEOUT
   }, 'Graceful shutdown handlers initialized');
+}
+
+/**
+ * Test-only helper to remove handlers between specs to avoid MaxListeners warnings.
+ * NOT exported publicly in generated types to avoid accidental production usage.
+ */
+export function __resetGracefulShutdownHandlersForTests(): void {
+  for (const { event, handler } of registeredHandlers) {
+    detachProcessHandler(event, handler);
+  }
+  registeredHandlers.length = 0;
+  handlersInstalled = false;
+  shutdownState.isShuttingDown = false;
+  if (shutdownState.shutdownTimeout) {
+    clearTimeout(shutdownState.shutdownTimeout);
+    shutdownState.shutdownTimeout = null;
+  }
+  if (shutdownState.forceShutdownTimeout) {
+    clearTimeout(shutdownState.forceShutdownTimeout);
+    shutdownState.forceShutdownTimeout = null;
+  }
 }
 
 /**

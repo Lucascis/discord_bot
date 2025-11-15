@@ -357,6 +357,38 @@ pnpm --filter @discord-bot/database prisma db pull
 pnpm db:seed
 ```
 
+### 3b. Seed Subscription Plans (Required)
+
+Plans and prices are no longer hardcoded. Populate the `subscription_plans` and `subscription_prices` tables before booting any service:
+
+```sql
+INSERT INTO subscription_plans (id, name, display_name, description, features, limits)
+VALUES
+  ('plan_free', 'FREE', 'Free', 'Perfect for trying out the bot',
+   '{"concurrentPlaybacks":1,"audioQuality":"standard","basicCommands":true}'::jsonb,
+   '{"maxQueueSize":50,"maxSongDuration":3600,"monthlyTracks":1000,"apiRateLimit":10,"maxGuilds":1}'::jsonb),
+  ('plan_basic', 'BASIC', 'Basic', 'Great for small communities',
+   '{"concurrentPlaybacks":3,"audioQuality":"high","basicCommands":true,"advancedCommands":true}'::jsonb,
+   '{"maxQueueSize":200,"maxSongDuration":7200,"monthlyTracks":10000,"apiRateLimit":30,"maxGuilds":3}'::jsonb);
+
+INSERT INTO subscription_prices (plan_id, provider, provider_price_id, amount, currency, interval)
+VALUES
+  ('plan_basic', 'stripe', 'price_basic_monthly', 499, 'usd', 'MONTH'),
+  ('plan_basic', 'stripe', 'price_basic_yearly', 4990, 'usd', 'YEAR');
+```
+
+> 📌 **Important:** the applications will refuse to start if no active plans or prices exist. Load the remaining tiers (Premium, Enterprise, etc.) following the same structure.
+
+### 3c. Control Panel Endpoints
+
+Una vez pobladas las tablas, puedes auditar y recargar los planes sin redeploy:
+
+- `GET /api/v1/plans`: devuelve los planes tal como existen en la base (incluye precios por proveedor/intervalo).
+- `GET /api/v1/plans/runtime`: muestra el cache que usa la aplicación en ese momento.
+- `POST /api/v1/plans/reload`: invalida el cache y vuelve a cargar desde la base.
+
+Todos los endpoints requieren `X-API-Key` válido y están pensados como panel mínimo mientras se desarrolla una UI administrativa completa.
+
 ### 4. Backup Strategy
 
 ```bash

@@ -2,7 +2,7 @@ import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { app } from '../src/app.js';
 import { prisma } from '@discord-bot/database';
-import { mockGuild, validGuildId, validApiKey } from './fixtures.js';
+import { mockGuildSettings, validGuildId, validApiKey } from './fixtures.js';
 
 describe('Guild Routes', () => {
   beforeEach(() => {
@@ -11,13 +11,14 @@ describe('Guild Routes', () => {
 
   describe('GET /api/v1/guilds', () => {
     it('should return paginated guild list', async () => {
-      // Configure mock response for guild list
-      (global as any).setMockRedisResponse('GUILD_LIST', {
-        data: {
-          guilds: [mockGuild],
-          total: 1
+      vi.mocked(prisma.serverConfiguration.count).mockResolvedValue(1);
+      vi.mocked(prisma.serverConfiguration.findMany).mockResolvedValue([
+        {
+          guildId: validGuildId,
+          createdAt: new Date(),
+          updatedAt: new Date()
         }
-      });
+      ] as never);
 
       const res = await request(app)
         .get('/api/v1/guilds')
@@ -28,7 +29,7 @@ describe('Guild Routes', () => {
       expect(res.body).toHaveProperty('pagination');
       expect(res.body.pagination).toHaveProperty('page', 1);
       expect(res.body.pagination).toHaveProperty('limit', 20);
-      expect(res.body.pagination).toHaveProperty('total', 1);
+      expect(res.body.pagination.total).toBe(1);
       expect(res.body.pagination).toHaveProperty('hasNext', false);
       expect(res.body.pagination).toHaveProperty('hasPrevious', false);
       expect(res.body.data).toBeInstanceOf(Array);
@@ -36,13 +37,8 @@ describe('Guild Routes', () => {
     });
 
     it('should use default pagination values', async () => {
-      // Configure mock response with default pagination
-      (global as any).setMockRedisResponse('GUILD_LIST', {
-        data: {
-          guilds: [mockGuild],
-          total: 1
-        }
-      });
+      vi.mocked(prisma.serverConfiguration.count).mockResolvedValue(0);
+      vi.mocked(prisma.serverConfiguration.findMany).mockResolvedValue([]);
 
       const res = await request(app)
         .get('/api/v1/guilds')
@@ -70,27 +66,15 @@ describe('Guild Routes', () => {
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('UNAUTHORIZED');
     });
-
-    it('should handle gateway service timeout', async () => {
-      // Don't configure mock response to trigger timeout
-      // This will cause the request to timeout waiting for a response
-
-      const res = await request(app)
-        .get('/api/v1/guilds')
-        .set('X-API-Key', validApiKey)
-        .query({ page: 1, limit: 20 });
-
-      expect(res.status).toBe(500);
-      expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
-    });
   });
 
   describe('GET /api/v1/guilds/:guildId', () => {
     it('should return specific guild information', async () => {
-      // Configure mock response for specific guild
-      (global as any).setMockRedisResponse('GUILD_INFO', {
-        data: mockGuild
-      });
+      vi.mocked(prisma.serverConfiguration.findUnique).mockResolvedValue({
+        guildId: validGuildId,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as never);
 
       const res = await request(app)
         .get(`/api/v1/guilds/${validGuildId}`)
@@ -113,10 +97,7 @@ describe('Guild Routes', () => {
     });
 
     it('should handle guild not found', async () => {
-      // Configure mock response for guild not found
-      (global as any).setMockRedisResponse('GUILD_INFO', {
-        error: 'Guild not found'
-      });
+      vi.mocked(prisma.serverConfiguration.findUnique).mockResolvedValue(null);
 
       const res = await request(app)
         .get(`/api/v1/guilds/${validGuildId}`)
@@ -130,13 +111,11 @@ describe('Guild Routes', () => {
   describe('GET /api/v1/guilds/:guildId/settings', () => {
     it('should return guild settings from database', async () => {
       const mockDbSettings = {
-        guildId: validGuildId,
-        autoplayEnabled: false,
-        djRoleId: '111222333444555666',
-        maxQueueSize: 100,
-        allowExplicitContent: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
+        ...mockGuildSettings,
+        autoplayEnabled: mockGuildSettings.autoplay,
+        allowExplicitContent: mockGuildSettings.allowExplicitContent,
+        createdAt: new Date(mockGuildSettings.createdAt),
+        updatedAt: new Date(mockGuildSettings.updatedAt)
       };
 
       vi.mocked(prisma.serverConfiguration.findUnique).mockResolvedValue(mockDbSettings);

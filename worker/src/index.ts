@@ -17,7 +17,7 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
 // Worker service imports
-import { initializeRedis, checkRedisHealth } from './utils/redis-client.js';
+import { initializeRedis, checkRedisHealth, redisClient, redisPubSub, redisBlocking } from './utils/redis-client.js';
 import { initializeAllWorkers, getWorkerStats, getJobMetrics, checkWorkersHealth } from './workers/bullmq-worker.js';
 import { initializeGracefulShutdown, addCleanupFunction, getShutdownHealth } from './utils/graceful-shutdown.js';
 import { scheduleDailyCleanup } from './queues/cleanup-queue.js';
@@ -89,6 +89,20 @@ function updateMetrics(): void {
     const jobMetrics = getJobMetrics();
     for (const [status, _count] of Object.entries(jobMetrics.byStatus)) {
       jobsProcessedCounter.inc({ queue_name: 'all', job_type: 'all', status }, 0);
+    }
+
+    // Update Redis connection states
+    const redisConnections = [
+      { type: 'main', client: redisClient },
+      { type: 'pubsub', client: redisPubSub },
+      { type: 'blocking', client: redisBlocking }
+    ];
+
+    for (const connection of redisConnections) {
+      _redisConnectionsGauge.set(
+        { connection_type: connection.type, status: connection.client.status },
+        1
+      );
     }
   } catch (error) {
     logger.error({ error }, 'Failed to update Prometheus metrics');

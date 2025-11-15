@@ -14,7 +14,7 @@ export type { GuildInfo } from './guild-service.js';
 
 // Plan definitions
 export {
-  PLANS,
+  PLAN_TEMPLATES,
   getPlanByTier,
   getAllPlans,
   getPublicPlans,
@@ -22,6 +22,8 @@ export {
   getNextTier,
   formatPrice,
   calculateYearlySavings,
+  loadPlansFromDatabase,
+  setPlanOverrides,
 } from './plans.js';
 
 // Feature flags

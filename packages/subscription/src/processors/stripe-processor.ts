@@ -17,7 +17,7 @@ import {
   PaymentSubscription,
   WebhookEvent,
 } from '../payment-processor-interface.js';
-import { PLANS } from '../plans.js';
+import { getPlanByTier } from '../plans.js';
 
 export class StripeProcessor implements IPaymentProcessor {
   readonly providerName = 'stripe' as const;
@@ -168,7 +168,7 @@ export class StripeProcessor implements IPaymentProcessor {
   }
 
   getPriceId(tier: SubscriptionTier, billingCycle: BillingInterval): string | null {
-    const plan = PLANS[tier];
+    const plan = getPlanByTier(tier);
 
     if (!plan?.stripePriceIds) {
       return null;

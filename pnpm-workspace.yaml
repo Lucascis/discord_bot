@@ -4,3 +4,12 @@ packages:
   - "api"
   - "worker"
   - "packages/*"
+  - "apps/*"
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - "@scarf/scarf"
+  - "@sentry/profiling-node"
+  - "msgpackr-extract"
+  - "prisma"
+  - "protobufjs"

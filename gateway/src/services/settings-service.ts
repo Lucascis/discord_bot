@@ -165,7 +165,7 @@ export class SettingsService {
           lyricsEnabled: false,
           sponsorBlockEnabled: true,
           advancedSearchEnabled: false,
-          maxAudioQuality: value === 'maxAudioQuality' ? value : 'medium',
+          maxAudioQuality: setting === 'maxAudioQuality' ? value : 'medium',
           volumeLimit: setting === 'volumeLimit' ? value : 200,
           maxQueueSize: setting === 'maxQueueSize' ? value : 100,
           maxSongDuration: 3600,

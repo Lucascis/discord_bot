@@ -183,6 +183,10 @@ router.use('/webhooks', webhookRoutes);
 import analyticsRoutes from './analytics.js';
 router.use('/analytics', analyticsRoutes);
 
+// Plan administration routes
+import planRoutes from './plans.js';
+router.use('/plans', planRoutes);
+
 /**
  * Apply common middleware for all v1 routes
  */

@@ -123,29 +123,33 @@ COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 # Switch to non-root user
 USER appuser
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
-
 # Default command (overridden by docker-compose)
 CMD ["node", "-e", "console.log('Set service command in docker-compose.yml. Available services: gateway, audio, api, worker')"]
 
 # Gateway Service
 FROM production AS gateway
 EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 CMD ["node", "gateway/dist/index.js"]
 
 # Audio Service
 FROM production AS audio
 EXPOSE 3002
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1
 CMD ["node", "audio/dist/index.js"]
 
 # API Service
 FROM production AS api
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 CMD ["node", "api/dist/index.js"]
 
 # Worker Service
 FROM production AS worker
 EXPOSE 3003
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3003/health || exit 1
 CMD ["node", "worker/dist/index.js"]

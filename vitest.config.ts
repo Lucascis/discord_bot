@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
+const pool = process.env.VITEST_POOL === 'threads' ? 'threads' : 'forks';
+
 export default defineConfig({
   test: {
     globals: true,
@@ -23,12 +25,14 @@ export default defineConfig({
     },
     testTimeout: 10000,
     hookTimeout: 10000,
-    pool: 'forks', // Vitest 2.x default for better stability
-    poolOptions: {
-      forks: {
-        singleFork: true
-      }
-    }
+    pool,
+    poolOptions: pool === 'forks'
+      ? {
+          forks: {
+            singleFork: true
+          }
+        }
+      : undefined
   },
   resolve: {
     alias: {
@@ -37,7 +41,7 @@ export default defineConfig({
       '@discord-bot/config': path.resolve(__dirname, 'packages/config/src'),
       '@discord-bot/commands': path.resolve(__dirname, 'packages/commands/src'),
       '@discord-bot/cache': path.resolve(__dirname, 'packages/cache/src'),
-      '@discord-bot/subscription': path.resolve(__dirname, 'packages/subscription/src'),
+      '@discord-bot/subscription': path.resolve(__dirname, 'packages/subscription/src/index.ts'),
       '@discord-bot/cluster': path.resolve(__dirname, 'packages/cluster/src'),
       '@discord-bot/cqrs': path.resolve(__dirname, 'packages/cqrs/src'),
       '@discord-bot/event-store': path.resolve(__dirname, 'packages/event-store/src'),

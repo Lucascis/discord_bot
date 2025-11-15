@@ -27,6 +27,7 @@
 - **Customer Management**: Complete CRM with lifecycle tracking
 - **Analytics & Metrics**: Revenue, churn, LTV, cohort analysis
 - **Audit Trail**: Complete billing history for compliance
+- **Implementation status**: The production build wires a stub payment provider by default. Stripe/MercadoPago connectors are available but require live credentials before premium plans can be sold.
 
 ### 🏗️ Architecture
 - **Microservices**: Gateway, Audio, API, Worker services
@@ -104,7 +105,33 @@ curl http://localhost:3000/health
 | **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | Production deployment instructions |
 | **[Project Structure](docs/PROJECT_STRUCTURE.md)** | Architecture and codebase structure |
 | **[Billing System](docs/ENTERPRISE_BILLING_SYSTEM.md)** | Payment integration and monetization |
+| **[Market Research](docs/MARKET_RESEARCH.md)** | Competitive landscape & positioning |
 | **[Claude Instructions](CLAUDE.md)** | AI assistant development guidelines |
+| **Panel Web (apps/panel)** | Next.js dashboard/landing que consume los endpoints `/api/v1/plans` y muestra el control centralizado. Ejecutar `pnpm --filter @discord-bot/panel dev` |
+
+### Panel Web – variables necesarias
+
+Configurar un `.env.local` dentro de `apps/panel` con los secretos de autenticación y endpoint de la API:
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_PANEL_API_KEY=tu_api_key
+NEXTAUTH_SECRET=clave_super_secreta
+AUTH_DISCORD_CLIENT_ID=discord_app_client_id
+AUTH_DISCORD_CLIENT_SECRET=discord_app_client_secret
+PANEL_STAFF_DISCORD_IDS=123456789012345678,987654321098765432
+```
+
+El flujo de login usa Discord OAuth; tras autenticarse, los usuarios ven su nombre/avatar en la navbar y pueden cerrar sesión. Asegurate de registrar la URL `http://localhost:3000/api/auth/callback/discord` (o el dominio correspondiente) en el Discord Developer Portal. Solo los IDs listados en `PANEL_STAFF_DISCORD_IDS` pueden acceder al Plan Engine (`/admin/plans`), donde se editan planes/pricios en caliente.
+
+### Subscription Plans are Database-Driven
+Every tier (Free, Basic, Premium, Enterprise) is configured in PostgreSQL via the `subscription_plans` and `subscription_prices` tables. The services will refuse to boot until at least one active plan and its price records exist. See the deployment guide for seeding instructions.
+
+- `GET /api/v1/plans`: lista los planes/pricios almacenados en la base.
+- `GET /api/v1/plans/runtime`: muestra lo que cargaron Gateway/API en memoria.
+- `POST /api/v1/plans/reload`: fuerza nuevamente la carga desde DB sin reiniciar servicios.
+
+Estas rutas requieren `X-API-Key` y ahora se consumen desde `/admin/plans` (Plan Engine). Allí el staff puede editar metadata, experimentar con flags, crear precios y recargar el runtime sin reinicios.
 
 ---
 

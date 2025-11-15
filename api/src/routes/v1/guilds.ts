@@ -15,110 +15,50 @@ import type {
 } from '../../types/api.js';
 import { logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
-import Redis from 'ioredis';
-import { env } from '@discord-bot/config';
 
 /**
  * Guild Management API Router
  *
  * Implements REST endpoints for Discord guild management
- * Following Discord.js v14 best practices and microservices architecture
+ * using data persisted in PostgreSQL.
  */
 
 const router: ExpressRouter = Router();
-
-// Redis client for inter-service communication
-const redis = new Redis(env.REDIS_URL);
-
-/**
- * Helper function to request data from Gateway service via Redis
- * Implements request-response pattern with timeout
- */
-async function requestFromGateway<T>(
-  requestType: string,
-  payload: Record<string, unknown>,
-  timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 5000
-): Promise<T> {
-  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
-  // Create response listener
-  const responsePromise = new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      redis.unsubscribe(`guild-response:${requestId}`);
-      reject(new Error('Gateway service timeout'));
-    }, timeoutMs);
-
-    redis.subscribe(`guild-response:${requestId}`, (err) => {
-      if (err) {
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    redis.on('message', (channel, message) => {
-      if (channel === `guild-response:${requestId}`) {
-        clearTimeout(timeout);
-        redis.unsubscribe(`guild-response:${requestId}`);
-
-        try {
-          const response = JSON.parse(message);
-          if (response.error) {
-            const error = new Error(response.error) as Error & { notFound?: boolean };
-            // Mark as not found error if the error message indicates that
-            if (response.error.toLowerCase().includes('not found')) {
-              error.notFound = true;
-            }
-            reject(error);
-          } else {
-            resolve(response.data);
-          }
-        } catch {
-          reject(new Error('Invalid response format'));
-        }
-      }
-    });
-  });
-
-  // Send request to gateway service
-  await redis.publish('discord-bot:guild-request', JSON.stringify({
-    requestId,
-    type: requestType,
-    ...payload
-  }));
-
-  return responsePromise;
-}
 
 /**
  * GET /api/v1/guilds
  * List accessible guilds with pagination
  */
 router.get('/', validatePagination, asyncHandler(async (req, res) => {
-  // Parse query params explicitly to numbers (validatePagination validates but doesn't convert)
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 20;
 
   try {
-    logger.info({
-      requestId: req.headers['x-request-id'],
-      page,
-      limit
-    }, 'Fetching guild list from gateway service');
+    const totalPromise = prisma.serverConfiguration.count();
+    const serversPromise = prisma.serverConfiguration.findMany({
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit
+    });
 
-    // Request guild list from gateway service
-    const guildData = await requestFromGateway<{
-      guilds: Guild[];
-      total: number;
-    }>('GUILD_LIST', { page, limit });
+    const [total, serverConfigs] = await Promise.all([totalPromise, serversPromise]);
 
-    const totalPages = Math.ceil(guildData.total / limit);
+    const guilds: Guild[] = serverConfigs.map((config) => ({
+      id: config.guildId,
+      name: config.guildId,
+      icon: undefined,
+      memberCount: undefined,
+      available: true
+    }));
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
 
     const response: PaginatedResponse<Guild> = {
-      data: guildData.guilds,
+      data: guilds,
       pagination: {
         page,
         limit,
-        total: guildData.total,
+        total,
         totalPages,
         hasNext: page < totalPages,
         hasPrevious: page > 1
@@ -146,20 +86,24 @@ router.get('/:guildId', validateGuildId, asyncHandler(async (req, res) => {
   const { guildId } = req.params;
 
   try {
-    logger.info({
-      requestId: req.headers['x-request-id'],
-      guildId
-    }, 'Fetching guild info from gateway service');
+    const serverConfig = await prisma.serverConfiguration.findUnique({
+      where: { guildId }
+    });
 
-    // Request specific guild data from gateway service
-    const guildData = await requestFromGateway<Guild>('GUILD_INFO', { guildId });
-
-    if (!guildData) {
+    if (!serverConfig) {
       throw new NotFoundError('Guild');
     }
 
+    const guild: Guild = {
+      id: serverConfig.guildId,
+      name: serverConfig.guildId,
+      available: true,
+      icon: undefined,
+      memberCount: undefined
+    };
+
     const response: APIResponse<Guild> = {
-      data: guildData,
+      data: guild,
       timestamp: new Date().toISOString(),
       requestId: req.headers['x-request-id'] as string
     };
@@ -168,11 +112,6 @@ router.get('/:guildId', validateGuildId, asyncHandler(async (req, res) => {
   } catch (error) {
     if (error instanceof NotFoundError) {
       throw error;
-    }
-
-    // Check if it's a not found error from the gateway service
-    if (error instanceof Error && (error as Error & { notFound?: boolean }).notFound) {
-      throw new NotFoundError('Guild');
     }
 
     logger.error({

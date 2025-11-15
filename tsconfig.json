@@ -8,7 +8,7 @@
       "@discord-bot/logger": ["./packages/logger/src"],
       "@discord-bot/commands": ["./packages/commands/src"],
       "@discord-bot/cache": ["./packages/cache/src"],
-      "@discord-bot/subscription": ["./packages/subscription/src"],
+      "@discord-bot/subscription": ["./packages/subscription/src/index.ts"],
       "@discord-bot/cluster": ["./packages/cluster/src"],
       "@discord-bot/cqrs": ["./packages/cqrs/src"],
       "@discord-bot/event-store": ["./packages/event-store/src"],

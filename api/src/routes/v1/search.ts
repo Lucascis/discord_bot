@@ -4,79 +4,17 @@ import { validateSearch } from '../../middleware/validation.js';
 import { InternalServerError } from '../../middleware/error-handler.js';
 import type { APIResponse, SearchResult } from '../../types/api.js';
 import { logger } from '@discord-bot/logger';
-import Redis from 'ioredis';
-import { env } from '@discord-bot/config';
+import { searchTracksViaLavalink } from '../../services/lavalink-search-service.js';
 
 /**
  * Search API Router
  *
  * Implements REST endpoints for track search functionality
- * Following Discord.js v14 best practices and microservices architecture
+ * Using Lavalink's REST API directly per official documentation:
+ * https://lavalink.dev/api/rest.html#operation/loadTracks
  */
 
 const router: ExpressRouter = Router();
-
-// Redis client for inter-service communication
-const redis = new Redis(env.REDIS_URL);
-
-/**
- * Helper function to request search data from Audio service via Redis
- * Implements request-response pattern with timeout
- */
-async function requestSearch(
-  query: string,
-  source?: string,
-  page: number = 1,
-  limit: number = 20,
-  timeoutMs: number = process.env.NODE_ENV === 'test' ? 2000 : 15000
-): Promise<SearchResult> {
-  const requestId = `search_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-
-  // Create response listener
-  const responsePromise = new Promise<SearchResult>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      redis.unsubscribe(`search-response:${requestId}`);
-      reject(new Error('Search service timeout'));
-    }, timeoutMs);
-
-    redis.subscribe(`search-response:${requestId}`, (err) => {
-      if (err) {
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    redis.on('message', (channel, message) => {
-      if (channel === `search-response:${requestId}`) {
-        clearTimeout(timeout);
-        redis.unsubscribe(`search-response:${requestId}`);
-
-        try {
-          const response = JSON.parse(message);
-          if (response.error) {
-            reject(new Error(response.error));
-          } else {
-            resolve(response.data);
-          }
-        } catch {
-          reject(new Error('Invalid search response format'));
-        }
-      }
-    });
-  });
-
-  // Send search request to audio service
-  await redis.publish('discord-bot:search-request', JSON.stringify({
-    requestId,
-    type: 'SEARCH_TRACKS',
-    query,
-    source,
-    page,
-    limit
-  }));
-
-  return responsePromise;
-}
 
 /**
  * GET /api/v1/search
@@ -99,8 +37,22 @@ router.get('/', validateSearch, asyncHandler(async (req, res) => {
       limit
     }, 'Executing track search via audio service');
 
-    // Request search from audio service
-    const searchResult = await requestSearch(query, source, page, limit);
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 15000);
+
+    let searchResult: SearchResult;
+
+    try {
+      searchResult = await searchTracksViaLavalink(
+        query,
+        source || 'all',
+        page || 1,
+        limit || 20,
+        abortController.signal
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const response: APIResponse<SearchResult> = {
       data: searchResult,

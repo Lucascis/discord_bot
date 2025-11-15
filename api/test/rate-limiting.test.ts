@@ -1,7 +1,9 @@
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app.js';
 import { validApiKey, validGuildId, mockGuild } from './fixtures.js';
+import { prisma } from '@discord-bot/database';
+import type { ServerConfiguration } from '@prisma/client';
 
 describe('Dynamic rate limiting', () => {
   // Note: These tests use in-memory rate limiting (API_RATE_LIMIT_IN_MEMORY=true)
@@ -15,6 +17,38 @@ describe('Dynamic rate limiting', () => {
         total: 1
       }
     });
+
+    const mockServerConfig: ServerConfiguration = {
+      id: 'cfg-1',
+      guildId: mockGuild.id,
+      subscriptionTier: 'free',
+      subscriptionExpiresAt: null,
+      spotifyEnabled: false,
+      appleMusicEnabled: false,
+      deezerEnabled: false,
+      lyricsEnabled: false,
+      sponsorBlockEnabled: true,
+      advancedSearchEnabled: false,
+      maxAudioQuality: 'medium',
+      volumeLimit: 200,
+      maxQueueSize: 100,
+      maxSongDuration: 3600,
+      allowExplicitContent: true,
+      djRoleId: null,
+      djOnlyMode: false,
+      voteSkipEnabled: true,
+      voteSkipThreshold: 0.5,
+      autoplayEnabled: false,
+      autoplayMode: 'similar',
+      autoplayQueueSize: 10,
+      ephemeralMessages: false,
+      persistentConnection: false,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    vi.mocked(prisma.serverConfiguration.count).mockResolvedValue(1);
+    vi.mocked(prisma.serverConfiguration.findMany).mockResolvedValue([mockServerConfig]);
   });
 
   afterEach(async () => {

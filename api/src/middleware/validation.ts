@@ -46,6 +46,7 @@ export const guildSettingsSchema = z.object({
 // Track add validation
 export const addTrackSchema = z.object({
   query: searchQuerySchema,
+  requestedBy: snowflakeSchema,
   position: trackPositionSchema.optional()
 });
 

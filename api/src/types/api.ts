@@ -162,6 +162,7 @@ export interface SearchRequest {
 
 export interface AddTrackRequest {
   query: string;
+  requestedBy: Snowflake;
   position?: number;
   source?: 'youtube' | 'spotify' | 'soundcloud';
 }

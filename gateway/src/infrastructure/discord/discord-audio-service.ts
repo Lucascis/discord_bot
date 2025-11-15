@@ -220,6 +220,16 @@ export class DiscordAudioService implements AudioService {
       const responseChannel = `discord-bot:response:${requestId}`;
 
       // Create a one-time message handler for this specific request
+      const unsubscribe = async () => {
+        if (typeof this.redisSubscriber.unsubscribe === 'function') {
+          try {
+            await this.redisSubscriber.unsubscribe(responseChannel, messageHandler);
+          } catch (error) {
+            logger.warn({ error, responseChannel }, 'Failed to unsubscribe response channel');
+          }
+        }
+      };
+
       const messageHandler = (message: string, channel: string) => {
         // Only handle messages for our specific request ID channel
         if (channel !== responseChannel) return;
@@ -234,14 +244,14 @@ export class DiscordAudioService implements AudioService {
               pendingRequest.resolve(response);
             }
             // Clean up: unsubscribe after receiving response
-            this.redisSubscriber.unsubscribe?.(responseChannel);
+            void unsubscribe();
           }
         } catch (parseError) {
           const pendingRequest = this.pendingRequests.get(requestId);
           if (pendingRequest) {
             pendingRequest.reject(new Error(`Failed to parse response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`));
             // Clean up: unsubscribe after error
-            this.redisSubscriber.unsubscribe?.(responseChannel);
+            void unsubscribe();
           }
         }
       };
@@ -250,6 +260,7 @@ export class DiscordAudioService implements AudioService {
         const pendingRequest = this.pendingRequests.get(requestId);
         if (pendingRequest) {
           pendingRequest.reject(new Error(`Failed to subscribe to response channel: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          void unsubscribe();
         }
       });
     });
