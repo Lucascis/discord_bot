@@ -1,5 +1,5 @@
 # Multi-stage Docker build for production optimization
-FROM node:22-alpine AS base
+FROM node:25-alpine AS base
 
 # Security and build metadata
 LABEL maintainer="discord-bot-team" \
@@ -86,7 +86,7 @@ RUN pnpm --filter api build || true
 RUN pnpm --filter worker build || true
 
 # Production stage - final optimized image
-FROM node:22-alpine AS production
+FROM node:25-alpine AS production
 
 # Create non-root user for security (Alpine)
 RUN addgroup -g 1001 nodejs \
