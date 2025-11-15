@@ -16,8 +16,8 @@
     "lru-cache": "^10.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.16",
-    "typescript": "^5.8.4",
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
 }
