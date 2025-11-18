@@ -12,7 +12,7 @@
   "dependencies": {
     "@discord-bot/logger": "workspace:*",
     "@discord-bot/observability": "workspace:*",
-    "ioredis": "^5.3.2",
+    "ioredis": "^5.8.2",
     "lru-cache": "^10.1.0"
   },
   "devDependencies": {

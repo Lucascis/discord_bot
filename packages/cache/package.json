@@ -12,7 +12,7 @@
   "dependencies": {
     "@discord-bot/config": "workspace:*",
     "@discord-bot/logger": "workspace:*",
-    "ioredis": "^5.4.1",
+    "ioredis": "^5.8.2",
     "prom-client": "^15.1.3",
     "redis": "^5.8.2",
     "zod": "^3.22.4"

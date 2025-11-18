@@ -20,7 +20,7 @@
     "@opentelemetry/sdk-node": "^0.203.0",
     "bullmq": "^5.58.7",
     "dotenv": "^16.6.1",
-    "ioredis": "^5.7.0",
+    "ioredis": "^5.8.2",
     "node-cron": "^4.2.1",
     "prom-client": "^15.1.3"
   },
