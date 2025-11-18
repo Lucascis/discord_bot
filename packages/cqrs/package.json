@@ -12,7 +12,7 @@
   "dependencies": {
     "@discord-bot/event-store": "workspace:*",
     "@discord-bot/logger": "workspace:*",
-    "uuid": "^9.0.1"
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/uuid": "^9.0.7",
