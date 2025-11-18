@@ -61,6 +61,6 @@
     ]
   },
   "dependencies": {
-    "@snazzah/davey": "^0.1.6"
+    "@snazzah/davey": "^0.1.8"
   }
 }
