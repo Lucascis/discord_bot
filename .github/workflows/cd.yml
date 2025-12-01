@@ -26,7 +26,7 @@ jobs:
         service: [gateway, audio, api, worker]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -97,7 +97,7 @@ jobs:
       url: https://discord-bot-staging.example.com
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure Staging Environment
         run: |
@@ -128,7 +128,7 @@ jobs:
       url: https://discord-bot.example.com
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Deploy Services
         run: |
