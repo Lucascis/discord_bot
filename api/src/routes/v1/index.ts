@@ -19,7 +19,7 @@ const router: ExpressRouter = Router();
 const apiKeyAuth: ExpressRouter = Router();
 apiKeyAuth.use((req, _res, next) => {
   const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-  const expectedApiKey = env.API_KEY || process.env.API_KEY;
+  const expectedApiKey = env.API_KEY;
 
   if (!expectedApiKey) {
     logger.warn('API_KEY not configured - API endpoints will be unprotected');
@@ -37,7 +37,7 @@ apiKeyAuth.use((req, _res, next) => {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
       path: req.path,
-      error: validation.error.errors
+      error: validation.error.issues
     }, 'Invalid API key format');
 
     return next(new UnauthorizedError('Invalid API key format'));
@@ -102,7 +102,23 @@ router.get('/', asyncHandler(async (req, res) => {
         'GET /api/v1/analytics/usage/trends',
         'GET /api/v1/analytics/performance',
         'POST /api/v1/analytics/reports/generate',
-        'GET /api/v1/analytics/reports/:reportId'
+        'GET /api/v1/analytics/reports/:reportId',
+        'GET /api/v1/player/:guildId/now-playing',
+        'GET /api/v1/player/:guildId/events',
+        'POST /api/v1/player/:guildId/controls',
+        'GET /api/v1/panel/guilds',
+        'GET /api/v1/panel/guilds/:guildId/settings',
+        'PUT /api/v1/panel/guilds/:guildId/settings',
+        'GET /api/v1/panel/guilds/:guildId/channels',
+        'POST /api/v1/panel/guilds/:guildId/summon',
+        'GET /api/v1/admin/config/definitions',
+        'GET /api/v1/admin/config/global',
+        'PUT /api/v1/admin/config/global/:key',
+        'GET /api/v1/admin/config/guilds/:guildId',
+        'PUT /api/v1/admin/config/guilds/:guildId/:key',
+        'GET /api/v1/admin/config/audit',
+        'GET /api/v1/guilds/:guildId/runtime-config',
+        'PUT /api/v1/guilds/:guildId/runtime-config/:key'
       ],
       features: [
         'Guild management',
@@ -186,6 +202,21 @@ router.use('/analytics', analyticsRoutes);
 // Plan administration routes
 import planRoutes from './plans.js';
 router.use('/plans', planRoutes);
+
+// Player control routes
+import playerRoutes from './player.js';
+router.use('/player', playerRoutes);
+
+// Runtime config routes
+import adminConfigRoutes from './admin-config.js';
+import runtimeConfigRoutes from './runtime-config.js';
+router.use('/admin/config', adminConfigRoutes);
+router.use('/guilds', runtimeConfigRoutes);
+
+// Panel scoped routes (RBAC + guild-scoped access)
+import panelRoutes from './panel.js';
+router.use('/panel', panelRoutes);
+
 
 /**
  * Apply common middleware for all v1 routes

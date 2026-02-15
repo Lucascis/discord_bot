@@ -91,14 +91,14 @@ export const ENHANCED_PREMIUM_FEATURES = {
             queueSize: 100,
             trackDuration: 3600, // 1 hour
             monthlyPlaytime: 108000, // 30 hours
-            concurrentSessions: 2,
+            concurrentSessions: 1,
             apiCallsPerDay: 500,
             searchesPerDay: 200,
             playlistsMax: 20
         },
         restrictions: {
             volumeLimit: 150,
-            premiumServers: 3,
+            premiumServers: 1,
             skipLimit: 20,
             canSkipSponsorBlocks: true,
             canUseNightcore: false,
@@ -130,14 +130,14 @@ export const ENHANCED_PREMIUM_FEATURES = {
             queueSize: 500,
             trackDuration: 7200, // 2 hours
             monthlyPlaytime: 432000, // 120 hours
-            concurrentSessions: 5,
+            concurrentSessions: 3,
             apiCallsPerDay: 2000,
             searchesPerDay: 1000,
             playlistsMax: 100
         },
         restrictions: {
             volumeLimit: 200,
-            premiumServers: 10,
+            premiumServers: 3,
             skipLimit: 100,
             canSkipSponsorBlocks: true,
             canUseNightcore: true,
@@ -349,6 +349,7 @@ export function getAvailableFeatures(tier) {
 export function getQuotaForTier(tier, quota) {
     return ENHANCED_PREMIUM_FEATURES[tier].quotas[quota];
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getRestrictionForTier(tier, restriction) {
     return ENHANCED_PREMIUM_FEATURES[tier].restrictions[restriction];
 }

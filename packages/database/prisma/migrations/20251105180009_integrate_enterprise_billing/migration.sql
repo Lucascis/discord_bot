@@ -26,7 +26,7 @@ CREATE TYPE "public"."BillingEventType" AS ENUM ('CUSTOMER_CREATED', 'CUSTOMER_U
 BEGIN;
 CREATE TYPE "public"."InvoiceStatus_new" AS ENUM ('DRAFT', 'OPEN', 'PAID', 'VOID', 'UNCOLLECTIBLE');
 ALTER TABLE "public"."Invoice" ALTER COLUMN "status" DROP DEFAULT;
-ALTER TABLE "public"."invoices" ALTER COLUMN "status" TYPE "public"."InvoiceStatus_new" USING ("status"::text::"public"."InvoiceStatus_new");
+ALTER TABLE "public"."Invoice" ALTER COLUMN "status" TYPE "public"."InvoiceStatus_new" USING ("status"::text::"public"."InvoiceStatus_new");
 ALTER TYPE "public"."InvoiceStatus" RENAME TO "InvoiceStatus_old";
 ALTER TYPE "public"."InvoiceStatus_new" RENAME TO "InvoiceStatus";
 DROP TYPE "public"."InvoiceStatus_old";
@@ -493,4 +493,3 @@ ALTER TABLE "public"."billing_history" ADD CONSTRAINT "billing_history_paymentId
 
 -- AddForeignKey
 ALTER TABLE "public"."billing_history" ADD CONSTRAINT "billing_history_refundId_fkey" FOREIGN KEY ("refundId") REFERENCES "public"."refunds"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-

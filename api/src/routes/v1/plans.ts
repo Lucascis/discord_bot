@@ -2,10 +2,13 @@ import { Router, type Router as ExpressRouter } from 'express';
 import { asyncHandler } from '../../middleware/async-handler.js';
 import type { APIResponse } from '../../types/api.js';
 import { prisma } from '@discord-bot/database';
+import { SubscriptionStatus } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { loadPlansFromDatabase, getAllPlans } from '@discord-bot/subscription';
 import { z } from 'zod';
-import { BillingInterval } from '@prisma/client';
+import { BillingInterval } from '@discord-bot/database';
+import type { Prisma } from '@discord-bot/database';
+import type { ServerConfiguration } from '@discord-bot/database';
 import { NotFoundError, ValidationError } from '../../middleware/error-handler.js';
 import { validateJSONContentType } from '../../middleware/validation.js';
 
@@ -87,14 +90,20 @@ const planUpdateSchema = z.object({
   experiments: z.array(z.string().min(1)).optional()
 });
 
-function mergeFeatures(features: unknown, experiments?: string[]): Record<string, unknown> {
-  const base = typeof features === 'object' && features !== null && !Array.isArray(features)
-    ? { ...(features as Record<string, unknown>) }
-    : {};
+function mergeFeatures(
+  features: Prisma.JsonValue,
+  experiments?: string[]
+): Prisma.InputJsonValue {
+  const base: Record<string, unknown> =
+    typeof features === 'object' && features !== null && !Array.isArray(features)
+      ? { ...(features as Record<string, unknown>) }
+      : {};
+
   if (experiments) {
     base.experiments = experiments;
   }
-  return base;
+
+  return base as Prisma.InputJsonValue;
 }
 
 router.put('/:planId', validateJSONContentType, asyncHandler(async (req, res) => {
@@ -120,8 +129,12 @@ router.put('/:planId', validateJSONContentType, asyncHandler(async (req, res) =>
       ...(payload.description !== undefined ? { description: payload.description } : {}),
       ...(typeof payload.active === 'boolean' ? { active: payload.active } : {}),
       ...(payload.experiments ? { features: mergeFeatures(plan.features, payload.experiments) } : {})
-    },
-    include: { prices: true }
+    }
+  });
+
+  const prices = await prisma.subscriptionPrice.findMany({
+    where: { planId },
+    orderBy: { createdAt: 'asc' }
   });
 
   const response: APIResponse<Record<string, unknown>> = {
@@ -131,7 +144,7 @@ router.put('/:planId', validateJSONContentType, asyncHandler(async (req, res) =>
       description: updated.description,
       active: updated.active,
       features: updated.features,
-      prices: updated.prices
+      prices
     },
     timestamp: new Date().toISOString(),
     requestId: req.headers['x-request-id'] as string

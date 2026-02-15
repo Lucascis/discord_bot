@@ -271,9 +271,8 @@ const commands = [
             .setDescription('Select subscription tier')
             .setRequired(true)
             .addChoices(
-              { name: 'Basic - 10K tracks/month', value: 'basic' },
-              { name: 'Premium - 100K tracks/month', value: 'premium' },
-              { name: 'Enterprise - Unlimited', value: 'enterprise' }
+              { name: 'Plus - ideal para 1 guild activa', value: 'basic' },
+              { name: 'Pro - hasta 3 guilds activas', value: 'premium' }
             )
         )
     )

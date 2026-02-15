@@ -46,6 +46,8 @@ export interface Guild {
   icon?: string;
   memberCount?: number;
   available: boolean;
+  subscriptionTier?: string;
+  isPremium?: boolean;
 }
 
 // Discord User information
@@ -65,6 +67,12 @@ export interface Channel {
   guildId: Snowflake;
 }
 
+export interface GuildChannel {
+  id: Snowflake;
+  name: string;
+  type: 'text' | 'voice' | 'stage' | 'announcement';
+}
+
 // ===== MUSIC TYPES =====
 
 // Track information
@@ -75,7 +83,6 @@ export interface Track {
   identifier: string;
   duration: number;
   isSeekable: boolean;
-  isStream: boolean;
   position?: number;
   thumbnail?: string;
   source: 'youtube' | 'spotify' | 'soundcloud' | 'bandcamp' | 'twitch' | 'vimeo' | 'http';
@@ -109,6 +116,33 @@ export interface PlayerState {
   filters: Record<string, unknown>;
 }
 
+export interface NowPlayingState {
+  guildId: Snowflake;
+  title: string;
+  durationMs: number;
+  positionMs: number;
+  paused: boolean;
+  repeatMode: 'off' | 'track' | 'queue';
+  queueLen: number;
+  hasTrack: boolean;
+  canSeek: boolean;
+  volume: number;
+  autoplay: boolean;
+  autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+  textChannelId?: Snowflake;
+  voiceChannelId?: Snowflake;
+  filter?: {
+    id: string;
+    label: string;
+    description: string;
+  };
+  uri?: string;
+  author?: string;
+  artworkUrl?: string;
+  updatedAt?: number;
+  source?: string;
+}
+
 // ===== GUILD SETTINGS TYPES =====
 
 export interface GuildSettings {
@@ -121,6 +155,10 @@ export interface GuildSettings {
   defaultSearchSource: 'youtube' | 'spotify' | 'soundcloud';
   announceNowPlaying: boolean;
   deleteInvokeMessage: boolean;
+  uiTheme?: {
+    playingColor?: string;
+    pausedColor?: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -134,6 +172,10 @@ export interface UpdateGuildSettingsRequest {
   defaultSearchSource?: 'youtube' | 'spotify' | 'soundcloud';
   announceNowPlaying?: boolean;
   deleteInvokeMessage?: boolean;
+  uiTheme?: {
+    playingColor?: string;
+    pausedColor?: string;
+  };
 }
 
 // ===== SEARCH TYPES =====

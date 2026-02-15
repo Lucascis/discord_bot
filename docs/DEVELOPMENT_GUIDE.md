@@ -2,7 +2,7 @@
 
 ## 🎯 **Development Overview**
 
-This guide provides comprehensive instructions for developers to set up, develop, test, and deploy the Discord music bot. The project supports multiple architecture patterns and development approaches.
+This guide provides comprehensive instructions for developers to set up, develop, test, and deploy the Discord music bot. El proyecto se organiza como un monorepo PNPM con microservicios.
 
 ---
 
@@ -63,45 +63,26 @@ pnpm db:seed
 
 ### **4. Start Development**
 ```bash
-# Quick start - Optimized music bot only
-node start-music-bot.js
-
-# OR: Full microservices development
-pnpm dev:all
-```
-
----
-
-## 🏗️ **Architecture Options**
-
-### **Option 1: Standalone Bot (Recommended for Development)**
-**Best for**: Quick testing, feature development, production deployment
-
-```bash
-# Start the optimized bot
-node music-bot-optimized.js
-```
-
-**Features**:
-- ✅ All music functionality working
-- ✅ Real-time progress tracking
-- ✅ Interactive button controls
-- ✅ Optimized for production scaling
-- ✅ Single file deployment
-
-### **Microservices Architecture** (Current Production Setup)
-**Best for**: Production deployment, enterprise patterns, scalable development
-
-```bash
-# Start all services in development
 pnpm dev:all
 
-# Or start individual services
+# O bien, servicios individuales
 pnpm --filter gateway dev    # Discord interface
 pnpm --filter audio dev      # Music processing + Lavalink
 pnpm --filter worker dev     # Background jobs + BullMQ
 pnpm --filter api dev        # REST endpoints + health checks
 ```
+
+---
+
+## 🏗️ **Architecture**
+
+### Microservices (Arquitectura actual)
+Los servicios principales viven en:
+
+- `gateway/` – interfaz Discord.js, slash commands, UI.
+- `audio/` – integración Lavalink, cola de reproducción, autoplay.
+- `api/` – API REST para planes, guilds, analíticas.
+- `worker/` – jobs en background y tareas de mantenimiento con BullMQ.
 
 **Features**:
 - ✅ **Production ready** with enterprise optimizations
@@ -113,19 +94,15 @@ pnpm --filter api dev        # REST endpoints + health checks
 
 ---
 
-## 📁 **Project Structure**
+## 📁 **Project Structure (resumen)**
 
 ```
 discord_bot/
-├── 📱 Bot Implementations
-│   ├── music-bot-optimized.js     # ✅ Production ready
-│   ├── start-music-bot.js         # ✅ Launcher script
-│   ├── music-bot-complete.js      # 🔧 Development version
-│   └── simple-bot.js              # 🧪 Testing only
-│
 ├── 🏗️ Microservices
 │   ├── gateway/                   # Discord.js interface
-│   │   └── src/                  # Current microservices implementation
+│   ├── audio/                     # Lavalink client + lógica de audio
+│   ├── api/                       # API REST
+│   └── worker/                    # Jobs y schedulers
 │   ├── audio/                    # Lavalink integration
 │   ├── api/                      # REST endpoints
 │   └── worker/                   # Background jobs
@@ -135,7 +112,7 @@ discord_bot/
 │   ├── packages/config/          # Environment config
 │   ├── packages/database/        # Prisma ORM
 │   ├── packages/logger/          # Structured logging
-│   └── packages/commands/        # Command system
+│   └── packages/subscription/    # Sistema de planes y billing
 │
 ├── 🎵 External Services
 │   ├── lavalink/                 # Audio server config
@@ -200,9 +177,22 @@ pnpm test --watch
 
 # Run tests with coverage
 pnpm test --coverage
+
+# Type-check audio src + tests
+pnpm exec tsc -p audio/tsconfig.tests.json
+
+# Type-check API src + tests
+pnpm exec tsc -p api/tsconfig.tests.json
 ```
 
 ---
+
+## 🖥️ Web Panel (Next.js 15)
+
+- `pnpm --filter @discord-bot/panel dev` levanta el panel en `http://localhost:3004`. Asegurate de definir `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PANEL_API_KEY` y `INTERNAL_API_BASE_URL` en `.env`.
+- El reproductor utiliza **Server Sent Events** (`/api/v1/player/:guildId/events`). En desarrollo, verificá con `curl -N` que los eventos fluyan y que el dashboard consuma `getNowPlaying` antes de hidratar.
+- La funcionalidad **Invocar bot desde el panel** envía comandos premium al gateway. Para probarla sin Stripe, agrega tu guild a `PREMIUM_TEST_GUILD_IDS` y actualizá su `subscriptionTier` vía Prisma/psql.
+- Las invocaciones concurrentes están limitadas por plan. Si necesitás limpiar slots manualmente durante pruebas, ejecutá `redis-cli DEL discord-bot:active-instances:<guildId>`.
 
 ## 🧪 **Testing Strategy**
 

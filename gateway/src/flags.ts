@@ -7,12 +7,12 @@ const CACHE_TTL = 300000; // 5 minutes
 function getCachedFlag(key: string): boolean | undefined {
   const cached = flagCache.get(key);
   if (!cached) return undefined;
-  
+
   if (Date.now() > cached.expires) {
     flagCache.delete(key);
     return undefined;
   }
-  
+
   return cached.value;
 }
 
@@ -27,54 +27,34 @@ export function clearFlagCache(): void {
 
 export async function getAutomixEnabled(guildId: string): Promise<boolean> {
   const cacheKey = `autoplay:${guildId}`;
-  
+
   // Check cache first
   const cached = getCachedFlag(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
-  
-  // Try canonical key first
-  const auto = await prisma.featureFlag.findUnique({ 
+
+  // Try canonical key
+  const auto = await prisma.featureFlag.findUnique({
     where: { guildId_name: { guildId, name: 'autoplay' } },
     select: { enabled: true }
   }).catch(() => null);
-  
-  if (auto) {
-    const result = !!auto.enabled;
-    setCachedFlag(cacheKey, result);
-    return result;
-  }
-  
-  // Legacy support: automix
-  const legacy = await prisma.featureFlag.findUnique({ 
-    where: { guildId_name: { guildId, name: 'automix' } },
-    select: { enabled: true }
-  }).catch(() => null);
-  
-  const result = !!legacy?.enabled;
+
+  const result = !!auto?.enabled;
   setCachedFlag(cacheKey, result);
   return result;
 }
 
 export async function setAutomixEnabled(guildId: string, enabled: boolean): Promise<void> {
   const cacheKey = `autoplay:${guildId}`;
-  
-  // If legacy exists, migrate to 'autoplay'
-  const legacy = await prisma.featureFlag.findUnique({ where: { guildId_name: { guildId, name: 'automix' } }, select: { id: true } }).catch(() => null);
-  if (legacy) {
-    await prisma.featureFlag.update({ where: { id: legacy.id }, data: { enabled, name: 'autoplay' } });
-    // Invalidate cache after update
-    flagCache.delete(cacheKey);
-    return;
-  }
+
   const current = await prisma.featureFlag.findUnique({ where: { guildId_name: { guildId, name: 'autoplay' } }, select: { id: true } }).catch(() => null);
   if (current) {
     await prisma.featureFlag.update({ where: { id: current.id }, data: { enabled } });
   } else {
     await prisma.featureFlag.create({ data: { guildId, name: 'autoplay', enabled } });
   }
-  
+
   // Invalidate cache after update
   flagCache.delete(cacheKey);
 }

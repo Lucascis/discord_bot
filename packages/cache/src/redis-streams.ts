@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from 'redis';
+import Redis from 'ioredis';
 import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
 
@@ -27,13 +27,14 @@ export interface StreamResponseData {
  * Provides reliable message delivery with at-least-once semantics
  */
 export class RedisStreamsManager {
-  private client: RedisClientType;
+  private client: Redis;
   private isConnected = false;
   private consumers = new Map<string, AbortController>();
 
   // Stream names
   public static readonly STREAMS = {
     AUDIO_COMMANDS: 'discord-bot:audio-commands',
+    AUDIO_CONTROLS: 'discord-bot:audio-controls',
     AUDIO_RESPONSES: 'discord-bot:audio-responses',
     GATEWAY_COMMANDS: 'discord-bot:gateway-commands',
     GATEWAY_RESPONSES: 'discord-bot:gateway-responses'
@@ -42,32 +43,32 @@ export class RedisStreamsManager {
   // Consumer group names
   public static readonly CONSUMER_GROUPS = {
     AUDIO_PROCESSORS: 'audio-processors',
+    AUDIO_CONTROLS_PROCESSORS: 'audio-controls-processors',
     GATEWAY_PROCESSORS: 'gateway-processors',
     RESPONSE_HANDLERS: 'response-handlers'
   } as const;
 
   constructor() {
-    this.client = createClient({
-      url: env.REDIS_URL,
-      socket: {
-        connectTimeout: 5000,
-        keepAlive: true,
-        noDelay: true,
-        // Stream-specific optimizations
-        reconnectStrategy: (retries: number) => Math.min(retries * 100, 3000)
-      }
+    this.client = new Redis(env.REDIS_URL, {
+      connectTimeout: 5000,
+      keepAlive: 5000,
+      noDelay: true,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true,
+      lazyConnect: true,
+      retryStrategy: (times: number) => Math.min(times * 100, 3000)
     });
 
     this.client.on('error', (error) => {
       logger.error({ error }, 'Redis Streams client error');
     });
 
-    this.client.on('connect', () => {
+    this.client.on('ready', () => {
       logger.info('Redis Streams client connected');
       this.isConnected = true;
     });
 
-    this.client.on('disconnect', () => {
+    this.client.on('end', () => {
       logger.warn('Redis Streams client disconnected');
       this.isConnected = false;
     });
@@ -77,8 +78,16 @@ export class RedisStreamsManager {
    * Connect to Redis and initialize streams and consumer groups
    */
   async connect(): Promise<void> {
+    const status = this.client.status as string;
+    if (this.isConnected || status === 'ready') {
+      logger.debug('Redis Streams manager already connected');
+      return;
+    }
+
     try {
-      await this.client.connect();
+      if (status !== 'ready' && status !== 'connecting') {
+        await this.client.connect();
+      }
       await this.initializeStreamsAndGroups();
       logger.info('Redis Streams manager initialized successfully');
     } catch (error) {
@@ -98,15 +107,19 @@ export class RedisStreamsManager {
     for (const stream of streams) {
       try {
         // Create stream by adding a dummy message if it doesn't exist
-        await this.client.xAdd(stream, '*', {
-          type: 'SYSTEM_INITIALIZATION',
-          initialized: Date.now().toString()
-        });
+        await this.client.xadd(
+          stream,
+          '*',
+          'type',
+          'SYSTEM_INITIALIZATION',
+          'initialized',
+          Date.now().toString()
+        );
 
         // Create consumer groups for this stream
         for (const group of groups) {
           try {
-            await this.client.xGroupCreate(stream, group, '0', { MKSTREAM: true });
+            await this.client.xgroup('CREATE', stream, group, '0', 'MKSTREAM');
             logger.debug({ stream, group }, 'Created consumer group');
           } catch (error) {
             // Group might already exist - that's ok
@@ -130,7 +143,11 @@ export class RedisStreamsManager {
     }
 
     try {
-      const messageId = await this.client.xAdd(streamName, '*', data);
+      const fields = Object.entries(data).flatMap(([key, value]) => [key, value]);
+      const messageId = await this.client.xadd(streamName, '*', ...fields);
+      if (!messageId) {
+        throw new Error('Failed to add message to stream');
+      }
       logger.debug({ streamName, messageId, dataKeys: Object.keys(data) }, 'Added message to stream');
       return messageId;
     } catch (error) {
@@ -158,11 +175,17 @@ export class RedisStreamsManager {
     try {
       const { count = 10, block = 5000 } = options;
 
-      const result = await this.client.xReadGroup(
+      const result = await this.client.xreadgroup(
+        'GROUP',
         groupName,
         consumerName,
-        [{ key: streamName, id: '>' }],
-        { COUNT: count, BLOCK: block }
+        'COUNT',
+        count,
+        'BLOCK',
+        block,
+        'STREAMS',
+        streamName,
+        '>'
       );
 
       if (!result || result.length === 0) {
@@ -170,11 +193,19 @@ export class RedisStreamsManager {
       }
 
       const messages: StreamMessage[] = [];
-      for (const stream of result) {
-        for (const message of stream.messages) {
+      for (const [_stream, entries] of result as Array<[string, Array<[string, Array<string | null>]>]>) {
+        for (const [id, fields] of entries) {
+          const data: Record<string, string> = {};
+          for (let i = 0; i < fields.length; i += 2) {
+            const key = fields[i];
+            if (!key) {
+              continue;
+            }
+            data[String(key)] = fields[i + 1] ?? '';
+          }
           messages.push({
-            id: message.id,
-            data: message.message as Record<string, string>
+            id,
+            data
           });
         }
       }
@@ -195,7 +226,7 @@ export class RedisStreamsManager {
     }
 
     try {
-      await this.client.xAck(streamName, groupName, messageId);
+      await this.client.xack(streamName, groupName, messageId);
       logger.debug({ streamName, groupName, messageId }, 'Acknowledged message');
     } catch (error) {
       logger.error({ error, streamName, groupName, messageId }, 'Failed to acknowledge message');
@@ -213,7 +244,7 @@ export class RedisStreamsManager {
     }
 
     try {
-      return await this.client.xInfoStream(streamName);
+      return await this.client.xinfo('STREAM', streamName);
     } catch (error) {
       logger.error({ error, streamName }, 'Failed to get stream info');
       throw error;
@@ -230,7 +261,7 @@ export class RedisStreamsManager {
     }
 
     try {
-      return await this.client.xInfoGroups(streamName);
+      return await this.client.xinfo('GROUPS', streamName);
     } catch (error) {
       logger.error({ error, streamName }, 'Failed to get group info');
       throw error;
@@ -247,7 +278,7 @@ export class RedisStreamsManager {
     }
 
     try {
-      return await this.client.xPending(streamName, groupName);
+      return await this.client.xpending(streamName, groupName);
     } catch (error) {
       logger.error({ error, streamName, groupName }, 'Failed to get pending messages');
       throw error;
@@ -331,7 +362,7 @@ export class RedisStreamsManager {
 
     // Disconnect client
     if (this.isConnected) {
-      await this.client.disconnect();
+      await this.client.quit();
       this.isConnected = false;
       logger.info('Redis Streams manager disconnected');
     }
@@ -347,9 +378,18 @@ export class RedisStreamsManager {
     }
 
     try {
-      const groups = await this.client.xInfoGroups(streamName);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return groups.find((group: any) => group.name === groupName) || null;
+      const groups = await this.client.xinfo('GROUPS', streamName);
+      if (!groups) {
+        return null;
+      }
+      const parsedGroups = (groups as Array<Array<unknown>>).map((group) => {
+        const groupData: Record<string, unknown> = {};
+        for (let i = 0; i < group.length; i += 2) {
+          groupData[String(group[i])] = group[i + 1];
+        }
+        return groupData;
+      });
+      return parsedGroups.find((group) => group.name === groupName) || null;
     } catch (error) {
       logger.debug({ error, streamName, groupName }, 'Failed to get consumer group info - group may not exist');
       return null;
@@ -359,7 +399,7 @@ export class RedisStreamsManager {
   /**
    * Get the underlying Redis client for advanced operations
    */
-  getClient(): RedisClientType {
+  getClient(): Redis {
     return this.client;
   }
 }

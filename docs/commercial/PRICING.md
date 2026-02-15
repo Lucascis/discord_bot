@@ -8,16 +8,18 @@ Discord Music Bot offers flexible pricing plans to suit communities of all sizes
 
 ## 📊 Plan Comparison
 
-| Feature | Free | Basic | Premium | Enterprise |
-|---------|------|-------|---------|------------|
-| **Monthly Price** | $0 | $4.99 | $9.99 | $24.99+ |
-| **Best For** | Small servers | Growing communities | Active servers | Large organizations |
-| **Max Queue Size** | 50 songs | 100 songs | 500 songs | Unlimited |
-| **Monthly Playtime** | 10 hours | 30 hours | 120 hours | Unlimited |
-| **Audio Quality** | Standard (128kbps) | High (320kbps) | Lossless (FLAC) | Spatial Audio |
-| **Music Sources** | YouTube | + Spotify | + Apple Music, Deezer | All sources + custom |
-| **Support** | Community | Email (48h) | Priority (24h) | Dedicated + SLA |
-| **Uptime SLA** | - | - | 99.5% | 99.9% |
+| Feature | Free | Plus | Pro |
+|---------|------|------|-----|
+| **Monthly Price** | $0 | $4.99 | $10.00 |
+| **Best For** | Small servers | Growing communities | Activos con múltiples guilds |
+| **Max Queue Size** | 50 songs | 1,000 songs | 5,000 songs |
+| **Monthly Playtime** | 10 hours | 200 hours | 500 hours |
+| **Audio Quality** | Standard (128kbps) | High (320kbps) | Highest |
+| **Music Sources** | YouTube | + Spotify | + más orígenes soportados por Lavalink |
+| **Web Panel & Studio Mode** | Básico | Completo | Completo + analíticas |
+| **Discord Web Player (audio dual)** | - | Sí | Sí |
+| **Support** | Comunidad | Priority (24h) | Priority (24h) |
+| **Uptime SLA** | - | - | 99.5% |
 
 ---
 
@@ -51,7 +53,7 @@ Perfect for getting started with basic music playback.
 
 ---
 
-### Basic Plan - $4.99/month
+### Plus Plan - $4.99/month
 
 Enhanced features for growing communities.
 
@@ -70,10 +72,10 @@ Enhanced features for growing communities.
 - 500 API calls per day
 
 **Ideal For:**
-- Active Discord communities
-- Music enthusiast servers
-- Gaming communities
-- Regular music sessions
+- Comunidades en crecimiento
+- Servidores de gaming activos
+- Streams regulares con buen audio
+- Clientes que quieren panel web + audio dual en un solo servidor
 
 **Popular Add-ons:**
 - Extended playtime: +$2/month for +30 hours
@@ -81,12 +83,12 @@ Enhanced features for growing communities.
 
 ---
 
-### Premium Plan - $9.99/month
+### Pro Plan - $10.00/month
 
 Advanced features for power users and active communities.
 
 **Features:**
-- ✅ **Everything in Basic, plus:**
+- ✅ **Everything in Plus, plus:**
 - ✅ Apple Music integration
 - ✅ Deezer integration
 - ✅ YouTube Music integration
@@ -105,11 +107,9 @@ Advanced features for power users and active communities.
 - 2,000 API calls per day
 
 **Ideal For:**
-- Large Discord servers
-- Music-focused communities
-- Radio stations
-- Content creators
-- Professional streamers
+- Servidores grandes con muchos usuarios concurrentes
+- Redes de servidores (hasta 3 guilds con la misma cuenta)
+- Radios, comunidades musicales y streamers que necesitan alta calidad
 
 **Popular Add-ons:**
 - Unlimited playtime: +$5/month
@@ -117,50 +117,7 @@ Advanced features for power users and active communities.
 
 ---
 
-### Enterprise Plan - Starting at $24.99/month
-
-Complete solution for organizations with custom requirements.
-
-**Features:**
-- ✅ **Everything in Premium, plus:**
-- ✅ Unlimited queue size
-- ✅ Unlimited monthly playtime
-- ✅ Unlimited API calls
-- ✅ Spatial audio (Dolby Atmos)
-- ✅ Multi-instance deployment support
-- ✅ Custom branding & white-label options
-- ✅ Advanced analytics dashboard
-- ✅ Webhook integrations
-- ✅ REST API access
-- ✅ Custom feature development
-- ✅ Dedicated support team
-- ✅ 99.9% uptime SLA
-- ✅ Custom SLA options available
-
-**Custom Options:**
-- Multi-server deployments
-- Custom audio sources
-- Dedicated infrastructure
-- On-premise deployment
-- Custom integrations
-- Advanced security features
-- Compliance certifications (SOC2, GDPR)
-
-**Ideal For:**
-- Gaming organizations
-- Event management companies
-- Large communities (5,000+ members)
-- Enterprise organizations
-- Service providers
-- Radio networks
-
-**Contact Sales** for custom pricing based on:
-- Number of Discord servers
-- Expected monthly usage
-- Required features
-- Support level
-- SLA requirements
-- Compliance needs
+> Hoy sólo ofrecemos estos tres planes como productos empaquetados. Si necesitás algo por fuera de Pro (infra dedicada, integraciones especiales), se evalúa como proyecto custom, no como un cuarto plan.
 
 ---
 
@@ -168,34 +125,26 @@ Complete solution for organizations with custom requirements.
 
 Save money with longer billing periods:
 
-| Billing Period | Basic | Premium | Enterprise | Discount |
-|----------------|-------|---------|------------|----------|
-| **Monthly** | $4.99 | $9.99 | $24.99 | 0% |
-| **Quarterly** | $14.22 | $28.47 | $71.22 | **5% off** |
-| **Yearly** | $50.91 | $101.90 | $254.90 | **15% off** |
+| Billing Period | Plus | Pro | Discount |
+|----------------|------|-----|----------|
+| **Monthly** | $4.99 | $10.00 | 0% |
+| **Yearly** | $49.90 | $100.00 | ~2 months free |
 
 **Annual Savings:**
-- Basic: Save $9.00 per year
-- Premium: Save $18.00 per year
-- Enterprise: Save $45.00+ per year
+- Plus: pagás 10 meses, usás 12
+- Pro: pagás 10 meses, usás 12
 
 ---
 
 ## 🎁 Free Trial
 
-Try Premium or Enterprise features risk-free:
+Try Pro features risk-free:
 
 - ✅ **14-day free trial** available
 - ✅ No credit card required
-- ✅ Full access to all features
+- ✅ Full access to all Pro features
 - ✅ Cancel anytime
 - ✅ Automatically downgrades to Free plan if not converted
-
-**Start Your Trial:**
-1. Use `/premium trial` command in Discord
-2. Choose Premium or Enterprise plan
-3. Enjoy 14 days of full access
-4. Decide before trial ends
 
 ---
 
@@ -244,8 +193,8 @@ We accept:
 - ✅ PayPal
 - ✅ Apple Pay
 - ✅ Google Pay
-- ✅ Bank Transfer (Enterprise only)
-- ✅ Cryptocurrency (Enterprise only)
+- ✅ Bank Transfer (para contratos anuales o proyectos custom)
+- ✅ Cryptocurrency (para proyectos custom aprobados)
 
 **Secure Processing:**
 - All payments processed through Stripe
@@ -357,7 +306,7 @@ A: The bot will notify you and stop playback. Upgrade or wait for next month.
 A: No, subscriptions are per-server. Contact us for multi-server discounts.
 
 **Q: What happens during maintenance?**
-A: Premium/Enterprise customers get advance notice and SLA credits if applicable.
+A: Plus/Pro customers (y proyectos custom) get advance notice and SLA credits if applicable.
 
 ### Payment Questions
 
@@ -387,7 +336,7 @@ Not sure which plan is right for you?
 
 - 📧 **Email:** sales@discordmusicbot.com
 - 💬 **Discord:** [Join our support server](https://discord.gg/musicbot)
-- 📞 **Call:** Enterprise customers only
+- 📞 **Call:** Clientes Pro y proyectos custom
 - 🤖 **Bot:** Use `/premium help` in Discord
 
 ---

@@ -1,6 +1,9 @@
 import { logger } from '@discord-bot/logger';
 import { MetricsCollector } from '@discord-bot/observability';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Query Performance Metrics
  */
@@ -87,10 +90,10 @@ export class QueryOptimizer {
     if (hints.useIndex) {
       // Note: PostgreSQL doesn't have MySQL-style index hints
       // Instead, we can modify the query to encourage index usage
-      logger.debug('Index hint applied', {
+      logger.debug({
         baseQuery: baseQuery.substring(0, 100),
         indexHint: hints.useIndex
-      });
+      }, 'Index hint applied');
     }
 
     return {
@@ -151,12 +154,12 @@ export class QueryOptimizer {
 
       // Log slow queries
       if (executionTime > this.slowQueryThreshold) {
-        logger.warn('Slow query detected', {
+        logger.warn({
           table: queryInfo.table,
           type: queryInfo.type,
           executionTimeMs: executionTime,
           query: queryInfo.query.substring(0, 200)
-        });
+        }, 'Slow query detected');
       }
 
       return result;
@@ -164,13 +167,13 @@ export class QueryOptimizer {
     } catch (error) {
       const executionTime = Date.now() - startTime;
 
-      logger.error('Query execution failed', {
+      logger.error({
         table: queryInfo.table,
         type: queryInfo.type,
         executionTimeMs: executionTime,
-        error: error instanceof Error ? error.message : String(error),
+        error: serializeError(error),
         query: queryInfo.query.substring(0, 200)
-      });
+      }, 'Query execution failed');
 
       if (this.metrics) {
         this.metrics.recordError('query_execution', 'database', undefined);
@@ -197,12 +200,12 @@ export class QueryOptimizer {
       batches.push(items.slice(i, i + effectiveConfig.batchSize));
     }
 
-    logger.info('Starting batch execution', {
+    logger.info({
       totalItems: items.length,
       batchCount: batches.length,
       batchSize: effectiveConfig.batchSize,
       maxConcurrency: effectiveConfig.maxConcurrency
-    });
+    }, 'Starting batch execution');
 
     // Process batches with concurrency control
     for (let i = 0; i < batches.length; i += effectiveConfig.maxConcurrency) {
@@ -218,12 +221,12 @@ export class QueryOptimizer {
             const batchResults = await processor(batch);
             const executionTime = Date.now() - startTime;
 
-            logger.debug('Batch processed successfully', {
+            logger.debug({
               batchIndex: i + batchIndex,
               batchSize: batch.length,
               executionTimeMs: executionTime,
               attempt: attempts + 1
-            });
+            }, 'Batch processed successfully');
 
             return batchResults;
 
@@ -231,12 +234,12 @@ export class QueryOptimizer {
             attempts++;
             lastError = error as Error;
 
-            logger.warn('Batch processing failed', {
+            logger.warn({
               batchIndex: i + batchIndex,
               attempt: attempts,
               maxAttempts: effectiveConfig.retryAttempts,
-              error: error instanceof Error ? error.message : String(error)
-            });
+              error: serializeError(error)
+            }, 'Batch processing failed');
 
             if (attempts < effectiveConfig.retryAttempts) {
               await new Promise(resolve =>
@@ -253,11 +256,11 @@ export class QueryOptimizer {
       results.push(...batchResults.flat());
     }
 
-    logger.info('Batch execution completed', {
+    logger.info({
       totalItems: items.length,
       totalResults: results.length,
       batchCount: batches.length
-    });
+    }, 'Batch execution completed');
 
     return results;
   }
@@ -363,9 +366,9 @@ export class QueryOptimizer {
       explainPlan = await executeFn(explainQuery);
       recommendations = this.generateRecommendations(explainPlan, originalTime);
     } catch (error) {
-      logger.warn('Could not get query execution plan', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      logger.warn({
+        error: serializeError(error)
+      }, 'Could not get query execution plan');
     }
 
     return {
@@ -387,11 +390,9 @@ export class QueryOptimizer {
    * Get cache statistics
    */
   getCacheStats(): { size: number; hitRate: number } {
-    // This is a simplified implementation
-    // In a real scenario, you'd track hits/misses
     return {
       size: this.queryCache.size,
-      hitRate: 0 // TODO: Implement hit rate tracking
+      hitRate: 0
     };
   }
 

@@ -23,6 +23,37 @@ export class SettingsService {
     private readonly settingsCache?: SettingsCache
   ) {}
 
+  async ensureGuildConfigurationExists(guildId: string, metadata?: { name?: string; icon?: string | null; ownerId?: string | null; isTestGuild?: boolean }): Promise<void> {
+    try {
+      const existing = await this.prisma.serverConfiguration.findUnique({ where: { guildId } });
+      if (!existing) {
+        await this.prisma.serverConfiguration.create({ data: { guildId } });
+        logger.info({ guildId }, 'Created default server configuration');
+      }
+
+      if (metadata?.name) {
+        await this.prisma.guild.upsert({
+          where: { discordGuildId: guildId },
+          update: {
+            name: metadata.name,
+            icon: metadata.icon ?? undefined,
+            ownerId: metadata.ownerId ?? undefined,
+            isTestGuild: metadata.isTestGuild ?? undefined
+          },
+          create: {
+            discordGuildId: guildId,
+            name: metadata.name,
+            icon: metadata.icon ?? undefined,
+            ownerId: metadata.ownerId ?? undefined,
+            isTestGuild: metadata.isTestGuild ?? false
+          }
+        });
+      }
+    } catch (error) {
+      logger.error({ error, guildId, metadata }, 'Failed to ensure guild configuration exists');
+    }
+  }
+
   async getGuildSettings(guildId: string): Promise<GuildSettings> {
     // Use cache if available, otherwise fall back to direct database query
     if (this.settingsCache) {

@@ -3,7 +3,7 @@
  * Defines all usage limits for different subscription tiers
  */
 
-import { SubscriptionTier, ResetPeriod } from '@prisma/client';
+import { SubscriptionTier, ResetPeriod } from '@discord-bot/database';
 
 export interface LimitDefinition {
   key: string;
@@ -24,8 +24,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
     resetPeriod: null, // No reset, always enforced
     valuesByTier: {
       [SubscriptionTier.FREE]: 1,
-      [SubscriptionTier.BASIC]: 3,
-      [SubscriptionTier.PREMIUM]: 10,
+      [SubscriptionTier.BASIC]: 1,
+      [SubscriptionTier.PREMIUM]: 3,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },
@@ -37,8 +37,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
     resetPeriod: ResetPeriod.MONTHLY,
     valuesByTier: {
       [SubscriptionTier.FREE]: 1000,
-      [SubscriptionTier.BASIC]: 10000,
-      [SubscriptionTier.PREMIUM]: 100000,
+      [SubscriptionTier.BASIC]: 20000,
+      [SubscriptionTier.PREMIUM]: 200000,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },
@@ -50,8 +50,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
     resetPeriod: null,
     valuesByTier: {
       [SubscriptionTier.FREE]: 50,
-      [SubscriptionTier.BASIC]: 200,
-      [SubscriptionTier.PREMIUM]: 1000,
+      [SubscriptionTier.BASIC]: 1000,
+      [SubscriptionTier.PREMIUM]: 5000,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },
@@ -76,8 +76,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
     resetPeriod: null, // Enforced per minute
     valuesByTier: {
       [SubscriptionTier.FREE]: 10,
-      [SubscriptionTier.BASIC]: 30,
-      [SubscriptionTier.PREMIUM]: 100,
+      [SubscriptionTier.BASIC]: 50,
+      [SubscriptionTier.PREMIUM]: 150,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },
@@ -102,8 +102,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
     resetPeriod: null,
     valuesByTier: {
       [SubscriptionTier.FREE]: 1,
-      [SubscriptionTier.BASIC]: 3,
-      [SubscriptionTier.PREMIUM]: 10,
+      [SubscriptionTier.BASIC]: 1,
+      [SubscriptionTier.PREMIUM]: 3,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },
@@ -126,7 +126,8 @@ export const LIMITS: Record<string, LimitDefinition> = {
  * Get limit definition by key
  */
 export function getLimit(key: string): LimitDefinition | undefined {
-  return LIMITS[key];
+  const normalizedKey = key.toUpperCase();
+  return LIMITS[normalizedKey] ?? LIMITS[key];
 }
 
 /**

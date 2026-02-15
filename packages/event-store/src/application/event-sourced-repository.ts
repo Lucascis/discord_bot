@@ -4,6 +4,9 @@ import { logger } from '@discord-bot/logger';
 import type { DomainEvent, EventMetadata } from '../domain/event.js';
 import type { IEventStore } from '../domain/event-store.js';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Event Sourced Aggregate Root
  * Base class for aggregates that use event sourcing
@@ -149,11 +152,11 @@ export abstract class EventSourcedRepository<T extends EventSourcedAggregateRoot
       return aggregate;
 
     } catch (error) {
-      logger.error('Failed to load aggregate', {
+      logger.error({
         aggregateId,
         aggregateType: this.getAggregateType(),
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to load aggregate');
       throw error;
     }
   }
@@ -179,19 +182,19 @@ export abstract class EventSourcedRepository<T extends EventSourcedAggregateRoot
 
       aggregate.markEventsAsCommitted();
 
-      logger.debug('Aggregate saved successfully', {
+      logger.debug({
         aggregateId: aggregate.aggregateId,
         aggregateType: this.getAggregateType(),
         eventCount: events.length,
         newVersion: aggregate.version
-      });
+      }, 'Aggregate saved successfully');
 
     } catch (error) {
-      logger.error('Failed to save aggregate', {
+      logger.error({
         aggregateId: aggregate.aggregateId,
         aggregateType: this.getAggregateType(),
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to save aggregate');
       throw error;
     }
   }

@@ -15,16 +15,15 @@ describe('autoplay helpers', () => {
   });
 
   it('builds candidates with ytsearch fallbacks', () => {
-    const c = buildAutomixCandidates('Song', 'Artist', '');
+    const c = buildAutomixCandidates('Song', 'Artist');
     const joined = c.join(' | ');
     expect(joined).toContain('ytmsearch:');
     expect(joined).toContain('ytsearch:');
     expect(joined).toContain('official');
   });
 
-  it('includes spsearch when uri is spotify track', () => {
-    const c = buildAutomixCandidates('Song', 'Artist', 'https://open.spotify.com/track/abc');
+  it('includes spsearch when artist/title available', () => {
+    const c = buildAutomixCandidates('Song', 'Artist');
     expect(c.some((q) => q.startsWith('spsearch:'))).toBe(true);
   });
 });
-

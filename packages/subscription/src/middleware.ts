@@ -3,7 +3,7 @@
  * Middleware for verifying subscription access and limits
  */
 
-import { SubscriptionTier } from '@prisma/client';
+import { SubscriptionTier } from '@discord-bot/database';
 import { SubscriptionService } from './subscription-service.js';
 import { needsUpgrade } from './plans.js';
 import type {
@@ -13,7 +13,7 @@ import type {
 } from './types.js';
 
 export class SubscriptionMiddleware {
-  constructor(private readonly subscriptionService: SubscriptionService) {}
+  constructor(private readonly subscriptionService: SubscriptionService) { }
 
   /**
    * Check if guild has required subscription tier
@@ -180,7 +180,7 @@ export class SubscriptionMiddleware {
    * Get tier benefits for display
    */
   private getTierBenefits(tier: SubscriptionTier): string[] {
-    const benefits: Record<SubscriptionTier, string[]> = {
+    const benefits = {
       [SubscriptionTier.FREE]: [
         '1 concurrent playback',
         'Basic commands',
@@ -213,8 +213,10 @@ export class SubscriptionMiddleware {
         'SLA guarantee',
         'White-label option',
       ],
-    };
+    } as const;
 
-    return benefits[tier] || [];
+    const tierKey = tier as unknown as keyof typeof benefits;
+    const tierBenefits = benefits[tierKey] ?? [];
+    return [...tierBenefits];
   }
 }

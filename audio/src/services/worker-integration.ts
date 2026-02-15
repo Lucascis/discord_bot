@@ -7,7 +7,7 @@
  * Following best practices for microservices communication via Redis pub/sub.
  */
 
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 import { env } from '@discord-bot/config';
 import { logger } from '@discord-bot/logger';
 import type { Track } from 'lavalink-client';
@@ -15,14 +15,21 @@ import type { Track } from 'lavalink-client';
 /**
  * Redis client for Worker Service communication
  */
-const workerRedis = createClient({ url: env.REDIS_URL });
+const workerRedis = new Redis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: true,
+  lazyConnect: true
+});
 
 /**
  * Initialize Worker Service integration
  */
 export async function initializeWorkerIntegration(): Promise<void> {
   try {
-    await workerRedis.connect();
+    const status = workerRedis.status as string;
+    if (status !== 'ready' && status !== 'connecting') {
+      await workerRedis.connect();
+    }
     logger.info('[Audio] Worker Service integration initialized');
   } catch (error) {
     logger.error({ error }, '[Audio] Failed to initialize Worker Service integration');
@@ -292,7 +299,7 @@ export async function checkWorkerIntegrationHealth(): Promise<{
     return {
       healthy: pingResult === 'PONG',
       details: {
-        connected: workerRedis.isReady,
+        connected: (workerRedis.status as string) === 'ready',
         ping: pingResult
       }
     };

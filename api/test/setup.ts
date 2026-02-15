@@ -6,12 +6,29 @@ import { setPlanOverrides, PLAN_TEMPLATES } from '@discord-bot/subscription';
 // ===================================================================
 // This ensures mocks are set up BEFORE app.ts imports and creates Redis connections
 
+type MessageHandler = (...args: unknown[]) => void;
+
 // Create mocks in hoisted scope
-const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoisted(() => {
+const {
+  getMockResponseRegistry,
+  setMockRedisResponse,
+  clearMockRedisResponses
+} = vi.hoisted(() => {
   const mockResponseRegistry = new Map<string, unknown>();
 
-  class MockRedis {
-  private messageHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
+  return {
+    getMockResponseRegistry: () => mockResponseRegistry,
+    setMockRedisResponse: (requestType: string, response: unknown): void => {
+      mockResponseRegistry.set(requestType, response);
+    },
+    clearMockRedisResponses: (): void => {
+      mockResponseRegistry.clear();
+    }
+  };
+});
+
+class MockRedis {
+  private messageHandlers = new Map<string, Array<MessageHandler>>();
   public status: string = 'ready';
 
   constructor(_url?: string) {}
@@ -40,7 +57,7 @@ const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoi
     try {
       const request = JSON.parse(message);
       const { requestId, type } = request;
-      const mockResponse = mockResponseRegistry.get(type);
+      const mockResponse = getMockResponseRegistry().get(type);
 
       if (mockResponse && requestId) {
         // Determine response channel based on request type
@@ -78,7 +95,7 @@ const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoi
   });
 
   // Event Emitter
-  on = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+  on = vi.fn().mockImplementation((event: string, handler: MessageHandler) => {
     if (!this.messageHandlers.has(event)) {
       this.messageHandlers.set(event, []);
     }
@@ -86,8 +103,8 @@ const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoi
     return this;
   });
 
-  once = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
-    const wrappedHandler = (...args: unknown[]) => {
+  once = vi.fn().mockImplementation((event: string, handler: MessageHandler) => {
+    const wrappedHandler: MessageHandler = (...args: unknown[]) => {
       handler(...args);
       const handlers = this.messageHandlers.get(event) || [];
       const index = handlers.indexOf(wrappedHandler);
@@ -96,7 +113,7 @@ const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoi
     return this.on(event, wrappedHandler);
   });
 
-  off = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
+  off = vi.fn().mockImplementation((event: string, handler: MessageHandler) => {
     const handlers = this.messageHandlers.get(event) || [];
     const index = handlers.indexOf(handler);
     if (index > -1) handlers.splice(index, 1);
@@ -140,37 +157,25 @@ const { MockRedisClass, setMockRedisResponse, clearMockRedisResponses } = vi.hoi
     set: vi.fn().mockReturnThis(),
     del: vi.fn().mockReturnThis(),
   });
-  }
-
-  return {
-    MockRedisClass: MockRedis,
-    globalMockResponseRegistry: mockResponseRegistry,
-    setMockRedisResponse: (requestType: string, response: unknown): void => {
-      mockResponseRegistry.set(requestType, response);
-    },
-    clearMockRedisResponses: (): void => {
-      mockResponseRegistry.clear();
-    }
-  };
-});
+}
 
 // Create singleton instance BEFORE mocking ioredis
-const mockRedisInstance = new MockRedisClass();
+const mockRedisInstance = new MockRedis();
 
 // Mock ioredis module with HOISTED mock - all instances share same mock
 vi.mock('ioredis', () => ({
-  default: class extends MockRedisClass {
-    constructor(...args: unknown[]) {
-      super(...args);
+  default: class extends MockRedis {
+    constructor(..._args: ConstructorParameters<typeof MockRedis>) {
+      super();
       // Return the singleton instance methods to share state
-      return mockRedisInstance as unknown as InstanceType<typeof MockRedisClass>;
+      return mockRedisInstance as unknown as InstanceType<typeof MockRedis>;
     }
   },
-  Redis: class extends MockRedisClass {
-    constructor(...args: unknown[]) {
-      super(...args);
+  Redis: class extends MockRedis {
+    constructor(..._args: ConstructorParameters<typeof MockRedis>) {
+      super();
       // Return the singleton instance methods to share state
-      return mockRedisInstance as unknown as InstanceType<typeof MockRedisClass>;
+      return mockRedisInstance as unknown as InstanceType<typeof MockRedis>;
     }
   }
 }));
@@ -199,6 +204,49 @@ vi.mock('@discord-bot/database', () => {
   const createMockFn = () => vi.fn();
 
   return {
+    SubscriptionTier: {
+      FREE: 'FREE',
+      BASIC: 'BASIC',
+      PREMIUM: 'PREMIUM',
+      ENTERPRISE: 'ENTERPRISE',
+      GOLD: 'GOLD',
+      DIAMOND: 'DIAMOND'
+    },
+    SubscriptionStatus: {
+      ACTIVE: 'ACTIVE',
+      CANCELED: 'CANCELED',
+      PAST_DUE: 'PAST_DUE',
+      TRIALING: 'TRIALING',
+      INCOMPLETE: 'INCOMPLETE',
+      UNPAID: 'UNPAID'
+    },
+    BillingInterval: {
+      MONTHLY: 'MONTHLY',
+      YEARLY: 'YEARLY',
+      WEEKLY: 'WEEKLY',
+      DAILY: 'DAILY'
+    },
+    FeatureCategory: {
+      AUDIO_QUALITY: 'AUDIO_QUALITY',
+      PLAYBACK_LIMITS: 'PLAYBACK_LIMITS',
+      ADVANCED_FEATURES: 'ADVANCED_FEATURES',
+      ANALYTICS: 'ANALYTICS',
+      SUPPORT: 'SUPPORT'
+    },
+    ResetPeriod: {
+      HOURLY: 'HOURLY',
+      DAILY: 'DAILY',
+      WEEKLY: 'WEEKLY',
+      MONTHLY: 'MONTHLY'
+    },
+    InvoiceStatus: {
+      DRAFT: 'DRAFT',
+      OPEN: 'OPEN',
+      PAID: 'PAID',
+      VOID: 'VOID',
+      UNCOLLECTIBLE: 'UNCOLLECTIBLE'
+    },
+    Prisma: {},
     prisma: {
       serverConfiguration: {
         findUnique: createMockFn(),
@@ -224,6 +272,7 @@ vi.mock('@discord-bot/database', () => {
       subscriptionPrice: {
         update: createMockFn(),
         create: createMockFn(),
+        findMany: createMockFn(),
       },
       webhookSubscription: {
         upsert: createMockFn(),
@@ -231,6 +280,13 @@ vi.mock('@discord-bot/database', () => {
       },
       subscription: {
         findUnique: createMockFn(),
+      },
+      guild: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: createMockFn(),
+        create: createMockFn(),
+        update: createMockFn(),
       },
       $connect: vi.fn().mockResolvedValue(undefined),
       $disconnect: vi.fn().mockResolvedValue(undefined),
@@ -276,16 +332,15 @@ vi.mock('@discord-bot/logger', () => ({
 // ===================================================================
 // EXPORT HELPERS TO GLOBAL SCOPE (Best Practice for Test Utilities)
 // ===================================================================
-declare global {
-   
-  var mockRedis: InstanceType<typeof MockRedisClass>;
-  function setMockRedisResponse(requestType: string, response: unknown): void;
-  function clearMockRedisResponses(): void;
-}
+const globalForTests = globalThis as typeof globalThis & {
+  mockRedis: InstanceType<typeof MockRedis>;
+  setMockRedisResponse: (requestType: string, response: unknown) => void;
+  clearMockRedisResponses: () => void;
+};
 
-(global as unknown as Record<string, unknown>).mockRedis = mockRedisInstance;
-(global as unknown as Record<string, unknown>).setMockRedisResponse = setMockRedisResponse;
-(global as unknown as Record<string, unknown>).clearMockRedisResponses = clearMockRedisResponses;
+globalForTests.mockRedis = mockRedisInstance;
+globalForTests.setMockRedisResponse = setMockRedisResponse;
+globalForTests.clearMockRedisResponses = clearMockRedisResponses;
 
 // ===================================================================
 // TEST LIFECYCLE HOOKS

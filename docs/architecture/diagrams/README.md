@@ -255,7 +255,7 @@ mmdc -i service-communication.md -o service-communication.png
 - [ARCHITECTURE.md](../../ARCHITECTURE.md) - High-level architecture overview
 - [DEVELOPMENT_GUIDE.md](../../DEVELOPMENT_GUIDE.md) - Development setup and patterns
 - [DEPLOYMENT_GUIDE.md](../../DEPLOYMENT_GUIDE.md) - Production deployment guide
-- [CLAUDE.md](../../../CLAUDE.md) - Claude Code project instructions
+- [ARCHITECTURE.md](../../ARCHITECTURE.md) - System architecture overview
 
 ### Related Diagrams
 - [Project Status](../../PROJECT_STATUS.md) - Current development status
@@ -289,18 +289,18 @@ mmdc -i service-communication.md -o service-communication.png
 ## Contributing
 
 ### Diagram Guidelines
-1. **Clarity over complexity** - Break large diagrams into smaller focused ones
-2. **Consistent naming** - Use same service names as codebase
-3. **Add descriptions** - Every diagram should have context and key topics
-4. **Test rendering** - Verify in multiple viewers before committing
-5. **Update README** - Document new diagrams in this file
+1. **Clarity over complexity** – Break large diagrams into smaller focused ones.
+2. **Consistent naming** – Use the same service names as the codebase and Docker Compose.
+3. **Add descriptions** – Every diagram must include context, purpose, and key topics.
+4. **Validate rendering** – Run `pnpm add -D @mermaid-js/mermaid-cli` and `npx mmdc -i <file> -o /tmp/out.svg` before committing.
+5. **Update README** – Document new diagrams and link them here.
 
 ### Style Guide
-- Use consistent color scheme (see Diagram Conventions)
-- Include legend/key for complex diagrams
-- Add notes for critical information
-- Keep line lengths under 100 characters for readability
-- Use subgraphs to group related components
+- Follow the C4 model notation (System, Container, Component, Deployment).
+- Use standardized classes: `person`, `system`/`container`, `external`, `database`.
+- Keep edge labels short and protocol-specific (e.g., `HTTPS POST`, `Redis Pub/Sub`).
+- Use subgraphs to group related components (e.g., `subgraph Audio Service`).
+- Keep Mermaid lines under ~100 characters for readability.
 
 ### Review Process
 1. Create feature branch: `docs/diagram-[name]`

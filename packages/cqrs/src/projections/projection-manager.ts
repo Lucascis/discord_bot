@@ -1,6 +1,9 @@
 import type { DomainEvent, IEventStore } from '@discord-bot/event-store';
 import { logger } from '@discord-bot/logger';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Projection Interface
  * Defines contract for read model projections
@@ -65,19 +68,19 @@ export class ProjectionManager {
       errorCount: 0
     });
 
-    logger.info('Projection registered', {
+    logger.info({
       projectionName: projection.projectionName,
       eventTypes: projection.eventTypes
-    });
+    }, 'Projection registered');
   }
 
   /**
    * Start all projections
    */
   async startAll(): Promise<void> {
-    logger.info('Starting all projections', {
+    logger.info({
       projectionCount: this.projections.size
-    });
+    }, 'Starting all projections');
 
     for (const [name, _projection] of this.projections) {
       await this.start(name);
@@ -95,7 +98,7 @@ export class ProjectionManager {
 
     const state = this.projectionStates.get(projectionName)!;
     if (state.isRunning) {
-      logger.warn('Projection is already running', { projectionName });
+      logger.warn({ projectionName }, 'Projection is already running');
       return;
     }
 
@@ -111,10 +114,10 @@ export class ProjectionManager {
 
     this.pollingIntervals.set(projectionName, interval);
 
-    logger.info('Projection started', {
+    logger.info({
       projectionName,
       lastProcessedPosition: state.lastProcessedPosition
-    });
+    }, 'Projection started');
 
     // Process initial batch
     await this.processEvents(projectionName);
@@ -148,7 +151,7 @@ export class ProjectionManager {
 
     state.isRunning = false;
 
-    logger.info('Projection stopped', { projectionName });
+    logger.info({ projectionName }, 'Projection stopped');
   }
 
   /**
@@ -191,7 +194,7 @@ export class ProjectionManager {
       await this.start(projectionName);
     }
 
-    logger.info('Projection reset', { projectionName });
+    logger.info({ projectionName }, 'Projection reset');
   }
 
   /**
@@ -217,11 +220,11 @@ export class ProjectionManager {
         return; // No new events
       }
 
-      logger.debug('Processing events for projection', {
+      logger.debug({
         projectionName,
         eventCount: events.length,
         fromPosition: state.lastProcessedPosition
-      });
+      }, 'Processing events for projection');
 
       // Process events sequentially to maintain order
       for (const event of events) {
@@ -237,31 +240,31 @@ export class ProjectionManager {
       state.lastProcessedAt = new Date();
       state.errorCount = 0; // Reset error count on success
 
-      logger.debug('Events processed successfully', {
+      logger.debug({
         projectionName,
         eventsProcessed: events.length,
         newPosition: state.lastProcessedPosition
-      });
+      }, 'Events processed successfully');
 
     } catch (error) {
       state.errorCount++;
       state.lastError = error instanceof Error ? error.message : String(error);
       state.lastErrorAt = new Date();
 
-      logger.error('Error processing events for projection', {
+      logger.error({
         projectionName,
-        error: state.lastError,
+        error: serializeError(error),
         errorCount: state.errorCount,
         position: state.lastProcessedPosition
-      });
+      }, 'Error processing events for projection');
 
       // Stop projection if too many errors
       if (state.errorCount >= this.config.maxRetries) {
-        logger.error('Projection stopped due to too many errors', {
+        logger.error({
           projectionName,
           errorCount: state.errorCount,
           maxRetries: this.config.maxRetries
-        });
+        }, 'Projection stopped due to too many errors');
         await this.stop(projectionName);
       } else {
         // Wait before retrying

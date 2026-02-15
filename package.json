@@ -2,7 +2,7 @@
   "name": "discord-music-bot",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.16.1",
+  "packageManager": "pnpm@10.23.0+sha512.21c4e5698002ade97e4efe8b8b4a89a8de3c85a37919f957e7a0f30f38fbc5bbdd05980ffe29179b2fb6e6e691242e098d945d1601772cad0fef5fb6411e2a4b",
   "scripts": {
     "build": "pnpm -r build",
     "build:clean": "pnpm -r clean && pnpm build",
@@ -18,6 +18,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e:audio": "vitest run --config vitest.e2e.config.ts tests/e2e/audio-audibility.test.ts",
+    "test:e2e:audio:local": "bash -lc 'docker compose -f docker-compose.test.yml --profile infra up -d; vitest run --config vitest.e2e.config.ts tests/e2e/audio-audibility.test.ts; code=$?; docker compose -f docker-compose.test.yml --profile infra down; exit $code'",
+    "test:voice:diag": "vitest run --config vitest.e2e.config.ts tests/e2e/voice-diagnostic.test.ts",
+    "test:voice:diag:main": "pnpm test:voice:diag",
+    "test:e2e:audio:main": "pnpm test:e2e:audio",
+    "test:web:panel:main": "bash ./scripts/panel-web-smoke.sh",
+    "test:voice:smoke:main": "bash ./scripts/voice-panel-smoke.sh",
+    "test:voice:release:main": "bash ./scripts/test-voice-release-main.sh",
+    "diag:voice:microcut": "bash ./scripts/voice-microcut-diag.sh",
+    "env:sync": "node scripts/env-sync.mjs",
+    "env:check": "node scripts/env-check.mjs",
+    "env:security:check": "node scripts/env-security-check.mjs",
     "start": "concurrently \"cd lavalink && java -jar Lavalink.jar\" \"pnpm -r start\" --names \"lavalink,services\" --prefix-colors \"blue,green\"",
     "start:prod": "NODE_ENV=production concurrently \"cd lavalink && java -jar Lavalink.jar\" \"pnpm -r start\" --names \"lavalink,services\" --prefix-colors \"blue,green\"",
     "start:perf": "cross-env NODE_ENV=production node --expose-gc --max-old-space-size=2048 dist/index.js",
@@ -29,38 +41,52 @@
     "postinstall": "pnpm --filter @discord-bot/database prisma:generate",
     "prepare": "husky install",
     "db:migrate": "pnpm --filter @discord-bot/database prisma:migrate",
-    "db:seed": "node --import 'data:text/javascript,import { register } from \"node:module\"; import { pathToFileURL } from \"node:url\"; register(\"ts-node/esm\", pathToFileURL(\"./\"));' packages/database/prisma/seed.ts",
+    "db:migrate:deploy": "pnpm --filter @discord-bot/database prisma:deploy",
+    "db:seed": "tsx packages/database/prisma/seed.ts",
     "db:reset": "pnpm --filter @discord-bot/database prisma:migrate reset",
     "db:studio": "pnpm --filter @discord-bot/database prisma:studio",
     "perf:monitor": "node --expose-gc scripts/performance-monitor.js",
-    "perf:report": "node scripts/generate-perf-report.js"
+    "perf:report": "node scripts/generate-perf-report.js",
+    "deploy:docker:build": "bash ./scripts/deploy-docker-build.sh",
+    "deploy:docker:up": "bash ./scripts/deploy-docker-up.sh",
+    "deploy:docker:rollback": "bash ./scripts/deploy-docker-rollback.sh"
   },
   "devDependencies": {
-    "@commitlint/cli": "^17.7.1",
-    "@commitlint/config-conventional": "^17.7.0",
-    "@eslint/js": "^9.35.0",
-    "@types/node": "^20.11.16",
-    "@typescript-eslint/eslint-plugin": "^8.43.0",
-    "@typescript-eslint/parser": "^8.43.0",
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "@discord-bot/tsconfig": "workspace:*",
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "@types/supertest": "^6.0.3",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "concurrently": "^9.2.1",
     "date-fns": "^4.1.0",
-    "eslint": "^9.35.0",
-    "eslint-config-prettier": "^9.0.0",
-    "globals": "^16.4.0",
-    "husky": "^8.0.3",
-    "prettier": "^3.0.3",
-    "ts-node": "^10.9.1",
-    "typescript": "^5.8.4",
-    "vitest": "^4.0.7"
+    "discord-api-types": "0.38.34",
+    "es-iterator-helpers": "^1.2.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "husky": "^9.1.7",
+    "opusscript": "0.0.8",
+    "prettier": "^3.6.2",
+    "prism-media": "^1.3.5",
+    "stripe": "^20.0.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.13"
   },
   "pnpm": {
     "overrides": {
-      "esbuild": ">=0.25.0"
+      "esbuild": ">=0.25.0",
+      "discord-api-types": "0.38.26"
     },
     "ignoredBuiltDependencies": [
       "esbuild"
     ]
   },
   "dependencies": {
-    "@snazzah/davey": "^0.1.6"
+    "@snazzah/davey": "^0.1.8"
   }
 }

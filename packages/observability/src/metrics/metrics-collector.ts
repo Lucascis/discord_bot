@@ -48,10 +48,10 @@ export class MetricsCollector {
       gcDurationBuckets: [0.001, 0.01, 0.1, 1, 2, 5],
     });
 
-    logger.info('Metrics collector initialized', {
+    logger.info({
       serviceName,
       serviceVersion
-    });
+    }, 'Metrics collector initialized');
   }
 
   /**
@@ -257,13 +257,13 @@ export class MetricsCollector {
         }
       }
     } catch (error) {
-      logger.error('Failed to record custom metric', {
+      logger.error({
         name,
         value,
         labels,
         type,
         error: error instanceof Error ? error.message : String(error)
-      });
+      }, 'Failed to record custom metric');
     }
   }
 

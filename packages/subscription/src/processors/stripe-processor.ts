@@ -8,7 +8,7 @@
  */
 
 import Stripe from 'stripe';
-import { SubscriptionTier, BillingInterval } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import {
   IPaymentProcessor,
@@ -29,7 +29,7 @@ export class StripeProcessor implements IPaymentProcessor {
     }
 
     this.stripe = new Stripe(apiKey, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-11-17.clover',
     });
 
     logger.info('Stripe payment processor initialized');
@@ -183,6 +183,11 @@ export class StripeProcessor implements IPaymentProcessor {
    * Map Stripe subscription to internal format
    */
   private mapStripeSubscription(subscription: Stripe.Subscription): PaymentSubscription {
+    const primaryItem = subscription.items?.data?.[0];
+    const currentPeriodStart =
+      primaryItem?.current_period_start ?? (subscription as unknown as { current_period_start?: number }).current_period_start ?? 0;
+    const currentPeriodEnd =
+      primaryItem?.current_period_end ?? (subscription as unknown as { current_period_end?: number }).current_period_end ?? 0;
     let status: PaymentSubscription['status'];
 
     switch (subscription.status) {
@@ -209,8 +214,8 @@ export class StripeProcessor implements IPaymentProcessor {
       id: subscription.id,
       customerId: subscription.customer as string,
       status,
-      currentPeriodStart: subscription.current_period_start,
-      currentPeriodEnd: subscription.current_period_end,
+      currentPeriodStart,
+      currentPeriodEnd,
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
       metadata: subscription.metadata,
     };

@@ -223,7 +223,7 @@ export class DiscordAudioService implements AudioService {
       const unsubscribe = async () => {
         if (typeof this.redisSubscriber.unsubscribe === 'function') {
           try {
-            await this.redisSubscriber.unsubscribe(responseChannel, messageHandler);
+            await this.redisSubscriber.unsubscribe(responseChannel);
           } catch (error) {
             logger.warn({ error, responseChannel }, 'Failed to unsubscribe response channel');
           }

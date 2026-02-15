@@ -14,6 +14,9 @@ import {
   type EventStoreConfig
 } from '../domain/event-store.js';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * PostgreSQL Event Store Implementation
  * Uses Prisma ORM for data persistence
@@ -77,23 +80,23 @@ export class PostgresEventStore implements IEventStore {
         }
       });
 
-      logger.info('Events appended successfully', {
+      logger.info({
         aggregateId,
         aggregateType,
         eventCount: events.length,
         newVersion: expectedVersion + events.length
-      });
+      }, 'Events appended successfully');
 
     } catch (error) {
       if (error instanceof ConcurrencyException) {
         throw error;
       }
 
-      logger.error('Failed to append events', {
+      logger.error({
         aggregateId,
         aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to append events');
 
       throw new EventStoreException(
         `Failed to append events for ${aggregateType}:${aggregateId}`,
@@ -141,11 +144,11 @@ export class PostgresEventStore implements IEventStore {
       };
 
     } catch (error) {
-      logger.error('Failed to get aggregate events', {
+      logger.error({
         aggregateId,
         aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to get aggregate events');
 
       throw new EventStoreException(
         `Failed to get events for ${aggregateType}:${aggregateId}`,
@@ -177,9 +180,9 @@ export class PostgresEventStore implements IEventStore {
       return events.map(this.mapToDomainEvent);
 
     } catch (error) {
-      logger.error('Failed to get global events', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      logger.error({
+        error: serializeError(error)
+      }, 'Failed to get global events');
 
       throw new EventStoreException(
         'Failed to get global events',
@@ -211,10 +214,10 @@ export class PostgresEventStore implements IEventStore {
       return events.map(this.mapToDomainEvent);
 
     } catch (error) {
-      logger.error('Failed to get events by type', {
+      logger.error({
         eventType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to get events by type');
 
       throw new EventStoreException(
         `Failed to get events by type: ${eventType}`,
@@ -246,18 +249,18 @@ export class PostgresEventStore implements IEventStore {
         }
       });
 
-      logger.info('Snapshot saved', {
+      logger.info({
         aggregateId: snapshot.aggregateId,
         aggregateType: snapshot.aggregateType,
         version: snapshot.version
-      });
+      }, 'Snapshot saved');
 
     } catch (error) {
-      logger.error('Failed to save snapshot', {
+      logger.error({
         aggregateId: snapshot.aggregateId,
         aggregateType: snapshot.aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to save snapshot');
 
       throw new EventStoreException(
         `Failed to save snapshot for ${snapshot.aggregateType}:${snapshot.aggregateId}`,
@@ -293,11 +296,11 @@ export class PostgresEventStore implements IEventStore {
       };
 
     } catch (error) {
-      logger.error('Failed to load snapshot', {
+      logger.error({
         aggregateId,
         aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to load snapshot');
 
       throw new EventStoreException(
         `Failed to load snapshot for ${aggregateType}:${aggregateId}`,
@@ -327,11 +330,11 @@ export class PostgresEventStore implements IEventStore {
       return result?.aggregateVersion ?? 0;
 
     } catch (error) {
-      logger.error('Failed to get aggregate version', {
+      logger.error({
         aggregateId,
         aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to get aggregate version');
 
       throw new EventStoreException(
         `Failed to get version for ${aggregateType}:${aggregateId}`,
@@ -355,11 +358,11 @@ export class PostgresEventStore implements IEventStore {
       return count > 0;
 
     } catch (error) {
-      logger.error('Failed to check if aggregate exists', {
+      logger.error({
         aggregateId,
         aggregateType,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Failed to check if aggregate exists');
 
       return false;
     }
@@ -400,11 +403,11 @@ export class PostgresEventStore implements IEventStore {
   ): Promise<void> {
     // This would be implemented based on the specific aggregate type
     // For now, we'll skip automatic snapshot creation
-    logger.debug('Snapshot needed but not implemented for automatic creation', {
+    logger.debug({
       aggregateId,
       aggregateType,
       version
-    });
+    }, 'Snapshot needed but not implemented for automatic creation');
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

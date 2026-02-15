@@ -3,6 +3,7 @@ import { logger } from '@discord-bot/logger';
 
 export interface CommandProcessorOptions {
   concurrency?: number;
+  controlConcurrency?: number;
   retryAttempts?: number;
 }
 
@@ -39,8 +40,21 @@ export class CommandProcessor {
         { count: this.options.concurrency || 5, block: 1000 }
       );
 
+      // Dedicated low-latency consumer for control-path commands.
+      await redisStreams.startConsumer(
+        RedisStreamsManager.STREAMS.AUDIO_CONTROLS,
+        RedisStreamsManager.CONSUMER_GROUPS.AUDIO_CONTROLS_PROCESSORS,
+        this.consumerName,
+        this.handleCommand,
+        { count: this.options.controlConcurrency || 12, block: 500 }
+      );
+
       this.isInitialized = true;
-      logger.info({ consumerName: this.consumerName }, 'CommandProcessor initialized successfully');
+      logger.info({
+        consumerName: this.consumerName,
+        commandStream: RedisStreamsManager.STREAMS.AUDIO_COMMANDS,
+        controlsStream: RedisStreamsManager.STREAMS.AUDIO_CONTROLS
+      }, 'CommandProcessor initialized successfully');
     } catch (error) {
       logger.error({ error }, 'Failed to initialize CommandProcessor');
       throw error;
@@ -62,6 +76,10 @@ export class CommandProcessor {
     try {
       const commandData: StreamCommandData = message.data as StreamCommandData;
       const { type, requestId, guildId } = commandData;
+      const enqueuedAtRaw = commandData.enqueuedAt ?? commandData.timestamp;
+      const enqueuedAt = Number.parseInt(String(enqueuedAtRaw ?? ''), 10);
+      const commandLatencyMs = Number.isFinite(enqueuedAt) ? Math.max(0, Date.now() - enqueuedAt) : undefined;
+      const priority = commandData.priority ?? 'normal';
 
       // Validate command data - ensure type field exists
       if (!type) {
@@ -87,7 +105,9 @@ export class CommandProcessor {
         messageId: message.id,
         type,
         requestId,
-        guildId
+        guildId,
+        priority,
+        ...(commandLatencyMs !== undefined ? { control_command_latency_ms: commandLatencyMs } : {})
       }, 'Processing command from stream');
 
       // Find command handler
@@ -211,14 +231,16 @@ export class CommandProcessor {
    * Shutdown the service and clean up resources
    */
   async shutdown(): Promise<void> {
-    logger.info('Shutting down CommandProcessor...');
+      logger.info('Shutting down CommandProcessor...');
 
     // Clear handlers
     this.commandHandlers.clear();
 
     // Stop consumer
-    const consumerKey = `${RedisStreamsManager.STREAMS.AUDIO_COMMANDS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_PROCESSORS}:${this.consumerName}`;
-    redisStreams.stopConsumer(consumerKey);
+    const commandConsumerKey = `${RedisStreamsManager.STREAMS.AUDIO_COMMANDS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_PROCESSORS}:${this.consumerName}`;
+    const controlsConsumerKey = `${RedisStreamsManager.STREAMS.AUDIO_CONTROLS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_CONTROLS_PROCESSORS}:${this.consumerName}`;
+    redisStreams.stopConsumer(commandConsumerKey);
+    redisStreams.stopConsumer(controlsConsumerKey);
 
     this.isInitialized = false;
     logger.info('CommandProcessor shutdown complete');

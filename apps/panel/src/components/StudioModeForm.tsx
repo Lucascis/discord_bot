@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { GuildSettings, UpdateGuildSettingsInput } from '@/lib/guild-client';
 
 interface Props {
@@ -17,13 +17,28 @@ export function StudioModeForm({ settings, disabled, onSave }: Props) {
     allowExplicitContent: settings.allowExplicitContent,
     defaultSearchSource: settings.defaultSearchSource,
     announceNowPlaying: settings.announceNowPlaying,
-    deleteInvokeMessage: settings.deleteInvokeMessage
+    deleteInvokeMessage: settings.deleteInvokeMessage,
+    uiTheme: settings.uiTheme ?? {
+      playingColor: '#6A0DAD',
+      pausedColor: '#FFAA00'
+    }
   });
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
 
   const handleChange = (field: keyof UpdateGuildSettingsInput, value: string | number | boolean) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleThemeChange = (field: 'playingColor' | 'pausedColor', value: string) => {
+    setFormState((prev) => ({
+      ...prev,
+      uiTheme: {
+        playingColor: prev.uiTheme?.playingColor ?? '#6A0DAD',
+        pausedColor: prev.uiTheme?.pausedColor ?? '#FFAA00',
+        [field]: value
+      }
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,6 +55,22 @@ export function StudioModeForm({ settings, disabled, onSave }: Props) {
       setMessage('No pudimos guardar los cambios');
     }
   };
+
+  useEffect(() => {
+    setFormState({
+      defaultVolume: settings.defaultVolume,
+      autoplay: settings.autoplay,
+      maxQueueSize: settings.maxQueueSize,
+      allowExplicitContent: settings.allowExplicitContent,
+      defaultSearchSource: settings.defaultSearchSource,
+      announceNowPlaying: settings.announceNowPlaying,
+      deleteInvokeMessage: settings.deleteInvokeMessage,
+      uiTheme: settings.uiTheme ?? {
+        playingColor: '#6A0DAD',
+        pausedColor: '#FFAA00'
+      }
+    });
+  }, [settings]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" aria-live="polite">
@@ -96,7 +127,7 @@ export function StudioModeForm({ settings, disabled, onSave }: Props) {
             onChange={(e) => handleChange('announceNowPlaying', e.target.checked)}
             disabled={disabled}
           />
-          <span className="text-sm">Anunciar "Now Playing"</span>
+          <span className="text-sm">Anunciar &quot;Now Playing&quot;</span>
         </label>
         <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
           <input
@@ -122,6 +153,29 @@ export function StudioModeForm({ settings, disabled, onSave }: Props) {
           <option value="soundcloud">SoundCloud</option>
         </select>
       </label>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-white/70">Color principal (Discord UI)</span>
+          <input
+            type="color"
+            value={formState.uiTheme?.playingColor ?? '#6A0DAD'}
+            onChange={(e) => handleThemeChange('playingColor', e.target.value)}
+            className="h-10 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2"
+            disabled={disabled}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-white/70">Color en pausa</span>
+          <input
+            type="color"
+            value={formState.uiTheme?.pausedColor ?? '#FFAA00'}
+            onChange={(e) => handleThemeChange('pausedColor', e.target.value)}
+            className="h-10 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2"
+            disabled={disabled}
+          />
+        </label>
+      </div>
 
       <button
         type="submit"

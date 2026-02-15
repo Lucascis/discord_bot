@@ -12,15 +12,16 @@ import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
 import http from 'node:http';
 import { Registry, collectDefaultMetrics, Gauge, Counter, Histogram } from 'prom-client';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+// import { NodeSDK } from '@opentelemetry/sdk-node';
+// import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+// import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
 // Worker service imports
 import { initializeRedis, checkRedisHealth, redisClient, redisPubSub, redisBlocking } from './utils/redis-client.js';
 import { initializeAllWorkers, getWorkerStats, getJobMetrics, checkWorkersHealth } from './workers/bullmq-worker.js';
 import { initializeGracefulShutdown, addCleanupFunction, getShutdownHealth } from './utils/graceful-shutdown.js';
 import { scheduleDailyCleanup } from './queues/cleanup-queue.js';
+import { generateDashboardMetrics, generateGuildAnalytics } from './services/analytics-service.js';
 
 /**
  * Service state tracking
@@ -107,6 +108,69 @@ function updateMetrics(): void {
   } catch (error) {
     logger.error({ error }, 'Failed to update Prometheus metrics');
   }
+}
+
+async function initializeAnalyticsResponder(): Promise<void> {
+  const channel = 'discord-bot:analytics-request';
+
+  const handleMessage = async (_channel: string, message: string) => {
+    try {
+      const payload = JSON.parse(message) as {
+        requestId: string;
+        type: string;
+        guildId?: string;
+        period?: string;
+        [key: string]: unknown;
+      };
+
+      const responseChannel = `analytics-response:${payload.requestId}`;
+      if (!payload.requestId || !payload.type) {
+        await redisClient.publish(responseChannel, JSON.stringify({
+          error: { message: 'invalid_request' }
+        }));
+        return;
+      }
+
+      if (payload.type === 'DASHBOARD_METRICS') {
+        logger.info({ requestId: payload.requestId }, 'Handling dashboard metrics request');
+        const data = await generateDashboardMetrics();
+        await redisClient.publish(responseChannel, JSON.stringify({ data }));
+        return;
+      }
+
+      if (payload.type === 'GUILD_ANALYTICS') {
+        if (!payload.guildId) {
+          await redisClient.publish(responseChannel, JSON.stringify({
+            error: { message: 'guildId required', code: 'VALIDATION_ERROR' }
+          }));
+          return;
+        }
+        logger.info({ requestId: payload.requestId, guildId: payload.guildId }, 'Handling guild analytics request');
+        const data = await generateGuildAnalytics(payload.guildId, typeof payload.period === 'string' ? payload.period : 'week');
+        await redisClient.publish(responseChannel, JSON.stringify({ data }));
+        return;
+      }
+
+      await redisClient.publish(responseChannel, JSON.stringify({
+        error: { message: `unsupported request type ${payload.type}`, code: 'UNSUPPORTED_TYPE' }
+      }));
+    } catch (error) {
+      logger.error({ error }, 'Failed to handle analytics request');
+    }
+  };
+
+  await redisPubSub.subscribe(channel);
+  redisPubSub.on('message', handleMessage);
+  addCleanupFunction(async () => {
+    redisPubSub.removeListener('message', handleMessage);
+    try {
+      await redisPubSub.unsubscribe(channel);
+    } catch (error) {
+      logger.warn({ error }, 'Failed to unsubscribe analytics channel during shutdown');
+    }
+  });
+
+  logger.info('Analytics responder subscribed to redis channel');
 }
 
 /**
@@ -236,7 +300,11 @@ async function initializeWorkerService(): Promise<void> {
     logger.info('Scheduling recurring cleanup jobs...');
     await scheduleDailyCleanup();
 
-    // 5. Start HTTP server
+    // 5. Initialize analytics responder
+    logger.info('Initializing analytics responder...');
+    await initializeAnalyticsResponder();
+
+    // 6. Start HTTP server
     const port = env.WORKER_HTTP_PORT || 3003;
     await new Promise<void>((resolve) => {
       healthServer.listen(port, () => {
@@ -245,10 +313,10 @@ async function initializeWorkerService(): Promise<void> {
       });
     });
 
-    // 6. Set up periodic metrics updates
+    // 7. Set up periodic metrics updates
     setInterval(updateMetrics, 30000); // Update every 30 seconds
 
-    // 7. Add cleanup functions for graceful shutdown
+    // 8. Add cleanup functions for graceful shutdown
     addCleanupFunction(async () => {
       logger.info('Closing HTTP server...');
       await new Promise<void>((resolve) => {
@@ -281,6 +349,7 @@ async function initializeWorkerService(): Promise<void> {
 /**
  * OpenTelemetry setup
  */
+/*
 if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
   const sdk = new NodeSDK({
     traceExporter: new OTLPTraceExporter({ url: env.OTEL_EXPORTER_OTLP_ENDPOINT }),
@@ -289,6 +358,7 @@ if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
   void sdk.start();
   logger.info('OpenTelemetry initialized');
 }
+*/
 
 /**
  * Start the service

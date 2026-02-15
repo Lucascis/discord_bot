@@ -744,8 +744,7 @@ export class BillingManagementUseCase {
   async processUpgrade(
     subscription: FeatureSubscription,
     newTier: SubscriptionTier,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    customerData: CustomerData // TODO: [STRIPE-INTEGRATION] Use customerData for Stripe customer update. See TECHNICAL_DEBT_AND_DECISIONS.md
+    _customerData: CustomerData
   ): Promise<{ success: boolean; billingCalculation?: BillingCalculation; error?: string }> {
     try {
       // Calculate upgrade cost
@@ -822,10 +821,8 @@ export class BillingManagementUseCase {
    */
   async convertTrialToPaid(
     subscription: FeatureSubscription,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    paymentMethodId: string, // TODO: [STRIPE-INTEGRATION] Use paymentMethodId to attach payment method to customer. See TECHNICAL_DEBT_AND_DECISIONS.md
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    customerData: CustomerData // TODO: [STRIPE-INTEGRATION] Use customerData for Stripe customer creation. See TECHNICAL_DEBT_AND_DECISIONS.md
+    _paymentMethodId: string,
+    _customerData: CustomerData
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ success: boolean; billingSetup?: any; error?: string }> {
     try {

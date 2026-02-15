@@ -1,18 +1,33 @@
-import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import {
+  ChatInputCommandInteraction,
+  MessageFlags,
+  Interaction,
+  ButtonInteraction,
+  StringSelectMenuInteraction
+} from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { logger } from '@discord-bot/logger';
 import { safeValidateCommand } from '@discord-bot/cache';
+import type { AudioCommand } from '@discord-bot/audio-control';
+import { randomUUID } from 'node:crypto';
 import { MusicUIBuilder } from '../ui/music-ui-builder.js';
 import { InteractionResponseHandler } from '../ui/interaction-response-handler.js';
 import { SettingsService } from '../../services/settings-service.js';
 import { DiscordPermissionService } from '../../infrastructure/discord/discord-permission-service.js';
 import { subscriptionMiddleware } from '../../middleware/subscription-middleware.js';
 
+import { AudioCommandService } from '../../services/audio-command-service.js';
+import { MusicSessionRepository } from '../../domain/repositories/music-session-repository.js';
+import { GuildId } from '../../domain/value-objects/guild-id.js';
+
 /**
  * Music Controller
  * Professional implementation for Discord music bot functionality
  */
 export class MusicController {
+  private readonly reconnectCooldownMs = 15_000;
+  private readonly signallingGraceMs = 2_000;
+  private readonly reconnectAllowedAtByGuild = new Map<string, number>();
 
   constructor(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,9 +36,393 @@ export class MusicController {
     private readonly responseHandler: InteractionResponseHandler,
     private readonly settingsService: SettingsService,
     private readonly permissionService: DiscordPermissionService,
-    private readonly registerProcessingMessage?: (guildId: string, channelId: string, messageId: string) => void,
-    private readonly clearUIBlock?: (guildId: string, channelId: string) => void
+    private readonly musicSessionRepository: MusicSessionRepository,
+    private readonly audioCommandService: AudioCommandService,
+    private readonly registerProcessingMessage?: (guildId: string, channelId: string, messageId: string, voiceChannelId?: string | null) => void,
+    private readonly clearUIBlock?: (guildId: string, channelId: string, voiceChannelId?: string | null) => void,
+    private readonly shouldForceVoiceReconnect?: (guildId: string) => boolean,
+    private readonly publishCachedVoiceStateUpdate?: (guildId: string, voiceChannelId?: string) => Promise<boolean>,
+    private readonly publishCachedVoiceServerUpdate?: (guildId: string) => Promise<void>,
+    private readonly registerVoiceRequestContext?: (guildId: string, requestId: string, voiceChannelId: string) => void
   ) {
+  }
+
+  private canReconnectVoice(guildId: string): { allowed: boolean; retryAfterMs: number } {
+    const now = Date.now();
+    const allowedAt = this.reconnectAllowedAtByGuild.get(guildId) ?? 0;
+    if (allowedAt <= now) {
+      return { allowed: true, retryAfterMs: 0 };
+    }
+    return { allowed: false, retryAfterMs: allowedAt - now };
+  }
+
+  private markVoiceReconnect(guildId: string): void {
+    this.reconnectAllowedAtByGuild.set(guildId, Date.now() + this.reconnectCooldownMs);
+  }
+
+  async handleInteraction(interaction: Interaction): Promise<void> {
+    if (interaction.isChatInputCommand()) {
+      await this.handleCommand(interaction);
+    } else if (interaction.isButton()) {
+      await this.handleButton(interaction);
+    } else if (interaction.isStringSelectMenu()) {
+      await this.handleSelectMenu(interaction);
+    }
+  }
+
+  async handleButton(interaction: ButtonInteraction): Promise<void> {
+    const customId = interaction.customId;
+
+    logger.info({
+      guildId: interaction.guildId,
+      customId,
+      userId: interaction.user.id
+    }, 'MusicController: Button interaction received');
+
+    // Handle music control buttons
+    if (customId.startsWith('music_')) {
+      const action = customId.replace('music_', '');
+      const [actionType, actionArg] = action.split(':');
+
+      // Map button actions to commands
+      switch (actionType) {
+        case 'playpause':
+          // Use toggle command which is supported by the backend
+          await this.handleControlInteraction(interaction, 'toggle');
+          break;
+        case 'previous':
+          await this.handleControlInteraction(interaction, 'previous');
+          break;
+        case 'skip':
+          await this.handleControlInteraction(interaction, 'skip');
+          break;
+        case 'stop':
+          await this.handleControlInteraction(interaction, 'stop');
+          break;
+        case 'shuffle':
+          await this.handleControlInteraction(interaction, 'shuffle');
+          break;
+        case 'loop':
+          await this.handleControlInteraction(interaction, 'loop'); // Need to handle loop toggle
+          break;
+        case 'queue':
+          await this.handleQueueButtonInteraction(interaction, 1, false);
+          break;
+        case 'queue_prev': {
+          const currentPage = Number.parseInt(actionArg ?? '1', 10);
+          const page = Number.isFinite(currentPage) ? Math.max(1, currentPage - 1) : 1;
+          await this.handleQueueButtonInteraction(interaction, page, true);
+          break;
+        }
+        case 'queue_next': {
+          const currentPage = Number.parseInt(actionArg ?? '1', 10);
+          const page = Number.isFinite(currentPage) ? Math.max(1, currentPage + 1) : 2;
+          await this.handleQueueButtonInteraction(interaction, page, true);
+          break;
+        }
+        case 'clear':
+          await this.handleControlInteraction(interaction, 'clear');
+          break;
+        case 'mute':
+          await this.handleControlInteraction(interaction, 'mute');
+          break;
+        case 'volume_up':
+          await this.handleRelativeVolumeInteraction(interaction, 10);
+          break;
+        case 'volume_down':
+          await this.handleRelativeVolumeInteraction(interaction, -10);
+          break;
+        case 'filters':
+          // Open filters logic
+          await this.eventBus.publish('discord-bot:panel-commands', JSON.stringify({
+            type: 'open_filters',
+            guildId: interaction.guildId,
+            channelId: interaction.channelId,
+            userId: interaction.user.id
+          }));
+          await interaction.deferUpdate();
+          break;
+        case 'autoplay':
+          await this.handleAutoplayInteraction(interaction);
+          break;
+        // Seek buttons
+        case 'seek_back_30':
+          await this.handleRelativeSeekInteraction(interaction, -30000);
+          break;
+        case 'seek_forward_30':
+          await this.handleRelativeSeekInteraction(interaction, 30000);
+          break;
+      }
+
+      // Acknowledge interaction if not already handled
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.deferUpdate();
+      }
+    } else if (customId.startsWith('filters_')) {
+      // Handle filter panel buttons
+      const action = customId.replace('filters_', '');
+      if (action === 'close') {
+        await interaction.message.delete();
+      } else if (action === 'reset') {
+        if (interaction.guildId) {
+          await this.audioCommandService.sendCommand('filters', interaction.guildId, {
+            action: 'apply',
+            preset: 'flat',
+            userId: interaction.user.id
+          });
+        }
+        await interaction.deferUpdate();
+      }
+    }
+  }
+
+  async handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (interaction.customId === 'filters_select') {
+      const selected = interaction.values[0];
+      if (interaction.guildId) {
+        await this.audioCommandService.sendCommand('filters', interaction.guildId, {
+          action: 'apply',
+          preset: selected,
+          userId: interaction.user.id
+        });
+      }
+      await interaction.deferUpdate();
+    }
+  }
+
+  private normalizeQueuePayload(queueData: unknown, fallbackPage: number): {
+    page: number;
+    totalPages: number;
+    totalTracks: number;
+    tracks: Array<{ title: string; artist?: string; duration?: number; requestedBy: string }>;
+  } {
+    const payload = typeof queueData === 'object' && queueData !== null
+      ? queueData as Record<string, unknown>
+      : {};
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const pageRaw = typeof payload.page === 'number'
+      ? payload.page
+      : Number.parseInt(String(payload.page ?? ''), 10);
+    const totalPagesRaw = typeof payload.totalPages === 'number'
+      ? payload.totalPages
+      : Number.parseInt(String(payload.totalPages ?? ''), 10);
+    const totalTracksRaw = typeof payload.totalTracks === 'number'
+      ? payload.totalTracks
+      : Number.parseInt(String(payload.totalTracks ?? ''), 10);
+
+    const page = Number.isFinite(pageRaw) ? pageRaw : fallbackPage;
+    const parsedTotalPages = Number.isFinite(totalPagesRaw) ? totalPagesRaw : 1;
+    const totalPages = Math.max(1, parsedTotalPages);
+    const totalTracks = Number.isFinite(totalTracksRaw) ? totalTracksRaw : items.length;
+
+    const tracks = items.map((item, index) => {
+      const track = (typeof item === 'object' && item !== null) ? item as Record<string, unknown> : {};
+      const title = typeof track.title === 'string' && track.title.trim().length > 0
+        ? track.title.trim()
+        : `Track ${(page - 1) * 10 + index + 1}`;
+      const artist = typeof track.artist === 'string'
+        ? track.artist
+        : (typeof track.author === 'string' ? track.author : undefined);
+      const durationRaw = typeof track.duration === 'number'
+        ? track.duration
+        : (typeof track.durationMs === 'number' ? track.durationMs : undefined);
+      const duration = typeof durationRaw === 'number' && durationRaw > 0 ? durationRaw : undefined;
+
+      return {
+        title,
+        artist,
+        duration,
+        requestedBy: 'Queue'
+      };
+    });
+
+    return { page, totalPages, totalTracks, tracks };
+  }
+
+  private async handleQueueButtonInteraction(interaction: ButtonInteraction, page: number, updateExisting: boolean): Promise<void> {
+    if (!interaction.guildId) return;
+
+    try {
+      const queueData = await this.audioCommandService.sendQueueCommand(interaction.guildId, { page, timeout: 7000 });
+      const normalized = this.normalizeQueuePayload(queueData, page);
+      const embed = this.uiBuilder.buildQueueEmbed({
+        tracks: normalized.tracks,
+        page: normalized.page,
+        totalPages: normalized.totalPages,
+      });
+      const components = this.uiBuilder.buildQueueNavigationButtons(normalized.page, normalized.totalPages);
+
+      if (updateExisting) {
+        await interaction.update({ embeds: [embed], components });
+      } else {
+        await interaction.reply({
+          embeds: [embed],
+          components,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    } catch (error) {
+      logger.error({
+        error,
+        guildId: interaction.guildId,
+        page
+      }, 'MusicController: Failed to fetch queue');
+
+      if (updateExisting) {
+        await interaction.update({
+          content: '❌ No pudimos cargar la cola en este momento.',
+          embeds: [],
+          components: []
+        });
+      } else {
+        await interaction.reply({
+          content: '❌ No pudimos cargar la cola en este momento.',
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    }
+  }
+
+  private async handleQueueSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!interaction.guildId) return;
+
+    try {
+      const queueData = await this.audioCommandService.sendQueueCommand(interaction.guildId, { page: 1, timeout: 7000 });
+      const normalized = this.normalizeQueuePayload(queueData, 1);
+      const embed = this.uiBuilder.buildQueueEmbed({
+        tracks: normalized.tracks,
+        page: normalized.page,
+        totalPages: normalized.totalPages,
+      });
+
+      await interaction.reply({
+        embeds: [embed],
+        components: this.uiBuilder.buildQueueNavigationButtons(normalized.page, normalized.totalPages),
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      logger.error({
+        error,
+        guildId: interaction.guildId
+      }, 'MusicController: Queue slash command failed');
+      await interaction.reply({
+        content: '❌ No pudimos obtener la cola.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+  }
+
+  async handleControlInteraction(interaction: ButtonInteraction, type: AudioCommand): Promise<void> {
+    if (!interaction.guildId) return;
+
+    const commandType = type;
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    const voiceChannelId = interaction.member && 'voice' in interaction.member
+      ? interaction.member.voice?.channelId
+      : undefined;
+
+    try {
+      // Ack immediately to avoid Discord interaction latency.
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+
+      await this.audioCommandService.sendCommand(commandType, interaction.guildId, {
+        userId: interaction.user.id,
+        requestId
+      });
+
+      logger.info({
+        guildId: interaction.guildId,
+        type: commandType,
+        userId: interaction.user.id,
+        requestId,
+        voiceChannelId,
+        latencyMs: Date.now() - startedAt
+      }, 'MusicController: Command sent via AudioCommandService');
+    } catch (error) {
+      logger.error({
+        error,
+        guildId: interaction.guildId,
+        type: commandType,
+        requestId,
+        voiceChannelId,
+        latencyMs: Date.now() - startedAt
+      }, 'MusicController: Failed to send command via AudioCommandService');
+
+      if (interaction.deferred && !interaction.replied) {
+        await interaction.followUp({
+          content: '❌ No pudimos aplicar ese cambio en este momento.',
+          flags: MessageFlags.Ephemeral
+        }).catch(() => undefined);
+      }
+    }
+  }
+
+  async handleVolumeInteraction(interaction: ButtonInteraction, volume: number): Promise<void> {
+    if (!interaction.guildId) return;
+    await this.audioCommandService.sendCommand('volume', interaction.guildId, {
+      percent: volume.toString()
+    });
+    await interaction.deferUpdate();
+  }
+
+  async handleRelativeVolumeInteraction(interaction: ButtonInteraction, delta: number): Promise<void> {
+    if (!interaction.guildId) return;
+    const requestId = randomUUID();
+    try {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+      // Use volumeAdjust command which handles relative volume in Audio service
+      await this.audioCommandService.sendCommand('volumeAdjust', interaction.guildId, {
+        delta: delta.toString(),
+        requestId
+      });
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId }, 'Failed to handle relative volume interaction');
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+    }
+  }
+
+  async handleAutoplayInteraction(interaction: ButtonInteraction): Promise<void> {
+    if (!interaction.guildId) return;
+    const requestId = randomUUID();
+    try {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+      // Delegate autoplay toggle/cycling to Audio service
+      await this.audioCommandService.sendCommand('autoplay', interaction.guildId, { requestId });
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId }, 'Failed to handle autoplay interaction');
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+    }
+  }
+
+  async handleRelativeSeekInteraction(interaction: ButtonInteraction, deltaMs: number): Promise<void> {
+    if (!interaction.guildId) return;
+    const requestId = randomUUID();
+    try {
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+      // Use seekAdjust command which handles relative seeking in Audio service
+      await this.audioCommandService.sendCommand('seekAdjust', interaction.guildId, {
+        deltaMs: deltaMs.toString(),
+        requestId
+      });
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId }, 'Failed to handle relative seek interaction');
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferUpdate();
+      }
+    }
   }
 
   async handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -99,38 +498,33 @@ export class MusicController {
 
       const audioServiceType = commandTypeMap[type] || type.toLowerCase();
 
-      const commandData = {
-        type: audioServiceType,
-        guildId: interaction.guildId,
-        ...((['nowplaying', 'queue'].includes(audioServiceType)) && {
-          requestId: `${audioServiceType}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        }),
-        ...(audioServiceType === 'nowplaying' && {
-          channelId: interaction.channelId
-        })
-      };
-
       // Validate command before publishing
-      const validationResult = safeValidateCommand(commandData);
-      if ('error' in validationResult && !validationResult.success) {
-        logger.error({
-          guildId: interaction.guildId,
-          type: audioServiceType,
-          validationError: (validationResult as { success: false; error: string }).error
-        }, 'Command validation failed - not sending invalid command');
-        await interaction.reply({ content: '❌ Command validation failed.', flags: MessageFlags.Ephemeral });
-        return;
-      }
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+      // We can skip validation here as AudioCommandService handles it or Audio service will reject it
 
       if (audioServiceType === 'nowplaying') {
         await interaction.reply({ content: `🎵 Getting now playing info...`, flags: MessageFlags.Ephemeral });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (this.audioCommandService as any).sendNowPlayingCommand(interaction.guildId, interaction.channelId);
+      } else if (audioServiceType === 'queue') {
+        await this.handleQueueSlashCommand(interaction);
       } else {
         await interaction.reply({ content: `🎵 ${audioServiceType} command sent...`, flags: MessageFlags.Ephemeral });
+
+        if (['skip', 'pause', 'resume', 'toggle', 'stop', 'shuffle', 'clear', 'previous', 'mute'].includes(audioServiceType)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await this.audioCommandService.sendSimpleCommand(audioServiceType as any, interaction.guildId);
+        } else {
+          await this.audioCommandService.sendCommand(audioServiceType as AudioCommand, interaction.guildId, {
+            userId: interaction.user.id
+          });
+        }
       }
-    } catch {
-      await interaction.reply({ content: '❌ Failed to process command.', flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      logger.error({ error, guildId: interaction.guildId, type }, 'Failed to process control command');
+      // Only reply if we haven't already
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ Failed to process command.', flags: MessageFlags.Ephemeral });
+      }
     }
   }
 
@@ -162,7 +556,9 @@ export class MusicController {
         return;
       }
 
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+      await this.audioCommandService.sendCommand('volume', interaction.guildId, {
+        percent: volume.toString()
+      });
       await interaction.reply({ content: `🔊 Setting volume to ${volume}%...`, flags: MessageFlags.Ephemeral });
     } catch {
       await interaction.reply({ content: '❌ Failed to set volume.', flags: MessageFlags.Ephemeral });
@@ -179,16 +575,13 @@ export class MusicController {
     const mode = interaction.options.getString('mode', true);
 
     try {
-      const commandData = mode ? {
-        type: 'loopSet',
-        guildId: interaction.guildId,
-        mode: mode
-      } : {
-        type: 'loop',
-        guildId: interaction.guildId
-      };
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+      if (mode) {
+        await this.audioCommandService.sendCommand('loopSet', interaction.guildId, {
+          mode: mode
+        });
+      } else {
+        await this.audioCommandService.sendSimpleCommand('loop' as any, interaction.guildId);
+      }
       await interaction.reply({ content: `🔁 Setting loop mode to: ${mode || 'cycle'}...`, flags: MessageFlags.Ephemeral });
     } catch {
       await interaction.reply({ content: '❌ Failed to set loop mode.', flags: MessageFlags.Ephemeral });
@@ -233,10 +626,13 @@ export class MusicController {
    * Implements Discord 5-Rule message management system
    */
   private async handlePlayTypeCommand(interaction: ChatInputCommandInteraction, commandType: 'play' | 'playnext' | 'playnow'): Promise<void> {
+    const requestId = randomUUID();
     logger.info({
       guildId: interaction.guildId,
       userId: interaction.user.id,
-      commandType
+      commandType,
+      channelId: interaction.channelId,
+      requestId
     }, `GATEWAY_MUSIC: ${commandType} command received`);
 
     if (!interaction.guildId) {
@@ -259,7 +655,7 @@ export class MusicController {
     const query = interaction.options.getString('query', true);
 
     try {
-      logger.info({ guildId: interaction.guildId, commandType }, 'DEBUG: Starting music command processing');
+      logger.info({ guildId: interaction.guildId, commandType, requestId }, 'DEBUG: Starting music command processing');
 
       // Get user's voice channel
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -267,12 +663,13 @@ export class MusicController {
       const voiceChannel = member?.voice?.channel;
 
       if (!voiceChannel) {
-        logger.info({ guildId: interaction.guildId, commandType }, 'DEBUG: User not in voice channel - early return');
+        logger.info({ guildId: interaction.guildId, commandType, requestId }, 'DEBUG: User not in voice channel - early return');
         await interaction.reply({ content: '❌ You must be in a voice channel to play music!', ephemeral: true });
         return;
       }
 
-      logger.info({ guildId: interaction.guildId, commandType, voiceChannelId: voiceChannel.id }, 'DEBUG: User in voice channel, continuing');
+      logger.info({ guildId: interaction.guildId, commandType, voiceChannelId: voiceChannel.id, requestId }, 'DEBUG: User in voice channel, continuing');
+      this.registerVoiceRequestContext?.(interaction.guildId, requestId, voiceChannel.id);
 
       // DISCORD 5-RULE MESSAGE MANAGEMENT SYSTEM
       // Rule 1: Only one visible UI PRINCIPAL message per channel
@@ -285,7 +682,7 @@ export class MusicController {
 
       // CRITICAL FIX: Clear UI block for new legitimate commands to allow UI recreation
       if (this.clearUIBlock) {
-        this.clearUIBlock(interaction.guildId, interaction.channelId);
+        this.clearUIBlock(interaction.guildId, interaction.channelId, voiceChannel.id);
       }
 
       // Determine if this is the first track by checking if bot is already connected to voice
@@ -323,65 +720,255 @@ export class MusicController {
 
       // CRITICAL: Connect Discord.js to voice channel FIRST before sending command to audio service
       // This applies to ALL music commands: /play, /playnext, /playnow
-      logger.info({ guildId: interaction.guildId, commandType, isFirstTrack }, 'DEBUG: About to attempt voice connection');
+      logger.info({ guildId: interaction.guildId, commandType, isFirstTrack, requestId }, 'DEBUG: About to attempt voice connection');
       try {
-        const { joinVoiceChannel, VoiceConnectionStatus } = await import('@discordjs/voice');
+        const { joinVoiceChannel, VoiceConnectionStatus, entersState } = await import('@discordjs/voice');
         const existingConnection = getVoiceConnection(interaction.guildId);
+        const existingState = existingConnection?.state.status ?? 'unknown';
 
-        // Check if connection exists AND is in a valid state (connected/ready)
-        // Signalling state is treated as invalid because it means the connection is stuck trying to connect
-        const isValidConnection = existingConnection &&
+        // Check if connection exists AND is in a valid state (connected/ready/connecting).
+        let isValidConnection = Boolean(
+          existingConnection &&
           (existingConnection.state.status === VoiceConnectionStatus.Ready ||
-           existingConnection.state.status === VoiceConnectionStatus.Connecting);
+            existingConnection.state.status === VoiceConnectionStatus.Connecting)
+        );
 
-        if (!isValidConnection) {
-          // Log whether we're creating new connection or replacing destroyed one
-          if (existingConnection) {
+        let connection = existingConnection ?? null;
+
+        if (existingConnection && existingState === VoiceConnectionStatus.Signalling) {
+          logger.warn({
+            guildId: interaction.guildId,
+            commandType,
+            requestId,
+            existingState
+          }, 'VOICE_CONNECT: Existing connection is signalling; waiting briefly before reconnect');
+
+          try {
+            await entersState(existingConnection, VoiceConnectionStatus.Ready, this.signallingGraceMs);
+            isValidConnection = true;
             logger.info({
               guildId: interaction.guildId,
-              oldState: existingConnection.state.status,
-              commandType
-            }, 'VOICE_CONNECT: Replacing destroyed/disconnected connection');
+              commandType,
+              requestId
+            }, 'VOICE_CONNECT: Signalling connection recovered without reconnect');
+          } catch (error) {
+            logger.warn({
+              guildId: interaction.guildId,
+              commandType,
+              requestId,
+              existingState,
+              error: error instanceof Error ? error.message : String(error)
+            }, 'VOICE_CONNECT: Signalling connection did not recover in grace window');
+          }
+        }
+
+        // If we don't have cached voice server data, force a fresh reconnect to trigger VOICE_SERVER_UPDATE
+        if (isValidConnection && this.shouldForceVoiceReconnect?.(interaction.guildId)) {
+          const decision = this.canReconnectVoice(interaction.guildId);
+          if (!decision.allowed) {
+            logger.warn({
+              guildId: interaction.guildId,
+              commandType,
+              requestId,
+              retryAfterMs: decision.retryAfterMs
+            }, 'VOICE_CONNECT: Skipping forced reconnect due to cooldown');
+          } else {
+            logger.info({
+              guildId: interaction.guildId,
+              commandType,
+              requestId,
+              reason: 'missing_voice_server_cache'
+            }, 'VOICE_CONNECT: Forcing reconnect to refresh voice server data');
+            try {
+              existingConnection?.destroy();
+              this.markVoiceReconnect(interaction.guildId);
+            } catch (error) {
+              logger.warn({
+                error,
+                guildId: interaction.guildId,
+                requestId
+              }, 'VOICE_CONNECT: Failed to destroy existing connection during forced reconnect');
+            }
+            connection = null;
+            isValidConnection = false;
+          }
+        }
+
+        if (!isValidConnection) {
+          let shouldCreateNewConnection = true;
+
+          if (existingConnection) {
+            const decision = this.canReconnectVoice(interaction.guildId);
+            logger.info({
+              guildId: interaction.guildId,
+              oldState: existingState,
+              commandType,
+              requestId,
+              reason: `state_${existingState}`
+            }, 'VOICE_CONNECT: Existing connection not valid for playback');
+
+            if (!decision.allowed) {
+              shouldCreateNewConnection = false;
+              connection = existingConnection;
+              logger.warn({
+                guildId: interaction.guildId,
+                commandType,
+                requestId,
+                retryAfterMs: decision.retryAfterMs
+              }, 'VOICE_CONNECT: Reconnect cooldown active, reusing current connection');
+            } else {
+              try {
+                existingConnection.destroy();
+                this.markVoiceReconnect(interaction.guildId);
+              } catch (error) {
+                logger.warn({
+                  error,
+                  guildId: interaction.guildId,
+                  requestId
+                }, 'VOICE_CONNECT: Failed to destroy stale connection');
+              }
+            }
           }
 
-          joinVoiceChannel({
-            channelId: voiceChannel.id,
-            guildId: interaction.guildId,
-            adapterCreator: voiceChannel.guild.voiceAdapterCreator
-          });
+          if (shouldCreateNewConnection) {
+            connection = joinVoiceChannel({
+              channelId: voiceChannel.id,
+              guildId: interaction.guildId,
+              adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+              selfDeaf: true
+            });
 
-          logger.info({
-            guildId: interaction.guildId,
-            voiceChannelId: voiceChannel.id,
-            commandType,
-            isReconnection: !!existingConnection
-          }, `VOICE_CONNECT: Discord.js ${existingConnection ? 'reconnected' : 'connected'} to voice channel for ${commandType}`);
+            logger.info({
+              guildId: interaction.guildId,
+              voiceChannelId: voiceChannel.id,
+              commandType,
+              requestId,
+              isReconnection: !!existingConnection
+            }, `VOICE_CONNECT: Discord.js ${existingConnection ? 'reconnected' : 'connected'} to voice channel for ${commandType}`);
+          }
         } else {
           logger.info({
             guildId: interaction.guildId,
-            currentState: existingConnection.state.status,
-            commandType
-          }, `VOICE_CONNECT: Already connected (${existingConnection.state.status}), skipping connection for ${commandType}`);
+            currentState: existingState,
+            commandType,
+            requestId
+          }, `VOICE_CONNECT: Already connected (${existingState}), skipping connection for ${commandType}`);
+        }
+
+        if (connection) {
+          let cachedVoiceStatePublished = false;
+          try {
+            await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+            logger.info({ guildId: interaction.guildId, commandType, requestId }, 'VOICE_CONNECT: Voice connection ready');
+            if (this.publishCachedVoiceStateUpdate) {
+              cachedVoiceStatePublished = await this.publishCachedVoiceStateUpdate(interaction.guildId, voiceChannel.id);
+            }
+            if (this.publishCachedVoiceServerUpdate) {
+              await this.publishCachedVoiceServerUpdate(interaction.guildId);
+            }
+
+            // If we cannot provide sessionId on reused connections, reconnect once to force fresh Discord voice events.
+            if (!cachedVoiceStatePublished) {
+              const decision = this.canReconnectVoice(interaction.guildId);
+              logger.warn({
+                guildId: interaction.guildId,
+                commandType,
+                requestId,
+                retryAfterMs: decision.retryAfterMs
+              }, 'VOICE_CONNECT: Missing sessionId after ready state, forcing one reconnect');
+
+              if (decision.allowed) {
+                try {
+                  connection.destroy();
+                  this.markVoiceReconnect(interaction.guildId);
+                } catch (error) {
+                  logger.warn({
+                    error,
+                    guildId: interaction.guildId,
+                    requestId
+                  }, 'VOICE_CONNECT: Failed to destroy connection before forced reconnect');
+                }
+
+                connection = joinVoiceChannel({
+                  channelId: voiceChannel.id,
+                  guildId: interaction.guildId,
+                  adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                  selfDeaf: true
+                });
+
+                await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+                logger.info({ guildId: interaction.guildId, commandType, requestId }, 'VOICE_CONNECT: Forced reconnect is ready');
+              } else {
+                logger.warn({
+                  guildId: interaction.guildId,
+                  commandType,
+                  requestId,
+                  retryAfterMs: decision.retryAfterMs
+                }, 'VOICE_CONNECT: Skipping forced reconnect due to cooldown');
+              }
+
+              if (this.publishCachedVoiceStateUpdate) {
+                cachedVoiceStatePublished = await this.publishCachedVoiceStateUpdate(interaction.guildId, voiceChannel.id);
+              }
+              if (this.publishCachedVoiceServerUpdate) {
+                await this.publishCachedVoiceServerUpdate(interaction.guildId);
+              }
+            }
+
+            if (!cachedVoiceStatePublished) {
+              logger.error({
+                guildId: interaction.guildId,
+                commandType,
+                requestId
+              }, 'VOICE_CONNECT: Could not publish cached VOICE_STATE_UPDATE after reconnect');
+              if (interaction.deferred) {
+                await interaction.editReply({ content: '❌ Voice session sync failed. Please retry /play.' });
+              } else {
+                await interaction.followUp({ content: '❌ Voice session sync failed. Please retry /play.', ephemeral: true });
+              }
+              return;
+            }
+          } catch (error) {
+            logger.error({
+              error: error instanceof Error ? error.message : String(error),
+              guildId: interaction.guildId,
+              commandType,
+              requestId
+            }, 'VOICE_CONNECT: Timed out waiting for voice connection ready');
+
+            if (interaction.deferred) {
+              await interaction.editReply({ content: '❌ Failed to connect to voice channel.' });
+            } else {
+              await interaction.followUp({ content: '❌ Failed to connect to voice channel.', ephemeral: true });
+            }
+            return;
+          }
         }
       } catch (voiceError) {
         logger.error({
           error: voiceError instanceof Error ? voiceError.message : String(voiceError),
           guildId: interaction.guildId,
-          commandType
+          commandType,
+          requestId
         }, `VOICE_CONNECT: Failed to connect Discord.js to voice channel for ${commandType}`);
       }
 
       // NOW send command to audio service after voice connection is established
-      const commandData = {
-        type: commandType,
+      const publishedRequestId = await this.audioCommandService.sendPlayCommand(
+        commandType,
+        interaction.guildId,
+        voiceChannel.id,
+        interaction.channelId,
+        interaction.user.id,
+        query
+      );
+      logger.info({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
-        userId: interaction.user.id,
-        query: query
-      };
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+        requestId: publishedRequestId,
+        commandType
+      }, 'GATEWAY_MUSIC: forwarded slash play command to audio');
 
       // For playnow, update the deferred reply only if it was deferred
       if (commandType === 'playnow' && interaction.deferred) {
@@ -390,7 +977,7 @@ export class MusicController {
 
     } catch (error) {
       // Use proper logger instead of console.error
-      logger.error({ error, guildId: interaction.guildId, commandType }, 'Error in handlePlayTypeCommand');
+      logger.error({ error, guildId: interaction.guildId, commandType, requestId }, 'Error in handlePlayTypeCommand');
       try {
         if (interaction.deferred) {
           await interaction.editReply({ content: '❌ Failed to process play command.' });
@@ -406,7 +993,7 @@ export class MusicController {
 
   // Missing command handlers that were added to main.ts
   async handleSkipCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-    await this.handleControlCommand(interaction, 'SKIP');
+    await this.handleControlCommand(interaction, 'skip');
   }
 
   async handleRemoveCommand(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -418,16 +1005,12 @@ export class MusicController {
     const index = interaction.options.getInteger('index', true);
 
     try {
-      const commandData = {
-        type: 'REMOVE_TRACK',
-        guildId: interaction.guildId,
+      await this.audioCommandService.sendCommand('remove', interaction.guildId, {
         channelId: interaction.channelId,
         userId: interaction.user.id,
-        index: index,
-        timestamp: Date.now()
-      };
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+        index: index.toString(),
+        timestamp: Date.now().toString()
+      });
       await interaction.reply({ content: `🗑️ Removing track at position ${index}...`, flags: MessageFlags.Ephemeral });
     } catch {
       await interaction.reply({ content: '❌ Failed to remove track.', flags: MessageFlags.Ephemeral });
@@ -444,14 +1027,11 @@ export class MusicController {
     const to = interaction.options.getInteger('to', true);
 
     try {
-      const commandData = {
-        type: 'move',
-        guildId: interaction.guildId,
-        from: from,
-        to: to
-      };
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await this.audioCommandService.sendCommand('move', interaction.guildId, {
+        from: from.toString(),
+        to: to.toString()
+      });
       await interaction.reply({ content: `↕️ Moving track from position ${from} to ${to}...`, flags: MessageFlags.Ephemeral });
     } catch {
       await interaction.reply({ content: '❌ Failed to move track.', flags: MessageFlags.Ephemeral });
@@ -467,16 +1047,12 @@ export class MusicController {
     const seconds = interaction.options.getInteger('seconds', true);
 
     try {
-      const commandData = {
-        type: 'SEEK',
-        guildId: interaction.guildId,
+      await this.audioCommandService.sendCommand('seek', interaction.guildId, {
         channelId: interaction.channelId,
         userId: interaction.user.id,
-        position: seconds * 1000, // Convert to milliseconds
-        timestamp: Date.now()
-      };
-
-      await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+        position: (seconds * 1000).toString(), // Convert to milliseconds
+        timestamp: Date.now().toString()
+      });
       await interaction.reply({ content: `⏩ Seeking to ${seconds} seconds...`, flags: MessageFlags.Ephemeral });
     } catch {
       await interaction.reply({ content: '❌ Failed to seek.', flags: MessageFlags.Ephemeral });
@@ -495,16 +1071,7 @@ export class MusicController {
       switch (subcommand) {
         case 'button-feedback': {
           const enabled = interaction.options.getBoolean('enabled', true);
-          const commandData = {
-            type: 'SET_GUILD_SETTING',
-            guildId: interaction.guildId,
-            channelId: interaction.channelId,
-            userId: interaction.user.id,
-            setting: 'ephemeralMessages',
-            value: enabled,
-            timestamp: Date.now()
-          };
-          await this.eventBus.publish('discord-bot:commands', JSON.stringify(commandData));
+          await this.settingsService.updateSetting(interaction.guildId, 'ephemeralMessages', enabled);
           await interaction.reply({
             content: `⚙️ Button feedback messages: ${enabled ? '✅ Enabled' : '❌ Disabled'}`,
             flags: MessageFlags.Ephemeral
@@ -514,16 +1081,7 @@ export class MusicController {
 
         case 'dj-role': {
           const role = interaction.options.getRole('role', true);
-          const djCommandData = {
-            type: 'SET_GUILD_SETTING',
-            guildId: interaction.guildId,
-            channelId: interaction.channelId,
-            userId: interaction.user.id,
-            setting: 'djRole',
-            value: role.id,
-            timestamp: Date.now()
-          };
-          await this.eventBus.publish('discord-bot:commands', JSON.stringify(djCommandData));
+          await this.settingsService.updateSetting(interaction.guildId, 'djRoleId', role.id);
           await interaction.reply({
             content: `⚙️ DJ role set to: ${role.name}`,
             flags: MessageFlags.Ephemeral
@@ -533,16 +1091,7 @@ export class MusicController {
 
         case 'djonly-mode': {
           const djOnlyEnabled = interaction.options.getBoolean('enabled', true);
-          const djOnlyCommandData = {
-            type: 'SET_GUILD_SETTING',
-            guildId: interaction.guildId,
-            channelId: interaction.channelId,
-            userId: interaction.user.id,
-            setting: 'djOnlyMode',
-            value: djOnlyEnabled,
-            timestamp: Date.now()
-          };
-          await this.eventBus.publish('discord-bot:commands', JSON.stringify(djOnlyCommandData));
+          await this.settingsService.updateSetting(interaction.guildId, 'djOnlyMode', djOnlyEnabled);
           await interaction.reply({
             content: `⚙️ DJ Only mode: ${djOnlyEnabled ? '🔒 **Enabled**' : '🔓 **Disabled**'}`,
             flags: MessageFlags.Ephemeral
@@ -552,16 +1101,7 @@ export class MusicController {
 
         case 'voteskip-enabled': {
           const voteSkipEnabled = interaction.options.getBoolean('enabled', true);
-          const voteSkipEnabledCommandData = {
-            type: 'SET_GUILD_SETTING',
-            guildId: interaction.guildId,
-            channelId: interaction.channelId,
-            userId: interaction.user.id,
-            setting: 'voteSkipEnabled',
-            value: voteSkipEnabled,
-            timestamp: Date.now()
-          };
-          await this.eventBus.publish('discord-bot:commands', JSON.stringify(voteSkipEnabledCommandData));
+          await this.settingsService.updateSetting(interaction.guildId, 'voteSkipEnabled', voteSkipEnabled);
           await interaction.reply({
             content: `⚙️ Vote skip: ${voteSkipEnabled ? '✅ **Enabled**' : '❌ **Disabled**'}`,
             flags: MessageFlags.Ephemeral
@@ -574,16 +1114,7 @@ export class MusicController {
           // Convert percentage (1-100) to decimal (0.01-1.0)
           const thresholdDecimal = threshold / 100;
 
-          const voteSkipThresholdCommandData = {
-            type: 'SET_GUILD_SETTING',
-            guildId: interaction.guildId,
-            channelId: interaction.channelId,
-            userId: interaction.user.id,
-            setting: 'voteSkipThreshold',
-            value: thresholdDecimal,
-            timestamp: Date.now()
-          };
-          await this.eventBus.publish('discord-bot:commands', JSON.stringify(voteSkipThresholdCommandData));
+          await this.settingsService.updateSetting(interaction.guildId, 'voteSkipThreshold', thresholdDecimal);
           await interaction.reply({
             content: `⚙️ Vote skip threshold set to **${threshold}%** (${Math.ceil(2 * thresholdDecimal)} votes needed for 2 users)`,
             flags: MessageFlags.Ephemeral
@@ -629,7 +1160,7 @@ export class MusicController {
 
     // If connection exists but is not ready/connected, consider it first track
     const isConnected = voiceConnection.state.status === 'ready' ||
-                       voiceConnection.state.status === 'connecting';
+      voiceConnection.state.status === 'connecting';
 
     // If not connected, this is the first track
     return !isConnected;

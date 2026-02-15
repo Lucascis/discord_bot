@@ -3,7 +3,7 @@
  * Complete type definitions for the Discord Music Bot subscription system
  */
 
-import type { SubscriptionTier, SubscriptionStatus, BillingInterval, FeatureCategory } from '@prisma/client';
+import type { SubscriptionTier, SubscriptionStatus, BillingInterval, FeatureCategory } from '@discord-bot/database';
 
 // ========================================
 // PLAN TYPES

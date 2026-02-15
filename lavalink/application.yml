@@ -8,7 +8,7 @@ server:
 
 lavalink:
   server:
-    password: ${LAVALINK_PASSWORD:youshallnotpass}
+    password: ${LAVALINK_PASSWORD:c0mm3rc1al_lav4l1nk_s3cur3_2025}
     # Disable built-in YouTube source to use plugin
     sources:
       youtube: false
@@ -28,14 +28,15 @@ lavalink:
       distortion: true
       channelMix: true
       lowPass: true
-    # Enhanced performance settings for production - OPTIMIZED FOR LOW LATENCY
-    bufferDurationMs: 800          # Increased from 400ms to reduce stuttering/lag
-    frameBufferDurationMs: 10000    # Increased from 5000ms to prevent audio gaps
-    opusEncodingQuality: 10
+    # Enhanced performance settings for production - tuned for stable playback
+    bufferDurationMs: 1800          # Slightly larger jitter buffer to absorb short network spikes
+    frameBufferDurationMs: 15000    # Larger frame cache for sustained playback stability
+    nonAllocatingFrameBuffer: true  # Reduce allocations and GC pressure under load
+    opusEncodingQuality: 8
     resamplingQuality: HIGH
     trackStuckThresholdMs: 15000    # Increased from 10000ms to be more tolerant
     useSeekGhosting: true
-    playerUpdateInterval: 30        # Increased from 10ms to reduce overhead
+    playerUpdateInterval: 5         # Keep player updates frequent enough for stable position/progress
     youtubePlaylistLoadLimit: 50  # Reduced to save memory
     soundcloudSearchEnabled: true
     gc-warnings: true
@@ -47,19 +48,6 @@ lavalink:
     httpPoolSize: 32  # Doubled for better concurrent search handling
     httpMaxPendingRequests: 128  # Doubled to handle more concurrent searches
 
-  # Plugin loading configuration
-  plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.15.0"
-      repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
-      repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0"
-      repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.sponsorblock:sponsorblock-plugin:3.0.1"
-      repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:1.1.0"
-      repository: "https://maven.lavalink.dev/releases"
-
 # Plugin-specific configuration
 plugins:
   youtube:
@@ -67,49 +55,48 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    # Optimized client order for maximum compatibility and bypass capabilities
+    # Client order tuned for reliability first (search + playback fallbacks)
     clients:
       - MUSIC
-      - ANDROID_VR
+      - MWEB
       - WEB
       - WEBEMBEDDED
-      # - TV_EMBEDDED  # Disabled: Failed to resolve TV_EMBEDDED into a Client
+      - ANDROID_VR
     clientOptions:
-      # YouTube Music client - best for music content and restricted videos
+      # MUSIC/MWEB are useful for metadata/search resilience.
       MUSIC:
+        playback: false
+        videoLoading: false
+        playlistLoading: false
+        searching: true
+      MWEB:
         playback: true
         videoLoading: true
         playlistLoading: true
         searching: true
-      # Android VR client - good for bypassing restrictions  
-      ANDROID_VR:
-        playback: true
-        videoLoading: true
-        playlistLoading: true
-        searching: true
-      # Web client - standard fallback
+      # Web client - stable playback fallback
       WEB:
         playback: true
         videoLoading: true
         playlistLoading: true
         searching: true
-      # Web embedded - often bypasses restrictions
+      # Web embedded - additional fallback on YouTube script churn
       WEBEMBEDDED:
         playback: true
         videoLoading: true
         playlistLoading: true
         searching: true
-      # TV embedded - additional bypass option (disabled due to resolution issues)
-      # TV_EMBEDDED:
-      #   playback: true
-      #   videoLoading: true
-      #   playlistLoading: false
-      #   searching: false
+      # Android VR client - legacy fallback
+      ANDROID_VR:
+        playback: true
+        videoLoading: true
+        playlistLoading: true
+        searching: true
     # Additional performance settings - optimized for search speed
     playlistLoadLimit: 50  # Reduced to prioritize search speed over large playlist loading
     videoLoadLimit: 25     # Reduced for faster individual video loading
-    maxRetryAttempts: 2    # Reduced from 3 to 2 for faster fallback
-    retryDelayMs: 500      # Reduced from 1000ms to 500ms for faster retries
+    maxRetryAttempts: 3    # More tolerant to transient YouTube extraction failures
+    retryDelayMs: 1000
     # Enhanced token management for better reliability
     oauth:
       enabled: false
@@ -121,9 +108,7 @@ plugins:
   lavasrc:
     # Enhanced providers with YouTube Music prioritization
     providers:
-      - "ytmsearch:\"%ISRC%\""
       - "ytsearch:\"%ISRC%\""
-      - "ytmsearch:%QUERY%"
       - "ytsearch:%QUERY%"
 
     # Enable multiple music sources for better track availability
@@ -181,4 +166,4 @@ plugins:
 logging:
   level:
     root: INFO
-    lavalink: DEBUG
+    lavalink: INFO

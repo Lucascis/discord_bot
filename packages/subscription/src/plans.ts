@@ -3,9 +3,9 @@
  * Defines all available subscription tiers and their features
  */
 
-import { SubscriptionTier, Prisma } from '@prisma/client';
+import { SubscriptionTier, Prisma } from '@discord-bot/database';
 import type { PlanDefinition, PlanFeatures, PlanLimits } from './types.js';
-import type { PrismaClient, BillingInterval } from '@prisma/client';
+import type { PrismaClient, BillingInterval } from '@discord-bot/database';
 
 /**
  * Default plan definitions used when the database has no overrides.
@@ -50,14 +50,14 @@ const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
   BASIC: {
     tier: SubscriptionTier.BASIC,
     name: 'basic',
-    displayName: 'Basic',
-    description: 'Great for small communities',
+    displayName: 'Plus',
+    description: 'Panel web + audio dual con 1 instancia y cola extendida.',
     price: {
       monthly: 499, // $4.99
-      yearly: 4990, // $49.90 (2 months free)
+      yearly: 4990, // $49.90
     },
     features: {
-      concurrentPlaybacks: 3,
+      concurrentPlaybacks: 1,
       audioQuality: 'high',
       basicCommands: true,
       advancedCommands: true,
@@ -76,11 +76,11 @@ const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
       noAds: true,
     },
     limits: {
-      maxQueueSize: 200,
-      maxSongDuration: 7200, // 2 hours
-      monthlyTracks: 10000,
-      apiRateLimit: 30,
-      maxGuilds: 3,
+      maxQueueSize: 1000,
+      maxSongDuration: 7200,
+      monthlyTracks: 20000,
+      apiRateLimit: 50,
+      maxGuilds: 1,
     },
     stripePriceIds: {
       // These would be set from Stripe dashboard
@@ -93,14 +93,14 @@ const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
   PREMIUM: {
     tier: SubscriptionTier.PREMIUM,
     name: 'premium',
-    displayName: 'Premium',
-    description: 'Perfect for active communities',
+    displayName: 'Pro',
+    description: 'Hasta 3 instancias simultáneas en distintos guilds, audio dual y 24/7.',
     price: {
-      monthly: 999, // $9.99
-      yearly: 9990, // $99.90 (2 months free)
+      monthly: 1000, // $10.00
+      yearly: 10000, // $100.00
     },
     features: {
-      concurrentPlaybacks: 10,
+      concurrentPlaybacks: 3,
       audioQuality: 'highest',
       basicCommands: true,
       advancedCommands: true,
@@ -119,11 +119,11 @@ const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
       noAds: true,
     },
     limits: {
-      maxQueueSize: 1000,
-      maxSongDuration: 14400, // 4 hours
-      monthlyTracks: 100000,
-      apiRateLimit: 100,
-      maxGuilds: 10,
+      maxQueueSize: 5000,
+      maxSongDuration: 14400,
+      monthlyTracks: 200000,
+      apiRateLimit: 150,
+      maxGuilds: 3,
     },
     stripePriceIds: {
       monthly: process.env.STRIPE_PRICE_PREMIUM_MONTHLY,
@@ -348,9 +348,9 @@ function mapDatabasePlan(record: SubscriptionPlanRecord): { tier: SubscriptionTi
     limits: mergeLimits(template.limits, record.limits),
     stripePriceIds: stripeMonthly || stripeYearly
       ? {
-          monthly: stripeMonthly,
-          yearly: stripeYearly
-        }
+        monthly: stripeMonthly,
+        yearly: stripeYearly
+      }
       : template.stripePriceIds,
     stripeProductId: template.stripeProductId
   };
@@ -358,8 +358,84 @@ function mapDatabasePlan(record: SubscriptionPlanRecord): { tier: SubscriptionTi
   return { tier, plan };
 }
 
+async function seedDefaultPlans(prisma: PrismaClient): Promise<void> {
+  const tiers = Object.keys(DEFAULT_PLAN_TEMPLATES) as SubscriptionTier[];
+
+  for (const tier of tiers) {
+    const template = DEFAULT_PLAN_TEMPLATES[tier];
+    const plan = await prisma.subscriptionPlan.upsert({
+      where: { name: template.name },
+      update: {
+        displayName: template.displayName,
+        description: template.description,
+        features: template.features as unknown as Prisma.InputJsonValue,
+        limits: template.limits as unknown as Prisma.InputJsonValue,
+        active: true,
+      },
+      create: {
+        name: template.name,
+        displayName: template.displayName,
+        description: template.description,
+        features: template.features as unknown as Prisma.InputJsonValue,
+        limits: template.limits as unknown as Prisma.InputJsonValue,
+        active: true,
+      },
+    });
+
+    await prisma.subscriptionPrice.upsert({
+      where: {
+        provider_providerPriceId: {
+          provider: 'internal',
+          providerPriceId: `seed-${template.name}-monthly`,
+        },
+      },
+      update: {
+        planId: plan.id,
+        amount: template.price.monthly ?? 0,
+        currency: 'USD',
+        interval: 'MONTH',
+        active: true,
+      },
+      create: {
+        planId: plan.id,
+        provider: 'internal',
+        providerPriceId: `seed-${template.name}-monthly`,
+        amount: template.price.monthly ?? 0,
+        currency: 'USD',
+        interval: 'MONTH',
+        active: true,
+      },
+    });
+
+    await prisma.subscriptionPrice.upsert({
+      where: {
+        provider_providerPriceId: {
+          provider: 'internal',
+          providerPriceId: `seed-${template.name}-yearly`,
+        },
+      },
+      update: {
+        planId: plan.id,
+        amount: template.price.yearly ?? 0,
+        currency: 'USD',
+        interval: 'YEAR',
+        active: true,
+      },
+      create: {
+        planId: plan.id,
+        provider: 'internal',
+        providerPriceId: `seed-${template.name}-yearly`,
+        amount: template.price.yearly ?? 0,
+        currency: 'USD',
+        interval: 'YEAR',
+        active: true,
+      },
+    });
+  }
+}
+
 export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void> {
-  const rows = await prisma.subscriptionPlan.findMany({
+  let rows = await prisma.subscriptionPlan.findMany({
     where: { active: true },
     include: {
       prices: {
@@ -369,7 +445,20 @@ export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void>
   });
 
   if (rows.length === 0) {
-    throw new Error('No subscription plans found in the database');
+    console.warn('[Subscription] No active plans found in DB, seeding defaults from templates');
+    await seedDefaultPlans(prisma);
+    rows = await prisma.subscriptionPlan.findMany({
+      where: { active: true },
+      include: {
+        prices: {
+          where: { active: true }
+        }
+      }
+    });
+  }
+
+  if (rows.length === 0) {
+    throw new Error('No subscription plans found in the database after default seeding');
   }
 
   const mapped: Partial<Record<SubscriptionTier, PlanDefinition>> = {};
@@ -392,4 +481,4 @@ export function setPlanOverrides(overrides: Partial<Record<SubscriptionTier, Pla
   planCache = overrides;
 }
 
-export const PLAN_TEMPLATES = DEFAULT_PLAN_TEMPLATES;
+export const PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = DEFAULT_PLAN_TEMPLATES;

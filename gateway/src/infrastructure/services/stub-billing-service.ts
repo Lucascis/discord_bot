@@ -108,7 +108,7 @@ export class StubBillingService implements BillingService {
   async issueRefund(
     subscriptionId: string,
     amount: number,
-    reason: string // TODO: [AUDIT-TRAIL] Log reason for refund in audit trail. See TECHNICAL_DEBT_AND_DECISIONS.md
+    reason: string
   ): Promise<{ success: boolean; refundId?: string }> {
     // Simulate API call delay
     await this.delay(this.simulatedLatency * 1.5); // Refunds take longer
@@ -117,7 +117,6 @@ export class StubBillingService implements BillingService {
       // Simulate refund processing
       const refundId = `refund_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      // TODO: [AUDIT-TRAIL] Log refund reason for audit purposes
       console.log(`Refund reason: ${reason}`);
 
       // Simulate refund success/failure based on amount

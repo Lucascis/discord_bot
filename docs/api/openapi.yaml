@@ -30,12 +30,12 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.discord-bot.example.com/api/v1
-    description: Production server
-  - url: https://staging-api.discord-bot.example.com/api/v1
-    description: Staging server
-  - url: http://localhost:3000/api/v1
-    description: Development server
+  - url: https://api.discordmusicbot.com/api/v1
+    description: Production server (global)
+  - url: https://staging-api.discordmusicbot.com/api/v1
+    description: Pre-production / staging server
+  - url: https://sandbox-api.discordmusicbot.com/api/v1
+    description: Internal development sandbox (VPN only)
 
 tags:
   - name: Health
@@ -72,6 +72,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
         '503':
           description: Service is unhealthy
           content:
@@ -94,6 +96,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
         '503':
           description: Service is not ready
           content:
@@ -144,6 +148,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GuildAnalyticsList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /guilds:
+    get:
+      tags:
+        - Guilds
+      summary: List guilds connected to the bot
+      description: Returns a paginated list of guilds synchronized from Discord along with their availability status.
+      operationId: listGuilds
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Guild list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildList'
         '401':
           $ref: '#/components/responses/UnauthorizedError'
 
@@ -213,6 +237,27 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
+  /guilds/{guildId}/channels:
+    get:
+      tags:
+        - Guilds
+      summary: List basic Discord channels
+      description: Returns cached Discord channels (text/voice/stage) for a guild so the panel can invoke premium actions.
+      operationId: getGuildChannels
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Channel list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuildChannelList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
   /music/{guildId}/queue:
     get:
       tags:
@@ -259,28 +304,149 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundError'
 
-  /music/{guildId}/now-playing:
+  /player/{guildId}/now-playing:
     get:
       tags:
         - Music
-      summary: Get now playing
-      description: Returns currently playing track information
-      operationId: getNowPlaying
+      summary: Get live playback state
+      description: Returns the current playback state reported by the audio service cache
+      operationId: getNowPlayingState
       parameters:
         - $ref: '#/components/parameters/GuildIdParam'
       responses:
         '200':
-          description: Now playing information retrieved
+          description: Playback state retrieved successfully
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/NowPlaying'
         '404':
-          description: No track currently playing
+          description: Guild not found or no playback data
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /player/{guildId}/events:
+    get:
+      tags:
+        - Music
+      summary: Subscribe to live playback events
+      description: |-
+        Server-Sent Events (SSE) stream that emits `snapshot` and `update` payloads when the audio service publishes
+        `discord-bot:ui:now`. Clients should include the API key via query string (`?apiKey=`) and keep the connection alive.
+      operationId: subscribePlayerEvents
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Event stream opened
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /player/{guildId}/stream-token:
+    post:
+      tags:
+        - Music
+      summary: Generate browser playback token
+      description: Issues a short-lived token that authorizes `/player/{guildId}/stream`.
+      operationId: createPlayerStreamToken
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      responses:
+        '200':
+          description: Token created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamToken'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /player/{guildId}/stream:
+    get:
+      tags:
+        - Music
+      summary: Proxy audio stream for panel playback
+      description: |-
+        Streams the current track (YouTube sources are transcoded via ytdl-core; other URIs are proxied as-is). Requires a
+        valid `token` query parameter obtained from `/player/{guildId}/stream-token`.
+      operationId: streamPlayerAudio
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audio stream
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /player/{guildId}/controls:
+    post:
+      tags:
+        - Music
+      summary: Send remote playback action
+      description: Issues a playback action (toggle, skip, stop, shuffle, mute, volume) against the active guild player
+      operationId: sendPlayerControl
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayerControlRequest'
+      responses:
+        '200':
+          description: Command accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerControlResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /player/{guildId}/summon:
+    post:
+      tags:
+        - Music
+      summary: Premium bot summon from panel
+      description: Invokes the Discord bot into a selected voice channel (premium guilds only).
+      operationId: summonBotFromPanel
+      parameters:
+        - $ref: '#/components/parameters/GuildIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummonRequest'
+      responses:
+        '200':
+          description: Summon accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerControlResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
 
   /search:
     get:
@@ -613,16 +779,73 @@ components:
       properties:
         id:
           type: string
+          description: Discord guild ID
         name:
           type: string
+          description: Friendly guild name pulled from Discord
+        icon:
+          type: string
+          format: uri
+          nullable: true
+          description: CDN URL for the guild icon, if available
         memberCount:
           type: integer
-        tier:
+          nullable: true
+        available:
+          type: boolean
+          description: Indicates whether the guild is currently reachable by the bot
+        subscriptionTier:
           type: string
-          enum: [FREE, TRIAL, PREMIUM]
-        joinedAt:
+          description: Plan tier configured in ServerConfiguration
+        isPremium:
+          type: boolean
+          description: True when the guild can access premium-only controls
+
+    GuildList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Guild'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        timestamp:
           type: string
           format: date-time
+
+    GuildChannelList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuildChannel'
+        timestamp:
+          type: string
+          format: date-time
+
+    GuildChannel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [text, voice, announcement, stage]
+
+    SummonRequest:
+      type: object
+      required:
+        - voiceChannelId
+        - textChannelId
+      properties:
+        voiceChannelId:
+          type: string
+        textChannelId:
+          type: string
 
     GuildSettings:
       type: object
@@ -641,6 +864,9 @@ components:
         loopMode:
           type: string
           enum: [off, track, queue]
+        streamable:
+          type: boolean
+          description: Indicates whether the API can proxy the audio for web playback
         djRoleId:
           type: string
           nullable: true
@@ -724,21 +950,91 @@ components:
           enum: [end, next, now]
           default: end
 
+    PlayerControlRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [toggle, skip, stop, shuffle, clear, previous, mute, volume]
+        value:
+          type: integer
+          minimum: 0
+          maximum: 200
+          description: Required when action is volume
+
+    PlayerControlResponse:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+
+    StreamToken:
+      type: object
+      properties:
+        token:
+          type: string
+        expires:
+          type: integer
+          format: int64
+
     NowPlaying:
       type: object
       properties:
-        track:
-          $ref: '#/components/schemas/QueueEntry'
-        position:
+        guildId:
+          type: string
+        title:
+          type: string
+        author:
+          type: string
+          nullable: true
+        uri:
+          type: string
+          nullable: true
+        artworkUrl:
+          type: string
+          nullable: true
+        durationMs:
           type: integer
-          description: Current position in milliseconds
-        isPaused:
+        positionMs:
+          type: integer
+        isStream:
+          type: boolean
+        paused:
+          type: boolean
+        repeatMode:
+          type: string
+          enum: [off, track, queue]
+        queueLen:
+          type: integer
+        hasTrack:
+          type: boolean
+        canSeek:
           type: boolean
         volume:
           type: integer
-        loopMode:
+          minimum: 0
+          maximum: 200
+        autoplay:
+          type: boolean
+        autoplayMode:
           type: string
-          enum: [off, track, queue]
+          enum: [off, similar, artist, genre, mixed]
+        filter:
+          type: object
+          properties:
+            id:
+              type: string
+            label:
+              type: string
+            description:
+              type: string
+          nullable: true
+        updatedAt:
+          type: integer
+          format: int64
+          description: Epoch milliseconds when the cache entry was produced
 
     SearchResults:
       type: object
@@ -866,3 +1162,7 @@ components:
           type: integer
         totalPages:
           type: integer
+        hasNext:
+          type: boolean
+        hasPrevious:
+          type: boolean

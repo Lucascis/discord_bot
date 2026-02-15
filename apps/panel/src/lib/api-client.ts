@@ -1,20 +1,37 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-const API_KEY = process.env.NEXT_PUBLIC_PANEL_API_KEY || '';
+const isServer = typeof window === 'undefined';
 
-type ApiRequestOptions = Parameters<typeof fetch>[1];
+function getInternalApiBase(): string {
+  return process.env.INTERNAL_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://api:3000';
+}
 
-export async function apiFetch<T>(
-  path: string,
-  options: ApiRequestOptions = {}
-): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+function getServerApiKey(): string {
+  return process.env.API_KEY || '';
+}
+
+function resolveBaseUrl(): string {
+  // Browser requests go through Next.js BFF (/api/v1/*), never directly to backend API.
+  return isServer ? getInternalApiBase() : '';
+}
+
+export interface ApiRequestOptions extends globalThis.RequestInit {
+  rawResponse?: boolean;
+  apiKey?: string;
+}
+
+export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const baseUrl = resolveBaseUrl();
+  const targetUrl = path.startsWith('http') ? path : `${baseUrl}${path}`;
+  const { rawResponse, headers, apiKey, ...rest } = options;
+  const resolvedApiKey = isServer ? (apiKey ?? getServerApiKey()) : undefined;
+
+  const res = await fetch(targetUrl, {
     cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': API_KEY,
-      ...(options.headers || {})
+      ...(resolvedApiKey ? { 'X-API-Key': resolvedApiKey } : {}),
+      ...(headers || {})
     },
-    ...options
+    ...rest
   });
 
   if (!res.ok) {
@@ -23,5 +40,5 @@ export async function apiFetch<T>(
   }
 
   const payload = await res.json();
-  return (payload.data ?? payload) as T;
+  return (rawResponse ? payload : (payload.data ?? payload)) as T;
 }

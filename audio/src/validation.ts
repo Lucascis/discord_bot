@@ -132,7 +132,8 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
   const validTypes = [
     'play', 'playnow', 'playnext', 'skip', 'pause', 'resume', 'toggle', 'stop', 'volume', 'loop',
     'loopSet', 'volumeAdjust', 'nowplaying', 'queue', 'seek', 'seekAdjust',
-    'shuffle', 'remove', 'clear', 'move', 'seedRelated', 'disconnect', 'previous', 'mute', 'filters'
+    'shuffle', 'remove', 'clear', 'move', 'seedRelated', 'disconnect', 'previous', 'mute', 'filters',
+    'summon'
   ];
 
   if (!validTypes.includes(msg.type)) {
@@ -312,6 +313,22 @@ export function validateCommandMessage(data: unknown): ValidationResult<CommandM
     if (msg.from < 1 || msg.to < 1) {
       return { success: false, error: 'Indices must be at least 1' };
     }
+  }
+
+  if (msg.type === 'summon') {
+    if (!msg.voiceChannelId || typeof msg.voiceChannelId !== 'string') {
+      return { success: false, error: 'Voice channel ID is required for summon command' };
+    }
+
+    if (!msg.textChannelId || typeof msg.textChannelId !== 'string') {
+      return { success: false, error: 'Text channel ID is required for summon command' };
+    }
+
+    const voiceValidation = validateSnowflake(msg.voiceChannelId, 'Voice Channel ID');
+    if (!voiceValidation.success) return { success: false, error: voiceValidation.error || 'Invalid voice channel ID' };
+
+    const textValidation = validateSnowflake(msg.textChannelId, 'Text Channel ID');
+    if (!textValidation.success) return { success: false, error: textValidation.error || 'Invalid text channel ID' };
   }
 
   if (['nowplaying', 'queue'].includes(msg.type)) {

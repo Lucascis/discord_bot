@@ -180,6 +180,7 @@ STRIPE_PRICE_PREMIUM_YEARLY=price_...
 SENTRY_DSN=https://...@sentry.io/...
 SENTRY_ENVIRONMENT=production
 ENABLE_METRICS=true
+METRICS_IP_ALLOWLIST=127.0.0.1,::1,::ffff:127.0.0.1,172.20.,::ffff:172.20.
 
 # Logging
 LOG_LEVEL=info
@@ -189,7 +190,7 @@ LOG_LEVEL=info
 
 ```bash
 # Using PM2 (recommended)
-pm2 start ecosystem.config.js
+pm2 start npm --name "discord-bot" -- run start
 pm2 save
 pm2 startup
 
@@ -222,13 +223,56 @@ server {
 ### Using Docker Compose
 
 ```bash
-# Production deployment
+# Production deployment (single node)
 docker-compose -f docker-compose.production.yml up -d
 
 # View logs
 docker-compose logs -f gateway audio api
+```
 
-# Scale services
+### Docker-first Release Flow (Recommended)
+
+```bash
+# 1) Validate environment contract/security
+pnpm env:check
+pnpm env:security:check
+
+# 2) Build workspaces and images
+pnpm build
+pnpm deploy:docker:build
+
+# 3) Apply migrations and deploy
+pnpm deploy:docker:up
+
+# 4) Run voice release gate on main stack
+pnpm test:voice:release:main
+```
+
+Manual Discord validation (required before go-live):
+
+1. Join the target voice channel.
+2. Execute `/play` from the target text channel.
+3. Confirm nowplaying UI progresses and audio is audible for 60-90 seconds.
+
+Rollback (immutable image strategy):
+
+```bash
+ROLLBACK_COMPOSE_FILE=docker-compose.rollback.yml pnpm deploy:docker:rollback
+```
+
+For large deployments (≈1000+ guilds) the default `docker-compose.yml` is already tuned:
+
+- **Lavalink**: JVM heap `-Xms1G -Xmx1536M` with G1GC, within a `2G` container limit.
+  - This matches the official recommendation of a modern JVM (Java 17+) with enough headroom for plugins and large queues.
+  - GC warnings from Lavalink’s internal monitor are kept enabled to surface real issues without affecting behavior.
+- **Gateway**: Node.js heap cap raised to `768MB` via `NODE_OPTIONS` and memory limit `768M` in Docker.
+  - Combined with the existing `shards: 'auto'` and cache limits in `gateway/src/main.ts`, this keeps memory stable for thousands of guilds.
+- **Audio/API/Worker**: Dedicated containers with conservative memory limits and health checks on their `/health` endpoints.
+
+When you need horizontal scaling (beyond what a single node can handle), use the provided cluster compose/k8s manifests:
+
+```bash
+# Example: scale Gateway and Audio services
 docker-compose up -d --scale gateway=3 --scale audio=2
 ```
 
@@ -377,7 +421,7 @@ VALUES
   ('plan_basic', 'stripe', 'price_basic_yearly', 4990, 'usd', 'YEAR');
 ```
 
-> 📌 **Important:** the applications will refuse to start if no active plans or prices exist. Load the remaining tiers (Premium, Enterprise, etc.) following the same structure.
+> 📌 **Important:** the applications will refuse to start if no active plans or prices exist. Load at least the three public tiers (FREE, BASIC, PREMIUM → Free / Plus / Pro) following the same structure.
 
 ### 3c. Control Panel Endpoints
 

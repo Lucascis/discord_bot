@@ -6,16 +6,25 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['**/dist/**', '**/node_modules/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      'apps/panel/.next/**',
+      'apps/panel/out/**',
+      '**/*.d.ts',
+    ],
   },
   eslint.configs.recommended,
   {
-    files: ['**/*.{js,mjs,cjs,ts}'],
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
+        ecmaFeatures: {
+          jsx: true,
+        },
       },
       globals: {
         ...globals.node,
@@ -45,6 +54,17 @@ export default [
         varsIgnorePattern: '^_',
         ignoreRestSiblings: true,
       }],
+    },
+  },
+  {
+    files: ['apps/panel/src/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        NodeJS: 'readonly',
+        React: 'readonly',
+      },
     },
   },
   prettier,

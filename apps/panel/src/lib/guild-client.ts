@@ -5,6 +5,8 @@ export type GuildOverview = {
   name: string;
   icon?: string | null;
   available?: boolean;
+  subscriptionTier?: string;
+  isPremium?: boolean;
 };
 
 export type GuildSettings = {
@@ -17,6 +19,10 @@ export type GuildSettings = {
   defaultSearchSource: 'youtube' | 'spotify' | 'soundcloud';
   announceNowPlaying: boolean;
   deleteInvokeMessage: boolean;
+  uiTheme?: {
+    playingColor?: string;
+    pausedColor?: string;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -29,7 +35,8 @@ export type UpdateGuildSettingsInput = Partial<Pick<GuildSettings,
   'allowExplicitContent' |
   'defaultSearchSource' |
   'announceNowPlaying' |
-  'deleteInvokeMessage'
+  'deleteInvokeMessage' |
+  'uiTheme'
 >>;
 
 type GuildPagination = {
@@ -41,9 +48,16 @@ type GuildPagination = {
   hasPrevious: boolean;
 };
 
-export async function getGuilds(): Promise<{ data: GuildOverview[]; pagination: GuildPagination }> {
+const withDiscordIdentityHeader = (discordUserId?: string) =>
+  discordUserId ? { 'x-discord-user-id': discordUserId } : undefined;
+
+export async function getGuilds(apiKey?: string, discordUserId?: string): Promise<{ data: GuildOverview[]; pagination: GuildPagination }> {
   try {
-    return await apiFetch<{ data: GuildOverview[]; pagination: GuildPagination }>('/api/v1/guilds');
+    return await apiFetch<{ data: GuildOverview[]; pagination: GuildPagination }>('/api/v1/panel/guilds', {
+      rawResponse: true,
+      apiKey,
+      headers: withDiscordIdentityHeader(discordUserId)
+    });
   } catch {
     return {
       data: [],
@@ -52,17 +66,27 @@ export async function getGuilds(): Promise<{ data: GuildOverview[]; pagination: 
   }
 }
 
-export async function getGuildSettings(guildId: string): Promise<GuildSettings | null> {
+export async function getGuildSettings(guildId: string, apiKey?: string, discordUserId?: string): Promise<GuildSettings | null> {
   try {
-    return await apiFetch<GuildSettings>(`/api/v1/guilds/${guildId}/settings`);
+    return await apiFetch<GuildSettings>(`/api/v1/panel/guilds/${guildId}/settings`, {
+      apiKey,
+      headers: withDiscordIdentityHeader(discordUserId)
+    });
   } catch {
     return null;
   }
 }
 
-export async function updateGuildSettings(guildId: string, input: UpdateGuildSettingsInput): Promise<void> {
-  await apiFetch(`/api/v1/guilds/${guildId}/settings`, {
+export async function updateGuildSettings(
+  guildId: string,
+  input: UpdateGuildSettingsInput,
+  apiKey?: string,
+  discordUserId?: string
+): Promise<void> {
+  await apiFetch(`/api/v1/panel/guilds/${guildId}/settings`, {
     method: 'PUT',
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
+    apiKey,
+    headers: withDiscordIdentityHeader(discordUserId)
   });
 }

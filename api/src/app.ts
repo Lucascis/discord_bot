@@ -8,6 +8,7 @@ import { Registry, collectDefaultMetrics } from 'prom-client';
 import { HealthChecker, CommonHealthChecks, logger } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
 import { env } from '@discord-bot/config';
+import { SubscriptionTier, getLimitValue } from '@discord-bot/subscription';
 import metricsRouter from './routes/metrics.js';
 import { errorHandler, notFoundHandler, UnauthorizedError } from './middleware/error-handler.js';
 import { apiKeySchema } from './middleware/validation.js';
@@ -44,20 +45,54 @@ app.use(helmet({
 }));
 
 // Rate limiting configuration (subscription-aware)
-const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10);
-const strictRateLimitWindowMs = parseInt(
-  process.env.RATE_LIMIT_STRICT_WINDOW_MS || process.env.RATE_LIMIT_WINDOW_MS || '900000',
-  10
-);
-const strictRateLimitMax = parseInt(process.env.RATE_LIMIT_STRICT_MAX || '20', 10);
+const rateLimitWindowMs = env.RATE_LIMIT_WINDOW_MS;
+const strictRateLimitWindowMs = env.RATE_LIMIT_STRICT_WINDOW_MS || env.RATE_LIMIT_WINDOW_MS;
+const strictRateLimitMax = env.RATE_LIMIT_STRICT_MAX;
 const shouldUseInMemoryRateLimit =
-  process.env.NODE_ENV === 'test' ||
-  process.env.API_RATE_LIMIT_IN_MEMORY === 'true' ||
+  env.NODE_ENV === 'test' ||
+  env.API_RATE_LIMIT_IN_MEMORY ||
   !env.REDIS_URL;
 const sharedRateLimitStore = shouldUseInMemoryRateLimit
   ? new InMemoryRateLimitStore()
   : createRateLimitStore(env.REDIS_URL);
 const strictPaths = ['/metrics', '/security/info'];
+
+const metricsIpAllowlist = (env.METRICS_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1,172.20.,::ffff:172.20.')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+const metricsPathPattern = /^\/metrics(\/|$)/;
+
+const isTrustedMetricsRequest = (req: express.Request): boolean => {
+  const requestPath = req.originalUrl || req.baseUrl || req.path || '';
+  if (!metricsPathPattern.test(requestPath)) {
+    return false;
+  }
+
+  const remoteAddress = req.ip || req.socket.remoteAddress || '';
+  if (!remoteAddress) {
+    return false;
+  }
+
+  return metricsIpAllowlist.some((entry) => {
+    if (entry.endsWith('*')) {
+      const prefix = entry.slice(0, -1);
+      return remoteAddress.startsWith(prefix);
+    }
+    return remoteAddress === entry || remoteAddress.startsWith(entry);
+  });
+};
+
+const resolveTier = (value?: string): SubscriptionTier => {
+  if (!value) {
+    return SubscriptionTier.FREE;
+  }
+  const normalized = value.toUpperCase();
+  return (SubscriptionTier as Record<string, SubscriptionTier>)[normalized] ?? SubscriptionTier.FREE;
+};
+
+const defaultRateLimitTier = resolveTier(env.API_RATE_LIMIT_DEFAULT_TIER);
 
 const dynamicRateLimiter = new DynamicRateLimiter({
   store: sharedRateLimitStore,
@@ -66,6 +101,15 @@ const dynamicRateLimiter = new DynamicRateLimiter({
     req.path === '/health' ||
     req.path === '/ready' ||
     strictPaths.some((path) => req.path.startsWith(path)),
+  defaultTier: defaultRateLimitTier,
+  // Use API_RATE_LIMIT limit; fallback to unlimited if misconfigured
+  limitResolver: (tier) => {
+    const value = getLimitValue('API_RATE_LIMIT', tier);
+    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
+      return RATE_LIMIT_UNLIMITED;
+    }
+    return value;
+  },
   // In test mode, use much higher limits EXCEPT for rate-limiting tests
   // (detected by special test API key suffix)
   ...(env.NODE_ENV === 'test' && {
@@ -85,6 +129,7 @@ const strictRateLimiter = new DynamicRateLimiter({
   windowMs: strictRateLimitWindowMs,
   keyPrefix: 'ratelimit:strict:',
   skip: (req) => req.path === '/health' || req.path === '/ready',
+  defaultTier: defaultRateLimitTier,
   limitResolver: (tier) => {
     const baseLimit = dynamicRateLimiter.resolveLimit(tier);
     if (baseLimit === RATE_LIMIT_UNLIMITED) {
@@ -101,7 +146,7 @@ const corsOptions = {
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+    const allowedOrigins = (env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
 
     // In development, allow localhost
     if (env.NODE_ENV === 'development') {
@@ -141,7 +186,11 @@ app.use(express.urlencoded({
 // Enhanced API Key authentication middleware with validation
 const apiKeyAuth = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
   const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-  const expectedApiKey = env.API_KEY || process.env.API_KEY;
+  const expectedApiKey = env.API_KEY;
+
+  if (isTrustedMetricsRequest(req)) {
+    return next();
+  }
 
   if (!expectedApiKey) {
     logger.warn('API_KEY not configured - API endpoints will be unprotected');
@@ -159,7 +208,7 @@ const apiKeyAuth = (req: express.Request, _res: express.Response, next: express.
       ip: req.ip,
       userAgent: req.headers['user-agent'],
       path: req.path,
-      error: validation.error.errors
+      error: validation.error.issues
     }, 'Invalid API key format');
 
     return next(new UnauthorizedError('Invalid API key format'));

@@ -90,9 +90,9 @@ describe('Plan administration routes', () => {
       displayName: 'Nuevo plan',
       description: 'desc',
       features: { experiments: ['BF2025'] },
-      active: true,
-      prices: []
+      active: true
     } as never);
+    vi.mocked(prisma.subscriptionPrice.findMany).mockResolvedValue([] as never);
 
     const res = await request(app)
       .put('/api/v1/plans/plan-1')

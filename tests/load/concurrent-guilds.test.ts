@@ -34,6 +34,9 @@ const PERFORMANCE_TARGETS = {
   THROUGHPUT_MIN: 100,   // Min 100 req/s
 };
 
+const RUN_LOAD_TESTS = process.env.RUN_LOAD_TESTS === 'true';
+const describeLoad = RUN_LOAD_TESTS ? describe : describe.skip;
+
 interface PerformanceMetrics {
   totalRequests: number;
   successfulRequests: number;
@@ -44,7 +47,7 @@ interface PerformanceMetrics {
   memoryUsage: NodeJS.MemoryUsage;
 }
 
-describe.skip('Load Test: Concurrent Guilds (requires full infrastructure)', () => {
+describeLoad('Load Test: Concurrent Guilds (requires full infrastructure)', () => {
   let prisma: PrismaClient;
   let redis: Redis;
 

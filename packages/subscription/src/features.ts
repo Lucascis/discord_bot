@@ -3,8 +3,9 @@
  * Defines all features available in the subscription system
  */
 
-import { SubscriptionTier, FeatureCategory, } from '@prisma/client';
+import { SubscriptionTier, FeatureCategory, SubscriptionStatus, ResetPeriod } from '@discord-bot/database';
 import type { FeatureFlag } from './types.js';
+import type { PrismaClient } from '@discord-bot/database';
 
 /**
  * All available features in the system
@@ -20,8 +21,8 @@ export const FEATURES: Record<string, FeatureFlag> = {
     defaultValue: 1,
     valuesByTier: {
       [SubscriptionTier.FREE]: 1,
-      [SubscriptionTier.BASIC]: 3,
-      [SubscriptionTier.PREMIUM]: 10,
+      [SubscriptionTier.BASIC]: 1,
+      [SubscriptionTier.PREMIUM]: 3,
       [SubscriptionTier.ENTERPRISE]: -1, // unlimited
     },
   },

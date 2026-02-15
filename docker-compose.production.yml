@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15.8-alpine3.20
     container_name: discord-bot-postgres
     restart: unless-stopped
     environment:
@@ -24,10 +24,10 @@ services:
 
   # Redis Cache
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.1-alpine3.20
     container_name: discord-bot-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     ports:
@@ -47,7 +47,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      JAVA_OPTS: "-Xmx1G -Xms512M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+      # Tuned for thousands of guilds: larger, steady heap with G1GC.
+      # Kept below the container memory limit to leave headroom.
+      JAVA_OPTS: "-Xms1G -Xmx1536M -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
       - ./lavalink/plugins:/opt/Lavalink/plugins:rw
@@ -56,6 +58,12 @@ services:
       - "2333:2333"
     networks:
       - discord-bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider --header='Authorization: ${LAVALINK_PASSWORD}' http://localhost:2333/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   # Database Migrations
   migrate:
@@ -65,7 +73,9 @@ services:
       target: builder
     container_name: discord-bot-migrate
     env_file: .env
-    command: sh -c "pnpm --filter @discord-bot/database prisma migrate deploy && pnpm --filter @discord-bot/database prisma db seed"
+    command: >
+      sh -c "pnpm --filter @discord-bot/database prisma:deploy
+      && pnpm --filter @discord-bot/database exec -- prisma db seed"
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +95,8 @@ services:
     environment:
       SERVICE_NAME: gateway
       NODE_ENV: production
+      # Increased heap cap for large shard counts (1k+ guilds)
+      NODE_OPTIONS: "--expose-gc --max-old-space-size=768"
     ports:
       - "3001:3001"
     depends_on:
@@ -106,7 +118,7 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 512M
+          memory: 768M
 
   # Audio Service (Music Playback)
   audio:
@@ -120,6 +132,8 @@ services:
     environment:
       SERVICE_NAME: audio
       NODE_ENV: production
+      # Audio service handles heavy queue/search workloads
+      NODE_OPTIONS: "--expose-gc --max-old-space-size=1024"
     ports:
       - "3002:3002"
     depends_on:
@@ -217,7 +231,7 @@ services:
 
   # Prometheus Metrics
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: discord-bot-prometheus
     restart: unless-stopped
     volumes:
@@ -236,7 +250,7 @@ services:
 
   # Grafana Dashboards
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.3.0
     container_name: discord-bot-grafana
     restart: unless-stopped
     environment:

@@ -1,16 +1,14 @@
 // Load environment variables FIRST, before any other imports
 import './env-loader.js';
 
-import { Client,
-  GatewayIntentBits,
+import {
   Events,
-  LimitedCollection,
-  Collection,
   GatewayDispatchEvents,
   ButtonInteraction,
-  StringSelectMenuInteraction } from 'discord.js';
+  StringSelectMenuInteraction,
+  Guild
+} from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
-import { createClient } from 'redis';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
@@ -21,25 +19,30 @@ import { PrismaGuildSettingsRepository } from './infrastructure/database/prisma-
 import { RedisMusicSessionRepository } from './infrastructure/redis/redis-music-session-repository.js';
 import { DiscordAudioService } from './infrastructure/discord/discord-audio-service.js';
 import { DiscordPermissionService } from './infrastructure/discord/discord-permission-service.js';
+import { RedisManager } from './infrastructure/redis/redis-manager.js';
+import { DiscordClientManager } from './infrastructure/discord/discord-client-manager.js';
 
 // Cache system imports
 import { RedisCircuitBreaker } from '@discord-bot/cache';
 import { SearchCache, UserCache, QueueCache, SettingsCache } from '@discord-bot/cache';
 // Message validation imports
-import { safeValidateVoiceCredentialsMessage,
+import {
+  safeValidateVoiceCredentialsMessage,
   safeValidateVoiceCredentials,
   safeValidateCommand,
-  safeValidateTrackQueued } from '@discord-bot/cache';
+  safeValidateTrackQueued
+} from '@discord-bot/cache';
 
 // Redis Streams services
 import { AudioCommandService } from './services/audio-command-service.js';
+import type { AudioCommand } from '@discord-bot/audio-control';
 
 // Domain Layer
 import { MusicSessionDomainService } from './domain/services/music-session-domain-service.js';
+import { VoiceManager } from './domain/services/voice-manager.js';
 
 // Application Layer
 import { PlayMusicUseCase } from './application/use-cases/play-music-use-case.js';
-import { ControlMusicUseCase } from './application/use-cases/control-music-use-case.js';
 
 // Presentation Layer
 import { MusicController } from './presentation/controllers/music-controller.js';
@@ -67,14 +70,11 @@ import { HealthServer } from './infrastructure/http/health-server.js';
  * Composition Root
  * Dependency injection and application bootstrapping
  */
-class GatewayApplication {
-  private discordClient!: Client;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private redisClient!: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private redisSubscriber!: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private audioRedisClient!: any;
+export class GatewayApplication {
+  private redisManager!: RedisManager;
+  private discordClientManager!: DiscordClientManager;
+  private voiceManager!: VoiceManager;
+
   private audioCommandService!: AudioCommandService;
   private musicController!: MusicController;
   private healthChecker!: ApplicationHealthChecker;
@@ -86,7 +86,7 @@ class GatewayApplication {
   private voteSkipService!: VoteSkipService;
   private premiumController!: PremiumController;
 
-  // UI Message Tracking System (Rule 1: Only one UI PRINCIPAL per channel)
+  // UI Message Tracking System (Rule 1: Only one UI PRINCIPAL per voice session)
   private activeInteractions: Map<string, {
     messageId: string;
     channelId: string;
@@ -95,9 +95,6 @@ class GatewayApplication {
     processingMessageId?: string;
     uiBlocked?: boolean; // New: Prevents UI recreation after manual deletion
   }> = new Map();
-
-  // Voice Server Data Storage (for token and endpoint)
-  private voiceServerData: Map<string, { token: string; endpoint: string; processedAt?: number }> = new Map();
 
   // Request Deduplication System (prevents concurrent queue requests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,6 +109,134 @@ class GatewayApplication {
     settingsCache: SettingsCache;
   };
 
+  // Preferred text channel for music UI per guild/voice combination
+  private lastUIChannel: Map<string, string> = new Map();
+  private guildThemeCache: Map<string, { playingColor: number; pausedColor: number; fetchedAt: number }> = new Map();
+  private voiceRequestContext: Map<string, {
+    requestId: string;
+    voiceChannelId: string;
+    createdAt: number;
+    lastEventAt: number;
+    voiceStateUpdates: number;
+    voiceServerUpdates: number;
+  }> = new Map();
+  private pendingVoiceDisconnectStops: Map<string, NodeJS.Timeout> = new Map();
+  private readonly transientVoiceDisconnectGraceMs = 8_000;
+
+  private getUIChannelMapKey(guildId: string, voiceChannelId?: string | null): string {
+    return `${guildId}:${voiceChannelId ?? 'default'}`;
+  }
+
+  private getUISessionKey(guildId: string, voiceChannelId?: string | null, channelId?: string | null): string {
+    if (voiceChannelId) return this.getUIChannelMapKey(guildId, voiceChannelId);
+    return `${guildId}:${channelId ?? 'default'}`;
+  }
+
+  private rememberUIChannel(guildId: string, textChannelId: string, voiceChannelId?: string | null): void {
+    this.lastUIChannel.set(this.getUIChannelMapKey(guildId, voiceChannelId), textChannelId);
+    this.lastUIChannel.set(this.getUIChannelMapKey(guildId, null), textChannelId);
+  }
+
+  private registerVoiceRequestContext(guildId: string, requestId: string, voiceChannelId: string): void {
+    this.voiceRequestContext.set(guildId, {
+      requestId,
+      voiceChannelId,
+      createdAt: Date.now(),
+      lastEventAt: Date.now(),
+      voiceStateUpdates: 0,
+      voiceServerUpdates: 0,
+    });
+  }
+
+  private getVoiceRequestContext(guildId: string): {
+    requestId: string;
+    voiceChannelId: string;
+    createdAt: number;
+    lastEventAt: number;
+    voiceStateUpdates: number;
+    voiceServerUpdates: number;
+  } | undefined {
+    const context = this.voiceRequestContext.get(guildId);
+    if (!context) return undefined;
+    if ((Date.now() - context.createdAt) > 10 * 60_000) {
+      this.voiceRequestContext.delete(guildId);
+      return undefined;
+    }
+    return context;
+  }
+
+  private trackVoiceEvent(guildId: string, eventType: 'VOICE_STATE_UPDATE' | 'VOICE_SERVER_UPDATE'): {
+    requestId?: string;
+    voiceChannelId?: string;
+    voiceStateUpdates: number;
+    voiceServerUpdates: number;
+  } {
+    const context = this.getVoiceRequestContext(guildId);
+    if (!context) {
+      return {
+        voiceStateUpdates: 0,
+        voiceServerUpdates: 0,
+      };
+    }
+
+    if (eventType === 'VOICE_STATE_UPDATE') {
+      context.voiceStateUpdates += 1;
+    } else {
+      context.voiceServerUpdates += 1;
+    }
+    context.lastEventAt = Date.now();
+    this.voiceRequestContext.set(guildId, context);
+
+    return {
+      requestId: context.requestId,
+      voiceChannelId: context.voiceChannelId,
+      voiceStateUpdates: context.voiceStateUpdates,
+      voiceServerUpdates: context.voiceServerUpdates,
+    };
+  }
+
+  private clearPendingVoiceDisconnectStop(guildId: string): void {
+    const timer = this.pendingVoiceDisconnectStops.get(guildId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.pendingVoiceDisconnectStops.delete(guildId);
+  }
+
+  private parseHexColorToInt(value?: string): number | undefined {
+    if (!value || typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!/^#?[0-9a-fA-F]{6}$/.test(trimmed)) return undefined;
+    return parseInt(trimmed.replace('#', ''), 16);
+  }
+
+  private async resolveGuildTheme(guildId: string): Promise<{ playingColor: number; pausedColor: number }> {
+    const cached = this.guildThemeCache.get(guildId);
+    const now = Date.now();
+    if (cached && now - cached.fetchedAt < 30_000) {
+      return { playingColor: cached.playingColor, pausedColor: cached.pausedColor };
+    }
+
+    const fallback = { playingColor: 0x6A0DAD, pausedColor: 0xFFAA00 };
+
+    try {
+      const metaRaw = await this.redisManager.getClient().get(`discord-bot:guild-settings:${guildId}:meta`);
+      if (metaRaw) {
+        const meta = JSON.parse(metaRaw) as { uiTheme?: { playingColor?: string; pausedColor?: string } };
+        const playingColor = this.parseHexColorToInt(meta.uiTheme?.playingColor) ?? fallback.playingColor;
+        const pausedColor = this.parseHexColorToInt(meta.uiTheme?.pausedColor) ?? fallback.pausedColor;
+        this.guildThemeCache.set(guildId, { playingColor, pausedColor, fetchedAt: now });
+        this.uiBuilder.setGuildTheme(guildId, { playingColor, pausedColor });
+        return { playingColor, pausedColor };
+      }
+    } catch (error) {
+      logger.warn({ error, guildId }, 'Failed to resolve guild theme, using defaults');
+    }
+
+    this.guildThemeCache.set(guildId, { ...fallback, fetchedAt: now });
+    this.uiBuilder.setGuildTheme(guildId, fallback);
+    return fallback;
+  }
+
   async initialize(): Promise<void> {
     logger.info('Initializing Gateway application with Clean Architecture...');
 
@@ -122,7 +247,11 @@ class GatewayApplication {
     await loadPlansFromDatabase(prisma);
 
     // Initialize external services
-    await this.initializeClients();
+    this.redisManager = new RedisManager();
+    await this.redisManager.connect();
+
+    this.discordClientManager = new DiscordClientManager();
+    this.voiceManager = new VoiceManager();
 
     // Initialize enterprise cache system
     await this.initializeCacheSystem();
@@ -133,7 +262,7 @@ class GatewayApplication {
     // Initialize AudioCommandService for Redis Streams
     await this.audioCommandService.initialize();
 
-    // Ensure demo guilds start on enterprise tier for QA
+    // Ensure demo guilds start on premium tier for QA
     await this.premiumController.initializeTestGuilds();
 
     // Setup Redis subscriptions for Audio service communication
@@ -148,225 +277,8 @@ class GatewayApplication {
     logger.info('Gateway application initialized successfully');
   }
 
-  private async initializeClients(): Promise<void> {
-    // Initialize Discord client with enterprise-grade configuration and memory-optimized caches
-    this.discordClient = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-      ],
-      // Enterprise scaling configuration
-      shards: 'auto', // Auto-scale shards based on guild count
-      // Connection resilience and memory optimization
-      ws: {
-        large_threshold: 50, // Reduced from 250 to optimize memory usage
-      },
-      // Rate limiting optimization
-      rest: {
-        timeout: 15000, // 15 second timeout
-        retries: 3,
-        globalRequestsPerSecond: 50 // Rate limit global requests
-      },
-      // Memory-optimized cache limits for SUPPORTED managers only
-      // WARNING: GuildManager, ChannelManager, GuildChannelManager, RoleManager, PermissionOverwriteManager
-      // are NOT supported for cache overrides and will break functionality if customized
-      makeCache: (manager) => {
-        switch (manager.name) {
-          case 'UserManager':
-            // Limit users cache to 1000 entries to prevent memory bloat
-            return new LimitedCollection({ maxSize: 1000 });
-          case 'MessageManager':
-            // Limit messages per channel to 50 for recent message access
-            return new LimitedCollection({ maxSize: 50 });
-          case 'VoiceStateManager':
-            // Limit voice states to 500 for voice channel management
-            return new LimitedCollection({ maxSize: 500 });
-          case 'GuildMemberManager':
-            // Limit guild members cache to 200 per guild
-            return new LimitedCollection({ maxSize: 200 });
-          case 'BaseGuildEmojiManager':
-            // Limit emoji cache to 100 per guild (corrected manager name)
-            return new LimitedCollection({ maxSize: 100 });
-          case 'PresenceManager':
-            // Limit presence cache to 200 to reduce memory usage
-            return new LimitedCollection({ maxSize: 200 });
-          case 'ReactionManager':
-            // Limit reaction cache to 50 per message
-            return new LimitedCollection({ maxSize: 50 });
-          case 'GuildBanManager':
-            // Limit ban cache to 100 per guild
-            return new LimitedCollection({ maxSize: 100 });
-          case 'GuildInviteManager':
-            // Limit invite cache to 50 per guild
-            return new LimitedCollection({ maxSize: 50 });
-          case 'ThreadManager':
-            // Limit thread cache to 100 per channel
-            return new LimitedCollection({ maxSize: 100 });
-          default:
-            // DO NOT override unsupported managers (GuildManager, ChannelManager, etc.)
-            // Return default Collection to prevent "UnsupportedCacheOverwriteWarning"
-            return new Collection();
-        }
-      }
-    });
-
-    // Initialize Redis client with enterprise configuration
-    this.redisClient = createClient({
-      url: env.REDIS_URL,
-      // Connection pool for high concurrency
-      socket: {
-        connectTimeout: 5000,
-        keepAlive: true,
-        noDelay: true
-      },
-      // Memory optimization
-    });
-
-    // Create separate Redis client for subscriptions
-    this.redisSubscriber = createClient({
-      url: env.REDIS_URL,
-      socket: {
-        connectTimeout: 5000,
-        keepAlive: true,
-        noDelay: true
-      }
-    });
-
-    // Create dedicated Redis client for raw Discord events to Audio service
-    this.audioRedisClient = createClient({
-      url: env.REDIS_URL,
-      socket: {
-        connectTimeout: 5000,
-        keepAlive: true,
-        noDelay: true
-      }
-    });
-
-    await this.redisClient.connect();
-    await this.redisSubscriber.connect();
-    await this.audioRedisClient.connect();
-    logger.info('Redis client, subscriber and audio client connected');
-
-    // Setup Redis reconnection handlers for graceful recovery
-    this.setupRedisReconnectionHandlers();
-  }
-
-  /**
-   * Setup Redis reconnection handlers to restore subscriptions after connection loss
-   * Implements automatic recovery for Redis pub/sub channels without manual intervention
-   */
-  private setupRedisReconnectionHandlers(): void {
-    // Redis Subscriber Reconnection Handler
-    this.redisSubscriber.on('reconnecting', () => {
-      logger.warn('Redis subscriber connection lost, attempting to reconnect...');
-    });
-
-    this.redisSubscriber.on('connect', async () => {
-      logger.info('Redis subscriber reconnected successfully');
-      // Restore all subscriptions after reconnection
-      try {
-        await this.restoreRedisSubscriptions();
-        logger.info('Successfully restored Redis subscriptions after reconnection');
-      } catch (error: unknown) {
-        logger.error({ error }, 'Failed to restore Redis subscriptions after reconnection');
-      }
-    });
-
-    this.redisSubscriber.on('error', (error: Error) => {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis subscriber connection error');
-    });
-
-    // Audio Redis Client Reconnection Handler
-    this.audioRedisClient.on('reconnecting', () => {
-      logger.warn('Audio Redis client connection lost, attempting to reconnect...');
-    });
-
-    this.audioRedisClient.on('connect', () => {
-      logger.info('Audio Redis client reconnected successfully');
-      // Note: audioRedisClient is only used for publishing raw events, subscriptions not needed
-    });
-
-    this.audioRedisClient.on('error', (error: Error) => {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Audio Redis client connection error');
-    });
-
-    // Main Redis Client Error Handler (for operations)
-    this.redisClient.on('error', (error: Error) => {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Redis client connection error');
-    });
-
-    logger.info('Redis reconnection handlers configured for graceful recovery');
-  }
-
-  /**
-   * Restore Redis subscriptions after reconnection
-   * Re-subscribes to all channels that were lost during disconnection
-   * Uses the same handlers as initial setupRedisSubscriptions for consistency
-   */
-  private async restoreRedisSubscriptions(): Promise<void> {
-    logger.info('Restoring Redis subscriptions after reconnection...');
-
-    try {
-      // Channels to restore: discord-bot:to-discord, discord-bot:ui:now
-      const channelsToRestore = [
-        'discord-bot:to-discord',
-        'discord-bot:ui:now'
-      ];
-
-      let successCount = 0;
-      let failureCount = 0;
-
-      for (const channel of channelsToRestore) {
-        try {
-          if (channel === 'discord-bot:to-discord') {
-            await this.redisSubscriber.subscribe(channel, (message: string) => {
-              try {
-                const data = JSON.parse(message);
-                logger.debug({ data }, 'Received message from Audio service on discord-bot:to-discord (restored subscription)');
-                this.handleAudioServiceMessage(data).catch(error => {
-                  logger.error({ error, channel }, 'Error handling audio service message after reconnection');
-                });
-              } catch (error) {
-                logger.error({ error, message }, 'Failed to parse message from discord-bot:to-discord (restored subscription)');
-              }
-            });
-          } else if (channel === 'discord-bot:ui:now') {
-            await this.redisSubscriber.subscribe(channel, (message: string) => {
-              try {
-                const data = JSON.parse(message);
-                logger.debug({ data }, 'Received UI update from Audio service (restored subscription)');
-                this.handleUIUpdate(data).catch(error => {
-                  logger.error({ error, channel }, 'Error handling UI update after reconnection');
-                });
-              } catch (error) {
-                logger.error({ error, message }, 'Failed to parse UI update message (restored subscription)');
-              }
-            });
-          }
-
-          logger.info({ channel }, 'Successfully restored subscription to channel after reconnection');
-          successCount++;
-        } catch (subscriptionError) {
-          logger.error({ channel, error: subscriptionError }, 'Failed to restore subscription to channel after reconnection');
-          failureCount++;
-        }
-      }
-
-      logger.info({
-        channels: channelsToRestore,
-        restored: successCount,
-        failed: failureCount
-      }, 'Redis subscription restoration completed');
-
-      if (failureCount > 0) {
-        logger.warn({ failureCount, totalChannels: channelsToRestore.length }, 'Some subscriptions failed to restore - service may have degraded functionality');
-      }
-    } catch (error) {
-      logger.error({ error }, 'Critical error during Redis subscription restoration');
-      throw error;
-    }
+  private getActiveInstanceKey(guildId: string): string {
+    return `discord-bot:active-instances:${guildId}`;
   }
 
   private async initializeCacheSystem(): Promise<void> {
@@ -448,11 +360,18 @@ class GatewayApplication {
     // Infrastructure Layer (Adapters)
     this.guildSettingsRepository = new PrismaGuildSettingsRepository(prisma);
     this.settingsService = new SettingsService(prisma, this.cacheSystem.settingsCache);
-    const musicSessionRepository = new RedisMusicSessionRepository(this.redisClient);
+    const musicSessionRepository = new RedisMusicSessionRepository(this.redisManager.getClient());
 
     // Use enterprise-grade cache system instead of basic stub
-    const audioService = new DiscordAudioService(this.redisClient, this.redisSubscriber, this.cacheSystem.searchCache);
-    const permissionService = new DiscordPermissionService(this.discordClient);
+    const audioService = new DiscordAudioService(
+      { publish: this.redisManager.publish.bind(this.redisManager) },
+      {
+        subscribe: this.redisManager.subscribe.bind(this.redisManager),
+        unsubscribe: this.redisManager.unsubscribe.bind(this.redisManager)
+      },
+      this.cacheSystem.searchCache
+    );
+    const permissionService = new DiscordPermissionService(this.discordClientManager.getClient());
     this.permissionService = permissionService;
 
     // Initialize VoteSkipService
@@ -475,14 +394,6 @@ class GatewayApplication {
       permissionService
     );
 
-    const _controlMusicUseCase = new ControlMusicUseCase(
-      musicSessionRepository,
-      this.guildSettingsRepository,
-      musicSessionDomainService,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {} as any /* audio control service */
-    );
-
     // Commercial Use Cases
     const _subscriptionManagementUseCase = new SubscriptionManagementUseCase(
       customerRepository,
@@ -498,29 +409,19 @@ class GatewayApplication {
     // Create event bus instance for controller
     const eventBus = {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      publish: async (channel: string, message: any) => {
-        try {
-          await this.redisClient.publish(channel, typeof message === 'string' ? message : JSON.stringify(message));
-        } catch (error) {
-          logger.error({ error, channel }, 'Failed to publish message to Redis');
-        }
+      publish: async (channel: string, message: any): Promise<void> => {
+        await this.redisManager.publish(channel, message);
       },
       subscribe: async (channel: string, callback: (channel: string, message: string) => void) => {
-        try {
-          // Use dedicated subscriber client
-          await this.redisSubscriber.subscribe(channel, (message: string, receivedChannel: string) => {
-            callback(receivedChannel, message);
-          });
-          logger.debug({ channel }, 'Subscribed to Redis channel');
-        } catch (error) {
-          logger.error({ error, channel }, 'Failed to subscribe to Redis channel');
-        }
+        await this.redisManager.subscribe(channel, (message, receivedChannel) => {
+          callback(receivedChannel, message);
+        });
       }
     };
 
     // Processing message registration callback for the music controller
-    const registerProcessingMessage = (guildId: string, channelId: string, messageId: string) => {
-      const channelKey = `${guildId}:${channelId}`;
+    const registerProcessingMessage = (guildId: string, channelId: string, messageId: string, voiceChannelId?: string | null) => {
+      const channelKey = this.getUISessionKey(guildId, voiceChannelId ?? null, channelId);
       const existingInteraction = this.activeInteractions.get(channelKey);
 
       if (existingInteraction) {
@@ -548,8 +449,8 @@ class GatewayApplication {
     };
 
     // Clear UI block callback for the music controller
-    const clearUIBlock = (guildId: string, channelId: string) => {
-      const channelKey = `${guildId}:${channelId}`;
+    const clearUIBlock = (guildId: string, channelId: string, voiceChannelId?: string | null) => {
+      const channelKey = this.getUISessionKey(guildId, voiceChannelId ?? null, channelId);
       const existingInteraction = this.activeInteractions.get(channelKey);
 
       if (existingInteraction?.uiBlocked) {
@@ -566,18 +467,80 @@ class GatewayApplication {
       }
     };
 
+    const shouldForceVoiceReconnect = (guildId: string): boolean => {
+      return !this.voiceManager.hasVoiceServerData(guildId);
+    };
+
+    const publishCachedVoiceServerUpdate = async (guildId: string): Promise<void> => {
+      const cached = this.voiceManager.getVoiceServerData(guildId);
+      if (!cached?.token || !cached?.endpoint) return;
+      const packet = {
+        t: 'VOICE_SERVER_UPDATE',
+        d: {
+          guild_id: guildId,
+          token: cached.token,
+          endpoint: cached.endpoint
+        }
+      };
+      await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet));
+    };
+
+    const publishCachedVoiceStateUpdate = async (guildId: string, fallbackVoiceChannelId?: string): Promise<boolean> => {
+      try {
+        const client = this.discordClientManager.getClient();
+        const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild || !client.user?.id) return false;
+
+        const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+        const cachedState = this.voiceManager.getVoiceStateData(guildId);
+        const sessionId = me?.voice?.sessionId ?? cachedState?.sessionId;
+        const channelId = me?.voice?.channelId ?? fallbackVoiceChannelId ?? cachedState?.channelId ?? null;
+        if (!sessionId) {
+          logger.warn({ guildId }, 'VOICE_CONNECT: No cached sessionId available for VOICE_STATE_UPDATE publish');
+          return false;
+        }
+
+        const packet = {
+          t: 'VOICE_STATE_UPDATE',
+          d: {
+            guild_id: guildId,
+            channel_id: channelId,
+            user_id: client.user.id,
+            session_id: sessionId,
+            self_mute: me?.voice?.selfMute ?? false,
+            self_deaf: me?.voice?.selfDeaf ?? true,
+          }
+        };
+
+        await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet));
+        return true;
+      } catch (error) {
+        logger.warn({
+          guildId,
+          error: error instanceof Error ? error.message : String(error),
+        }, 'VOICE_CONNECT: Failed to publish cached VOICE_STATE_UPDATE');
+        return false;
+      }
+    };
+
+    // Initialize AudioCommandService for Redis Streams
+    this.audioCommandService = new AudioCommandService();
+
     this.musicController = new MusicController(
       eventBus,
       this.uiBuilder,
       responseHandler,
       this.settingsService,
-      permissionService,
+      this.permissionService,
+      musicSessionRepository,
+      this.audioCommandService,
       registerProcessingMessage,
-      clearUIBlock
+      clearUIBlock,
+      shouldForceVoiceReconnect,
+      publishCachedVoiceStateUpdate,
+      publishCachedVoiceServerUpdate,
+      this.registerVoiceRequestContext.bind(this)
     );
-
-    // Initialize AudioCommandService for Redis Streams
-    this.audioCommandService = new AudioCommandService();
 
     // Initialize Premium Controller
     this.premiumController = new PremiumController({
@@ -589,10 +552,19 @@ class GatewayApplication {
 
   private setupHealthMonitoring(): void {
     // Initialize health checker with all dependencies
-    this.healthChecker = new ApplicationHealthChecker(this.redisClient, this.discordClient);
+    this.healthChecker = new ApplicationHealthChecker(
+      this.redisManager.getClient(),
+      this.discordClientManager.getClient()
+    );
 
     // Start health server on port 3001
     this.healthServer = new HealthServer(this.healthChecker, env.GATEWAY_HTTP_PORT || 3001);
+    let lastManualGcAt = 0;
+    const manualGcEnabled = process.env.GATEWAY_MANUAL_GC_ENABLED === 'true';
+    const parsedHeapThreshold = Number.parseFloat(process.env.GATEWAY_GC_HEAP_THRESHOLD ?? '0.9');
+    const parsedMinGcIntervalMs = Number.parseInt(process.env.GATEWAY_GC_MIN_INTERVAL_MS ?? '600000', 10);
+    const gcHeapThreshold = Number.isFinite(parsedHeapThreshold) ? Math.min(0.99, Math.max(0.5, parsedHeapThreshold)) : 0.9;
+    const gcMinIntervalMs = Number.isFinite(parsedMinGcIntervalMs) ? Math.max(60_000, parsedMinGcIntervalMs) : 600_000;
 
     // Enhanced health monitoring with enterprise metrics
     setInterval(async () => {
@@ -601,6 +573,7 @@ class GatewayApplication {
       // Log comprehensive system metrics
       const memoryUsage = process.memoryUsage();
       const uptime = process.uptime();
+      const client = this.discordClientManager.getClient();
 
       logger.info({
         systemHealth: {
@@ -615,25 +588,42 @@ class GatewayApplication {
             seconds: Math.round(uptime),
             hours: Math.round(uptime / 3600 * 100) / 100
           },
-          discordGuilds: this.discordClient.guilds.cache.size,
-          discordUsers: this.discordClient.users.cache.size,
-          discordPing: this.discordClient.ws.ping,
+          discordGuilds: client.guilds.cache.size,
+          discordUsers: client.users.cache.size,
+          discordPing: client.ws.ping,
           nodeVersion: process.version,
           pid: process.pid
         }
       }, 'Enterprise system health metrics');
 
       // Memory cleanup trigger for high usage
-      if (memoryUsage.heapUsed / memoryUsage.heapTotal > 0.8) {
+      const heapUsageRatio = memoryUsage.heapUsed / memoryUsage.heapTotal;
+      const heapUsagePercent = Math.round(heapUsageRatio * 100);
+      const threshold = gcHeapThreshold;
+      const shouldConsiderGc = heapUsageRatio > threshold;
+      if (shouldConsiderGc) {
         logger.warn({
-          heapUsagePercent: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100),
-          heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024)
-        }, 'High memory usage detected - triggering GC');
+          heapUsagePercent,
+          heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+          thresholdPercent: Math.round(threshold * 100),
+          manualGcEnabled,
+        }, 'High memory usage detected');
 
-        // Force garbage collection if exposed
-        if (global.gc) {
-          global.gc();
-          logger.info('Manual garbage collection completed');
+        if (manualGcEnabled && global.gc) {
+          const elapsed = Date.now() - lastManualGcAt;
+          if (elapsed >= gcMinIntervalMs) {
+            global.gc();
+            lastManualGcAt = Date.now();
+            logger.info({
+              heapUsagePercent,
+              thresholdPercent: Math.round(threshold * 100),
+            }, 'Manual garbage collection completed');
+          } else {
+            logger.debug({
+              heapUsagePercent,
+              nextAllowedInMs: gcMinIntervalMs - elapsed,
+            }, 'Skipping manual GC due to cooldown');
+          }
         }
       }
     }, 300000);
@@ -658,6 +648,12 @@ class GatewayApplication {
     // Setup cleanup interval for activeInteractions Map to prevent memory leaks
     setInterval(() => {
       this.cleanupActiveInteractions();
+      const now = Date.now();
+      for (const [guildId, context] of this.voiceRequestContext.entries()) {
+        if (now - context.lastEventAt > 10 * 60_000) {
+          this.voiceRequestContext.delete(guildId);
+        }
+      }
     }, 300000); // Every 5 minutes (300000ms)
 
     logger.info('Enterprise health monitoring initialized with comprehensive metrics');
@@ -668,7 +664,7 @@ class GatewayApplication {
     // discord-bot:to-discord   → Audio → Gateway (Lavalink events)
     // discord-bot:ui:now       → Audio → Gateway (real-time UI updates)
 
-    this.redisSubscriber.subscribe('discord-bot:to-discord', (message: string) => {
+    this.redisManager.subscribe('discord-bot:to-discord', (message: string) => {
       try {
         const data = JSON.parse(message);
         logger.info({ data }, 'Received message from Audio service on discord-bot:to-discord');
@@ -678,17 +674,41 @@ class GatewayApplication {
       }
     });
 
-    this.redisSubscriber.subscribe('discord-bot:ui:now', (message: string) => {
+    this.redisManager.subscribe('discord-bot:ui:now', (message: string) => {
       try {
         const data = JSON.parse(message);
-        logger.info({ data }, 'Received UI update from Audio service');
+        const context = this.getVoiceRequestContext(data.guildId);
+        const uiLogPayload = {
+          guildId: data.guildId,
+          requestId: context?.requestId,
+          voiceChannelId: data.voiceChannelId,
+          channelId: data.channelId ?? data.textChannelId,
+          uiPushSource: data.uiPushSource,
+          title: data.title,
+          positionMs: data.positionMs,
+          durationMs: data.durationMs
+        };
+        if (data.uiPushSource === 'control' || data.uiPushSource === 'track_event') {
+          logger.info(uiLogPayload, 'Gateway received UI payload from audio');
+        } else {
+          logger.debug(uiLogPayload, 'Gateway received UI payload from audio');
+        }
         this.handleUIUpdate(data);
       } catch (error) {
         logger.error({ error, message }, 'Failed to parse UI update message');
       }
     });
 
-    logger.info('Gateway subscribed to Audio service channels: discord-bot:to-discord, discord-bot:ui:now');
+    this.redisManager.subscribe('discord-bot:panel-commands', (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        this.handlePanelCommand(data);
+      } catch (error) {
+        logger.error({ error, message }, 'Failed to parse panel command message');
+      }
+    });
+
+    logger.info('Gateway subscribed to Audio service channels: discord-bot:to-discord, discord-bot:ui:now, discord-bot:panel-commands');
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -698,12 +718,17 @@ class GatewayApplication {
 
     // Handle string-based operations (custom operations from audio service)
     if (data.payload?.op === 'track_queued') {
+      // Remember the text channel where the queue operation was triggered
+      if (data.payload?.textChannelId && data.guildId) {
+        this.rememberUIChannel(data.guildId, data.payload.textChannelId, data.payload.voiceChannelId ?? null);
+      }
       // Show "Track Added to Queue" message (always visible, not ephemeral)
       if (data.payload?.textChannelId) {
         try {
-          const channel = await this.discordClient.channels.fetch(data.payload.textChannelId);
+          const client = this.discordClientManager.getClient();
+          const channel = await client.channels.fetch(data.payload.textChannelId);
           if (channel?.isTextBased() && 'send' in channel) {
-            const user = await this.discordClient.users.fetch(data.payload.requestedBy);
+            const user = await client.users.fetch(data.payload.requestedBy);
 
             const embed = this.uiBuilder.buildAddedToQueueEmbed({
               trackTitle: data.payload.track.title,
@@ -717,2286 +742,677 @@ class GatewayApplication {
             await channel.send({ embeds: [embed] });
             logger.info({ guildId: data.guildId, track: data.payload.track.title }, 'Track queued notification sent');
 
-            // After showing "Added to Queue" message, request a fresh UI update that will create a new UI message
-            // This ensures the UI is always the last message without manually deleting the previous one
-            setTimeout(async () => {
-              try {
-                // Mark the current UI as outdated so the next UI update creates a new message instead of editing
-                const channelKey = `${data.guildId}:${data.payload.textChannelId}`;
-                const trackingInteraction = this.activeInteractions.get(channelKey);
-                if (trackingInteraction) {
-                  // Clear the messageId to force creation of new UI message
-                  this.activeInteractions.set(channelKey, {
-                    ...trackingInteraction,
-                    messageId: ''
-                  });
-                }
-
-                await this.redisClient.publish('discord-bot:commands', JSON.stringify({
-                  guildId: data.guildId,
-                  type: 'nowplaying',
-                  channelId: data.payload.textChannelId,
-                  requestId: `ui_refresh_${Date.now()}`
-                }));
-                logger.info({ guildId: data.guildId }, 'Requested fresh UI update after Added to Queue message');
-              } catch (requestError) {
-                logger.warn({ error: requestError, guildId: data.guildId }, 'Failed to request UI update');
-              }
-            }, 1000); // Wait 1 second to ensure Added to Queue message is visible first
+            // Keep the existing UI message for this voice session; do not force creation of a new one.
           }
         } catch (error) {
-          logger.warn({ error, guildId: data.guildId }, 'Failed to send track queued notification');
+          logger.error({ error, guildId: data.guildId }, 'Failed to send track queued notification');
         }
       }
-    }
-
-    // RULE 4: Handle disconnect events from audio service
-    if (data.type === 'DISCONNECTED' || data.payload?.op === 'disconnected') {
-      logger.info({ guildId: data.guildId }, 'Audio service disconnected - implementing Rule 4');
-      await this.deleteUIPrincipalMessage(data.guildId, data.textChannelId);
-    }
-
-    // Handle numeric Lavalink operation codes
-    if (typeof data.payload?.op === 'number') {
-      const operationCode = data.payload.op;
-
-      switch (operationCode) {
-        case 0: // Ready
-          logger.info({ guildId: data.guildId }, 'Lavalink ready for guild');
-          break;
-        case 1: // VoiceUpdate
-          logger.debug({ guildId: data.guildId }, 'Voice update received');
-          break;
-        case 2: // PlayerUpdate
-          logger.debug({ guildId: data.guildId }, 'Player update received');
-          break;
-        case 3: // TrackStart
-          logger.info({ guildId: data.guildId }, 'Track started');
-          break;
-        case 4: // VoiceStateUpdate
-          logger.debug({ guildId: data.guildId }, 'Voice state update received (handled by Discord.js Events.VoiceStateUpdate)');
-          // REMOVED: Duplicate handler causing loop - Discord.js Events.VoiceStateUpdate handles this
-          break;
-        default:
-          logger.warn({ guildId: data.guildId, operationCode }, 'Unknown Lavalink operation code');
-      }
-    }
-  }
-
-  /**
-   * Publish message to Redis with automatic retry logic
-   * Retries with exponential backoff when publishResult === 0 (no subscribers)
-   * Max 3 attempts with delays: 1000ms, 2000ms, 3000ms
-   *
-   * CRITICAL: This prevents message loss when Audio service is temporarily unavailable
-   * by automatically retrying delivery until subscribers are available
-   */
-  private async publishWithRetry(
-    channel: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    message: any,
-    guildId: string,
-    maxAttempts: number = 3
-  ): Promise<boolean> {
-    // Validate message before publishing
-    let validationResult;
-    try {
-      if (channel === 'discord-bot:to-audio' && message.type === 'VOICE_CREDENTIALS' && message.voiceCredentials) {
-        validationResult = safeValidateVoiceCredentialsMessage(message);
-      } else if (channel === 'discord-bot:to-audio' && message.sessionId && message.guildId) {
-        // Direct voice credentials format (raw)
-        validationResult = safeValidateVoiceCredentials(message);
-      } else if (channel === 'discord-bot:commands') {
-        validationResult = safeValidateCommand(message);
-      } else if (message.type === 'track_queued') {
-        validationResult = safeValidateTrackQueued(message);
-      }
-
-      if (validationResult && !validationResult.success) {
-        logger.error({
-          guildId,
-          channel,
-          validationError: validationResult.error,
-          messageType: message.type
-        }, 'Message validation failed - not sending invalid message');
-        return false;
-      }
-    } catch (validationError) {
-      logger.warn({
-        guildId,
-        channel,
-        error: validationError instanceof Error ? validationError.message : String(validationError)
-      }, 'Message validation check encountered an error, proceeding with caution');
-    }
-
-    const messageJson = typeof message === 'string' ? message : JSON.stringify(message);
-    const delays = [1000, 2000, 3000]; // Exponential backoff delays in milliseconds
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const publishResult = await this.redisClient.publish(channel, messageJson);
-
-        if (publishResult > 0) {
-          // Success: message received by at least one subscriber
-          logger.info({
-            guildId,
-            channel,
-            publishResult,
-            attempt
-          }, 'VOICE_CONNECT: Message published successfully to Redis channel');
-          return true;
-        }
-
-        // publishResult === 0: No subscribers received the message
-        if (attempt < maxAttempts) {
-          const delayMs = delays[attempt - 1];
-          logger.warn({
-            guildId,
-            channel,
-            attempt,
-            maxAttempts,
-            delayMs,
-            reason: 'No subscribers received message'
-          }, 'VOICE_CONNECT: Redis publish returned 0 subscribers, retrying after delay...');
-
-          // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-        } else {
-          // All retries exhausted
-          logger.error({
-            guildId,
-            channel,
-            attempt,
-            maxAttempts,
-            reason: 'No subscribers received message (all retries failed)'
-          }, 'VOICE_CONNECT: CRITICAL - Failed to publish voice credentials after 3 retry attempts (Audio service not listening)');
-          return false;
-        }
-      } catch (error) {
-        logger.error({
-          guildId,
-          channel,
-          attempt,
-          error: error instanceof Error ? error.message : String(error)
-        }, 'VOICE_CONNECT: Error during Redis publish');
-
-        if (attempt < maxAttempts) {
-          const delayMs = delays[attempt - 1];
-          logger.warn({
-            guildId,
-            attempt,
-            maxAttempts,
-            delayMs
-          }, 'VOICE_CONNECT: Retrying after error...');
-
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleVoiceStateUpdate(data: any): Promise<void> {
-    // CRITICAL: This function sends Discord voice credentials to Lavalink
-    // When Audio service requests voice connection, Gateway must provide Discord credentials
-    logger.info({ guildId: data.guildId }, 'VOICE_CONNECT: Processing voice state update');
-
-    try {
-      const guild = this.discordClient.guilds.cache.get(data.guildId);
-      if (!guild) {
-        logger.error({ guildId: data.guildId }, 'VOICE_CONNECT: Guild not found');
-        return;
-      }
-
-      // Get the bot's voice state for this guild
-      const botVoiceState = guild.voiceStates.cache.get(this.discordClient.user!.id);
-      if (!botVoiceState || !botVoiceState.sessionId) {
-        logger.warn({ guildId: data.guildId }, 'VOICE_CONNECT: Bot voice state not found or missing sessionId');
-        return;
-      }
-
-      // Get voice server data (token and endpoint) from stored data
-      const voiceServerInfo = this.voiceServerData.get(data.guildId);
-
-      // Extract Discord voice credentials
-      const voiceCredentials = {
-        guildId: data.guildId,
-        sessionId: botVoiceState.sessionId,
-        token: voiceServerInfo?.token || null,
-        endpoint: voiceServerInfo?.endpoint || null
-      };
-
-      // Validate voice credentials before sending
-      if (!voiceCredentials.sessionId || !voiceCredentials.token || !voiceCredentials.endpoint) {
-        logger.warn({
-          guildId: data.guildId,
-          hasSessionId: !!voiceCredentials.sessionId,
-          hasToken: !!voiceCredentials.token,
-          hasEndpoint: !!voiceCredentials.endpoint
-        }, 'VOICE_CONNECT: Incomplete voice credentials - missing voice server data');
-
-        // For 24/7 operation: Try to get fresh credentials by requesting voice state update
-        await this.requestFreshVoiceCredentials(data.guildId);
-        return;
-      }
-
-      logger.info({
-        guildId: data.guildId,
-        hasSessionId: !!voiceCredentials.sessionId,
-        hasToken: !!voiceCredentials.token,
-        hasEndpoint: !!voiceCredentials.endpoint
-      }, 'VOICE_CONNECT: Sending valid Discord credentials to Audio service');
-
-      // Send credentials to Audio service via Redis
-      const credentialMessage = {
-        type: 'VOICE_CREDENTIALS',
-        guildId: data.guildId,
-        voiceCredentials
-      };
-
-      logger.info({
-        guildId: data.guildId,
-        hasSessionId: !!credentialMessage.voiceCredentials?.sessionId,
-        hasToken: !!credentialMessage.voiceCredentials?.token,
-        hasEndpoint: !!credentialMessage.voiceCredentials?.endpoint,
-        channel: 'discord-bot:to-audio'
-      }, 'VOICE_CONNECT: About to publish voice credentials to Redis with automatic retry logic');
-
-      // Publish with automatic retry logic (max 3 attempts with exponential backoff)
-      const success = await this.publishWithRetry(
-        'discord-bot:to-audio',
-        credentialMessage,
-        data.guildId,
-        3 // Max 3 attempts
-      );
-
-      if (success) {
-        logger.info({
-          guildId: data.guildId,
-          channel: 'discord-bot:to-audio'
-        }, 'VOICE_CONNECT: Discord credentials successfully delivered to Audio service');
-      } else {
-        logger.error({
-          guildId: data.guildId,
-          channel: 'discord-bot:to-audio'
-        }, 'VOICE_CONNECT: Failed to deliver voice credentials to Audio service after all retries');
-      }
-
-    } catch (error) {
-      logger.error({
-        guildId: data.guildId,
-        error: error instanceof Error ? error.message : String(error)
-      }, 'VOICE_CONNECT: Failed to send voice credentials');
-    }
-  }
-
-  /**
-   * Handle Voice Server Update events (provides token and endpoint)
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleVoiceServerUpdate(update: any): Promise<void> {
-    try {
-      const guildId = update.guild.id;
-      const token = update.token;
-      const endpoint = update.endpoint;
-
-      // Store voice server data with timestamp and auto-refresh capability
-      this.voiceServerData.set(guildId, {
-        token,
-        endpoint,
-        processedAt: Date.now()
-      });
-
-      logger.info({
-        guildId,
-        hasToken: !!token,
-        hasEndpoint: !!endpoint
-      }, 'VOICE_CONNECT: Voice server update received');
-
-      // CRITICAL: Send voice credentials immediately if we have sessionId
-      const voiceState = this.discordClient.guilds.cache.get(guildId)?.voiceStates.cache.get(this.discordClient.user?.id || '');
-      if (voiceState?.sessionId) {
-        await this.sendVoiceCredentials(guildId, voiceState.sessionId, token, endpoint);
-      }
-
-      // Implement periodic refresh system for 24/7 bot operation
-      this.setupVoiceCredentialRefresh(guildId);
-
-    } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'VOICE_CONNECT: Failed to handle voice server update');
-    }
-  }
-
-  /**
-   * Send voice credentials to Audio service via Redis
-   * Implements automatic retry logic when no subscribers are available
-   */
-  private async sendVoiceCredentials(guildId: string, sessionId: string, token: string, endpoint: string): Promise<void> {
-    try {
-      const voiceCredentials = {
-        guildId,
-        sessionId,
-        token,
-        endpoint
-      };
-
-      logger.info({
-        guildId,
-        hasSessionId: !!sessionId,
-        hasToken: !!token,
-        hasEndpoint: !!endpoint
-      }, 'VOICE_CONNECT: Sending Discord credentials to Audio service');
-
-      // Send via Redis pub/sub to Audio service with automatic retry logic
-      logger.info({
-        guildId,
-        hasSessionId: !!voiceCredentials.sessionId,
-        hasToken: !!voiceCredentials.token,
-        hasEndpoint: !!voiceCredentials.endpoint,
-        channel: 'discord-bot:to-audio'
-      }, 'VOICE_CONNECT: About to publish voice credentials to Redis with retry logic');
-
-      // Use retry-enabled publish method (max 3 attempts with exponential backoff)
-      const success = await this.publishWithRetry(
-        'discord-bot:to-audio',
-        voiceCredentials,
-        guildId,
-        3 // Max 3 attempts
-      );
-
-      if (success) {
-        logger.info({
-          guildId,
-          channel: 'discord-bot:to-audio'
-        }, 'VOICE_CONNECT: Discord credentials successfully delivered to Audio service');
-      } else {
-        logger.error({
-          guildId,
-          channel: 'discord-bot:to-audio'
-        }, 'VOICE_CONNECT: Failed to deliver voice credentials to Audio service after all retries');
-      }
-
-    } catch (error) {
-      logger.error({
-        guildId,
-        error: error instanceof Error ? error.message : String(error)
-      }, 'VOICE_CONNECT: Failed to send voice credentials to Audio service');
-    }
-  }
-
-  /**
-   * Setup voice credential refresh system for 24/7 operation
-   * Periodically refreshes voice server data to maintain long-running connections
-   */
-  private voiceRefreshTimers = new Map<string, NodeJS.Timeout>();
-
-  private setupVoiceCredentialRefresh(guildId: string): void {
-    // Clear existing timer if any
-    const existingTimer = this.voiceRefreshTimers.get(guildId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    // For 24/7 operation: Keep credentials available indefinitely
-    // Only clean up if bot leaves voice channel (handled in handleDiscordVoiceStateUpdate)
-    // No automatic reconnection - maintain persistent connection
-    logger.info({ guildId }, 'VOICE_CONNECT: Voice credentials stored for persistent 24/7 connection');
-  }
-
-  /**
-   * Request fresh voice credentials only when needed (on-demand)
-   * Used for 24/7 operation when credentials expire or become invalid
-   */
-  private async requestFreshVoiceCredentials(guildId: string): Promise<void> {
-    try {
-      const guild = this.discordClient.guilds.cache.get(guildId);
-      const botVoiceState = guild?.voiceStates.cache.get(this.discordClient.user!.id);
-
-      if (botVoiceState?.channel) {
-        logger.info({ guildId, channelId: botVoiceState.channelId }, 'VOICE_CONNECT: Requesting fresh credentials for expired token');
-
-        // Send voice state update to get fresh credentials from Discord
-        // This doesn't disconnect - just refreshes the token
-        await guild!.members.me!.voice.setDeaf(false);
-        await guild!.members.me!.voice.setMute(false);
-
-        logger.info({ guildId }, 'VOICE_CONNECT: Fresh credential request sent');
-      } else {
-        logger.warn({ guildId }, 'VOICE_CONNECT: Cannot refresh credentials - bot not in voice channel');
-      }
-    } catch (error) {
-      logger.error({
-        guildId,
-        error: error instanceof Error ? error.message : String(error)
-      }, 'VOICE_CONNECT: Failed to request fresh credentials');
-    }
-  }
-
-  /**
-   * Handle Discord voice state updates (when bot joins/leaves voice channels)
-   */
-   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleDiscordVoiceStateUpdate(oldState: any, newState: any): Promise<void> {
-    // Only process bot's own voice state changes
-    if (newState.id !== this.discordClient.user?.id) return;
-
-    const guildId = newState.guild.id;
-
-    try {
-      // Check if bot joined a voice channel
-      if (!oldState.channel && newState.channel) {
-        logger.info({
-          guildId,
-          voiceChannelId: newState.channelId,
-          sessionId: newState.sessionId
-        }, 'VOICE_CONNECT: Bot joined voice channel');
-
-        // Get voice server data (token and endpoint) from stored data
-        const voiceServerInfo = this.voiceServerData.get(guildId);
-
-        // Extract Discord voice credentials with fallback
-        let token = voiceServerInfo?.token;
-        let endpoint = voiceServerInfo?.endpoint;
-
-        // CRITICAL VALIDATION: Don't send invalid credentials to Audio service
-        if (!token || !endpoint) {
-          logger.warn({
-            guildId,
-            hasStoredToken: !!voiceServerInfo?.token,
-            hasStoredEndpoint: !!voiceServerInfo?.endpoint,
-            voiceServerDataExists: this.voiceServerData.has(guildId)
-          }, 'VOICE_CONNECT: Missing voice server data - may have been cleaned up, waiting for fresh VOICE_SERVER_UPDATE event');
-          return; // Don't send invalid credentials
-        }
-
-        const voiceCredentials = {
-          guildId,
-          sessionId: newState.sessionId,
-          token,
-          endpoint
-        };
-
-        logger.info({
-          guildId,
-          hasSessionId: !!voiceCredentials.sessionId,
-          hasToken: !!voiceCredentials.token,
-          hasEndpoint: !!voiceCredentials.endpoint
-        }, 'VOICE_CONNECT: Sending Discord credentials to Audio service');
-
-        // Send credentials to Audio service via Redis
-        const credentialMessage = {
-          type: 'VOICE_CREDENTIALS',
-          guildId,
-          voiceCredentials
-        };
-
-        await this.redisClient.publish('discord-bot:to-audio', JSON.stringify(credentialMessage));
-        logger.info({ guildId }, 'VOICE_CONNECT: Discord credentials sent to Audio service successfully');
-      }
-
-      // Check if bot left a voice channel
-      if (oldState.channel && !newState.channel) {
-        logger.info({
-          guildId,
-          oldChannelId: oldState.channelId
-        }, 'VOICE_CONNECT: Bot left voice channel');
-
-        // Clean up voice refresh timer and data when bot leaves voice
-        const refreshTimer = this.voiceRefreshTimers.get(guildId);
-        if (refreshTimer) {
-          clearTimeout(refreshTimer);
-          this.voiceRefreshTimers.delete(guildId);
-          this.voiceServerData.delete(guildId);
-          logger.info({ guildId }, 'VOICE_CONNECT: Cleaned up voice refresh system - bot left voice channel');
-        }
-      }
-
-    } catch (error) {
-      logger.error({
-        guildId,
-        error: error instanceof Error ? error.message : String(error)
-      }, 'VOICE_CONNECT: Failed to handle Discord voice state update');
+    } else if (data.payload?.op === 'trackStart') {
+      // Handle track start - this triggers the main UI update
+      // We don't need to do anything here as the Audio service will send a UI update
+      // via discord-bot:ui:now channel which is handled by handleUIUpdate
+      logger.debug({ guildId: data.guildId }, 'Track start event received');
+    } else if (data.payload?.op === 'queueEnd') {
+      // Handle queue end
+      logger.debug({ guildId: data.guildId }, 'Queue end event received');
     }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleUIUpdate(data: any): Promise<void> {
-    // Handle real-time UI updates from Audio service
-    logger.info({ guildId: data.guildId }, 'Processing UI update');
-
-    try {
-      // CRITICAL FIX: Check if UI is blocked for this channel (prevents recreation after manual deletion)
-      const channelKey = `${data.guildId}:${data.textChannelId || 'fallback'}`;
-      const existingInteraction = this.activeInteractions.get(channelKey);
-
-      if (existingInteraction?.uiBlocked) {
-        logger.info({
-          guildId: data.guildId,
-          channelId: data.textChannelId,
-          reason: 'UI_BLOCKED'
-        }, 'Skipping UI update - UI blocked after manual deletion');
-        return;
-      }
-      // Get the text channel for this guild
-      const guild = this.discordClient.guilds.cache.get(data.guildId);
-      if (!guild) {
-        logger.error({ guildId: data.guildId }, 'Guild not found for UI update');
-        return;
-      }
-
-      // CRITICAL: Find appropriate text channel from the data or use first available
-      let targetChannel = null;
-
-      logger.info({
-        guildId: data.guildId,
-        providedTextChannelId: data.textChannelId,
-        availableChannels: guild.channels.cache.filter(ch => ch.isTextBased()).map(ch => ({ id: ch.id, name: ch.name }))
-      }, 'CHANNEL_TARGETING: Finding target channel for UI message');
-
-      if (data.textChannelId) {
-        targetChannel = guild.channels.cache.get(data.textChannelId);
-        if (targetChannel) {
-          logger.info({
-            guildId: data.guildId,
-            channelId: data.textChannelId,
-            channelName: targetChannel.name
-          }, 'CHANNEL_TARGETING: Using provided text channel');
-        } else {
-          logger.warn({
-            guildId: data.guildId,
-            invalidChannelId: data.textChannelId
-          }, 'CHANNEL_TARGETING: Provided channel ID not found in cache');
-        }
-      } else {
-        logger.warn({
-          guildId: data.guildId
-        }, 'CHANNEL_TARGETING: No textChannelId provided in UI update data');
-      }
-
-      if (!targetChannel) {
-        // Fall back to first text channel
-        logger.warn({
-          guildId: data.guildId
-        }, 'CHANNEL_TARGETING: Falling back to first available text channel');
-
-        for (const [channelId, channel] of guild.channels.cache) {
-          if (channel.isTextBased()) {
-            targetChannel = channel;
-            logger.info({
-              guildId: data.guildId,
-              fallbackChannelId: channelId,
-              fallbackChannelName: channel.name
-            }, 'CHANNEL_TARGETING: Using fallback text channel');
-            break;
-          }
-        }
-      }
-
-      if (!targetChannel) {
-        logger.error({ guildId: data.guildId }, 'No text channel found for UI update');
-        return;
-      }
-
-      // Build the UI content
-      const embed = this.uiBuilder.buildNowPlayingEmbed({
-        trackTitle: data.title,
-        artist: data.author,
-        duration: data.durationMs,
-        position: data.positionMs,
-        volume: data.volume || 100,
-        loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue',
-        queueLength: data.queueLen || 0,
-        isPaused: data.paused,
-        artworkUrl: data.artworkUrl,
-        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off',
-        filter: data.filter
-          ? {
-              id: data.filter.id,
-              label: data.filter.label,
-              description: data.filter.description,
-            }
-          : undefined,
-      });
-
-      const components = this.uiBuilder.buildMusicControlButtons({
-        isPlaying: data.hasTrack && !data.paused,
-        isPaused: data.paused,
-        hasQueue: data.queueLen > 0,
-        queueLength: data.queueLen || 0,
-        // Remove canSkip override - let buildMusicControlButtons calculate it based on queue + autoplay
-        volume: data.volume || 100,
-        loopMode: data.repeatMode === 'off' ? 'off' : data.repeatMode === 'track' ? 'track' : 'queue',
-        isMuted: (data.volume || 0) === 0,
-        autoplayMode: (data as { autoplayMode?: string }).autoplayMode as 'off' | 'similar' | 'artist' | 'genre' | 'mixed' || 'off',
-        activeFilterId: data.filter?.id,
-        activeFilterLabel: data.filter?.label,
-      });
-
-      const messageContent = {
-        embeds: [embed],
-        components: components
-      };
-
-      // Get channel key for tracking
-      const trackingChannelKey = `${data.guildId}:${targetChannel.id}`;
-      const trackingInteraction = this.activeInteractions.get(trackingChannelKey);
-
-      let uiMessage;
-      let wasEdited = false;
-
-      // RULE 1: Only one UI PRINCIPAL per channel - try to edit existing message first
-      if (trackingInteraction && trackingInteraction.messageId) {
-        try {
-          // Check if targetChannel has messages property (text channels)
-          if ('messages' in targetChannel) {
-            const existingMessage = await targetChannel.messages.fetch(trackingInteraction.messageId);
-            if (existingMessage) {
-              uiMessage = await existingMessage.edit(messageContent);
-              wasEdited = true;
-              logger.info({
-                guildId: data.guildId,
-                channelId: targetChannel.id,
-                messageId: existingMessage.id
-              }, 'Updated existing UI PRINCIPAL message (Rule 1)');
-            }
-          }
-        } catch (editError: unknown) {
-          // Message no longer exists or can't be edited, create new one
-          const errorMessage = editError instanceof Error ? editError.message : String(editError);
-          logger.warn({
-            guildId: data.guildId,
-            messageId: trackingInteraction.messageId,
-            error: errorMessage
-          }, 'Could not edit existing UI message, creating new one');
-        }
-      }
-
-      // If edit failed or no existing message, create new UI PRINCIPAL
-      if (!wasEdited) {
-        // RULE 1 FIX: Clean up any old UI messages before creating new one
-        await this.cleanupOldUIPrincipalMessages(targetChannel);
-
-        logger.info({
-          guildId: data.guildId,
-          channelId: targetChannel.id,
-          channelName: targetChannel.name,
-          messageStructure: {
-            embedsCount: messageContent.embeds?.length || 0,
-            componentsCount: messageContent.components?.length || 0
-          }
-        }, 'DISCORD_SEND: Attempting to create new UI PRINCIPAL message');
-
-        try {
-          // Check if targetChannel has send property (text channels)
-          if ('send' in targetChannel) {
-            uiMessage = await targetChannel.send(messageContent);
-            logger.info({
-              guildId: data.guildId,
-              channelId: targetChannel.id,
-              messageId: uiMessage.id,
-              success: true
-            }, 'DISCORD_SEND: Successfully created new UI PRINCIPAL message (Rule 1)');
-          }
-        } catch (sendError: unknown) {
-          const errorMessage = sendError instanceof Error ? sendError.message : String(sendError);
-          const errorCode = sendError && typeof sendError === 'object' && 'code' in sendError ? (sendError as { code?: string }).code : 'unknown';
-          logger.error({
-            guildId: data.guildId,
-            channelId: targetChannel.id,
-            channelName: 'name' in targetChannel ? targetChannel.name : 'unknown',
-            error: errorMessage,
-            errorCode: errorCode || 'unknown',
-            messageContent: JSON.stringify(messageContent, null, 2)
-          }, 'DISCORD_SEND: CRITICAL FAILURE - Could not send UI message to Discord');
-          return; // Exit if we can't send the UI message
-        }
-      }
-
-      // Only update tracking if we successfully created/updated a message
-      if (uiMessage) {
-        // Update tracking system
-        this.activeInteractions.set(trackingChannelKey, {
-          messageId: uiMessage.id,
-          channelId: targetChannel.id,
-          guildId: data.guildId,
-          lastUpdated: Date.now()
-        });
-
-        // Skip cleanup for ephemeral processing messages - Discord manages them automatically
-        if (trackingInteraction?.processingMessageId) {
-          logger.debug({
-            guildId: data.guildId,
-            processingMessageId: trackingInteraction.processingMessageId
-          }, 'Skipping ephemeral processing message cleanup (Discord auto-manages)');
-        }
-
-        logger.info({
-          guildId: data.guildId,
-          channelId: targetChannel.id,
-          messageId: uiMessage.id,
-          trackTitle: data.title,
-          wasEdited: wasEdited
-        }, 'UI update completed successfully');
-      }
-
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error({
-        error: errorMessage,
-        guildId: data.guildId
-      }, 'Failed to update Discord UI');
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async cleanupOldUIPrincipalMessages(channel: any): Promise<void> {
-    try {
-      // RULE 1: Only one UI PRINCIPAL message per channel
-      // Fetch recent messages and look for bot's UI messages with music components
-      const recentMessages = await channel.messages.fetch({ limit: 50 });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const botMessages = recentMessages.filter((msg: any) =>
-        msg.author.id === this.discordClient.user?.id &&
-        msg.components.length > 0 &&
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        msg.components.some((row: any) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          row.components.some((component: any) =>
-            component.customId?.startsWith('music_')
-          )
-        )
-      );
-
-      // Delete old UI PRINCIPAL messages
-      for (const message of botMessages.values()) {
-        try {
-          await message.delete();
-          logger.debug({ messageId: message.id, channelId: channel.id }, 'Deleted old UI PRINCIPAL message');
-        } catch (deleteError) {
-          logger.warn({ messageId: message.id, error: deleteError }, 'Failed to delete old UI message');
-        }
-      }
-
-      if (botMessages.size > 0) {
-        logger.info({ deletedCount: botMessages.size, channelId: channel.id }, 'Cleaned up old UI PRINCIPAL messages');
-      }
-    } catch (error) {
-      logger.warn({ error, channelId: channel.id }, 'Failed to cleanup old UI messages');
-    }
-  }
-
-  private async shouldUseEphemeral(guildId: string): Promise<boolean> {
-    // Rule 5: Ephemeral messages only when setting is ON
-    try {
-      const settings = await this.settingsService.getGuildSettings(guildId);
-      return settings.ephemeralMessages;
-    } catch (error) {
-      logger.error({ error, guildId }, 'Failed to get guild settings for ephemeral check');
-      // Default to false on error for better UX
-      return false;
-    }
-  }
-
-  /**
-   * RULE 4: Delete UI PRINCIPAL message when bot disconnects
-   * Implements Rule 4: Disconnecting bot must delete UI PRINCIPAL message
-   */
-  private async deleteUIPrincipalMessage(guildId: string, textChannelId?: string): Promise<void> {
-    try {
-      // Find all UI messages for this guild
-      const channelKeysToDelete: string[] = [];
-
-      if (textChannelId) {
-        // Delete specific channel UI message
-        channelKeysToDelete.push(`${guildId}:${textChannelId}`);
-      } else {
-        // Delete all UI messages for this guild
-        for (const [channelKey, interaction] of this.activeInteractions.entries()) {
-          if (interaction.guildId === guildId) {
-            channelKeysToDelete.push(channelKey);
-          }
-        }
-      }
-
-      for (const channelKey of channelKeysToDelete) {
-        const interaction = this.activeInteractions.get(channelKey);
-        if (!interaction || !interaction.messageId) continue;
-
-        try {
-          const guild = this.discordClient.guilds.cache.get(guildId);
-          if (!guild) continue;
-
-          const channel = guild.channels.cache.get(interaction.channelId);
-          if (!channel?.isTextBased()) continue;
-
-          const message = await channel.messages.fetch(interaction.messageId);
-          if (message) {
-            await message.delete();
-            logger.info({
-              guildId,
-              channelId: interaction.channelId,
-              messageId: interaction.messageId
-            }, 'RULE 4: Deleted UI PRINCIPAL message after bot disconnect');
-          }
-        } catch (deleteError) {
-          logger.warn({
-            error: deleteError,
-            guildId,
-            channelKey,
-            messageId: interaction.messageId
-          }, 'Failed to delete UI PRINCIPAL message during disconnect');
-        }
-
-        // Remove from tracking
-        this.activeInteractions.delete(channelKey);
-      }
-
-      logger.info({
-        guildId,
-        textChannelId,
-        deletedMessages: channelKeysToDelete.length
-      }, 'RULE 4: UI cleanup completed after bot disconnect');
-
-    } catch (error) {
-      logger.error({
-        error,
-        guildId,
-        textChannelId
-      }, 'Failed to delete UI PRINCIPAL messages during disconnect');
-    }
-  }
-
-  /**
-   * Cleanup old entries from activeInteractions Map to prevent memory leaks
-   * Removes entries older than 1 hour (3600000ms)
-   */
-  private cleanupActiveInteractions(): void {
-    const now = Date.now();
-    const oneHourAgo = now - 3600000; // 1 hour in milliseconds
-    let cleanedCount = 0;
-
-    // Iterate through all entries and remove old ones
-    for (const [channelKey, interaction] of this.activeInteractions.entries()) {
-      if (interaction.lastUpdated < oneHourAgo) {
-        this.activeInteractions.delete(channelKey);
-        cleanedCount++;
-
-        logger.debug({
-          channelKey,
-          guildId: interaction.guildId,
-          channelId: interaction.channelId,
-          messageId: interaction.messageId,
-          ageMinutes: Math.round((now - interaction.lastUpdated) / 60000),
-          lastUpdated: new Date(interaction.lastUpdated).toISOString()
-        }, 'Cleaned up old activeInteraction entry');
-      }
-    }
-
-    if (cleanedCount > 0) {
-      logger.info({
-        cleanedCount,
-        remainingEntries: this.activeInteractions.size,
-        cleanupAge: '1 hour'
-      }, 'ActiveInteractions Map cleanup completed');
-    } else {
-      logger.debug({
-        totalEntries: this.activeInteractions.size,
-        cleanupAge: '1 hour'
-      }, 'ActiveInteractions Map cleanup - no old entries found');
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleVoteSkipCommand(interaction: any): Promise<void> {
-    try {
-      if (!interaction.guildId) {
-        await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
-        return;
-      }
-
-      const guildId = interaction.guildId;
-      const userId = interaction.user.id;
-      const channelId = interaction.channelId;
-
-      // Check if there's already an active vote
-      const existingSession = this.voteSkipService.getActiveSession(guildId);
-
-      if (existingSession) {
-        // User is trying to join an existing vote
-        const result = await this.voteSkipService.castVote(guildId, userId);
-
-        if (result.completed) {
-          // Vote passed! Trigger skip
-          const showFeedback = await this.shouldUseEphemeral(guildId);
-          if (showFeedback) {
-            await interaction.reply({ content: result.message, ephemeral: true });
-          }
-
-          // Send skip command to audio service
-          try {
-            await this.audioCommandService.sendCommand('skip', guildId, {
-              triggeredBy: 'voteskip',
-              voteCount: String(result.session?.votes.size || 0),
-              timestamp: String(Date.now())
-            });
-          } catch (error) {
-            logger.error({ error, guildId }, 'Failed to send skip command after successful vote');
-          }
-        } else {
-          // Vote recorded but not completed yet
-          const showFeedback = await this.shouldUseEphemeral(guildId);
-          if (showFeedback) {
-            await interaction.reply({ content: result.message, ephemeral: true });
-          }
-        }
-      } else {
-        // Start a new vote skip session
-        const result = await this.voteSkipService.initiateVoteSkip(guildId, channelId, userId);
-
-        if (result.success) {
-          const showFeedback = await this.shouldUseEphemeral(guildId);
-          if (showFeedback) {
-            await interaction.reply({ content: result.message, ephemeral: true });
-          }
-
-          // If only one person needed and they started it, immediately skip
-          if (result.session && result.session.votes.size >= result.session.requiredVotes) {
-            try {
-              await this.audioCommandService.sendCommand('skip', guildId, {
-                triggeredBy: 'voteskip',
-                voteCount: String(result.session.votes.size),
-                timestamp: String(Date.now())
-              });
-            } catch (error) {
-              logger.error({ error, guildId }, 'Failed to send skip command after vote completion');
-            }
-          }
-        } else {
-          const showFeedback = await this.shouldUseEphemeral(guildId);
-          if (showFeedback) {
-            await interaction.reply({ content: result.message, ephemeral: true });
-          }
-        }
-      }
-
-    } catch (error) {
-      logger.error({ error, guildId: interaction.guildId, userId: interaction.user.id }, 'Error handling voteskip command');
-      try {
-        const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
-        if (showFeedback) {
-          await interaction.reply({
-            content: '❌ An error occurred while processing your vote. Please try again.',
-            ephemeral: true
-          });
-        }
-      } catch (replyError) {
-        logger.error({ replyError }, 'Failed to send error response for voteskip command');
-      }
-    }
-  }
-
-  /**
-   * Apply optimistic UI updates for instant button feedback
-   * Extracts current state from message, predicts new state based on command, and updates UI immediately
-   */
-   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async applyOptimisticUIUpdate(interaction: any, commandType: string, additionalData: any): Promise<void> {
-    try {
-      // Get the current UI message from the interaction
-      const message = interaction.message;
-      if (!message || !message.embeds || message.embeds.length === 0) {
-        logger.debug({ commandType }, 'No embed found in message for optimistic update');
-        return;
-      }
-
-      // Extract current state from the embed fields
-      const embed = message.embeds[0];
-      const currentState = this.extractStateFromEmbed(embed);
-
-      // Predict the new state based on the command
-      const newState = this.predictNewState(currentState, commandType, additionalData);
-
-      // Rebuild the UI with the predicted state
-      const newEmbed = this.uiBuilder.buildNowPlayingEmbed({
-        trackTitle: currentState.trackTitle,
-        artist: currentState.artist,
-        duration: currentState.duration,
-        position: currentState.position,
-        volume: newState.volume,
-        loopMode: newState.loopMode,
-        queueLength: currentState.queueLength,
-        isPaused: newState.isPaused,
-        artworkUrl: currentState.artworkUrl,
-        autoplayMode: newState.autoplayMode
-      });
-
-      const newComponents = this.uiBuilder.buildMusicControlButtons({
-        isPlaying: !newState.isPaused && (currentState.isPlaying || currentState.isPaused),
-        isPaused: newState.isPaused,
-        hasQueue: currentState.hasQueue,
-        queueLength: currentState.queueLength,
-        volume: newState.volume,
-        loopMode: newState.loopMode,
-        isMuted: newState.volume === 0,
-        autoplayMode: newState.autoplayMode
-      });
-
-      // Update the message immediately
-      await message.edit({
-        embeds: [newEmbed],
-        components: newComponents
-      });
-
-      logger.info({ commandType, guildId: interaction.guildId }, 'Optimistic UI update applied successfully');
-    } catch (error) {
-      // Log but don't throw - optimistic update failure shouldn't block the command
-      logger.warn({ error, commandType }, 'Failed to apply optimistic UI update');
-    }
-  }
-
-  /**
-   * Extract current state from the Now Playing embed
-   */
-   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractStateFromEmbed(embed: any): any {
-    const title = embed.title || '';
-    const description = embed.description || '';
-
-    // Extract track title and artist from description
-    const descriptionLines = description.split('\n');
-    const trackTitle = descriptionLines[0]?.replace(/\*\*/g, '') || 'Unknown Track';
-    const artist = descriptionLines[1]?.replace(/\*by\s*/i, '').trim() || undefined;
-
-    // Extract state from fields
-    const fields = embed.fields || [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const volumeField = fields.find((f: any) => f.name === '🔊 Volume');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const loopField = fields.find((f: any) => f.name === '🔁 Loop Mode');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const statusField = fields.find((f: any) => f.name === '⚡ Status');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const queueField = fields.find((f: any) => f.name === '📋 Queue');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const autoplayField = fields.find((f: any) => f.name === '▶️ Autoplay');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const progressField = fields.find((f: any) => f.name === '⏱️ Progress');
-
-    // Parse volume from field value (format: "▓▓▓▓░░░░ **100%**")
-    let volume = 100;
-    if (volumeField) {
-      const volumeMatch = volumeField.value.match(/\*\*(\d+)%\*\*/);
-      if (volumeMatch) {
-        volume = parseInt(volumeMatch[1], 10);
-      }
-    }
-
-    // Parse loop mode from field value
-    let loopMode: 'off' | 'track' | 'queue' = 'off';
-    if (loopField) {
-      const loopValue = loopField.value.toLowerCase();
-      if (loopValue.includes('current track')) {
-        loopMode = 'track';
-      } else if (loopValue.includes('entire queue')) {
-        loopMode = 'queue';
-      }
-    }
-
-    // Parse status (playing/paused)
-    const isPaused = title.includes('⏸️') || title.includes('Paused') || statusField?.value.includes('Paused');
-    const isPlaying = title.includes('✨') || title.includes('Now Playing') || statusField?.value.includes('Playing');
-
-    // Parse queue length
-    let queueLength = 0;
-    if (queueField) {
-      const queueMatch = queueField.value.match(/\*\*(\d+) tracks\*\*/);
-      if (queueMatch) {
-        queueLength = parseInt(queueMatch[1], 10);
-      }
-    }
-
-    // Parse autoplay mode
-    let autoplayMode: 'off' | 'similar' | 'artist' | 'genre' | 'mixed' = 'off';
-    if (autoplayField) {
-      const autoplayValue = autoplayField.value.toLowerCase();
-      if (autoplayValue.includes('similar')) {
-        autoplayMode = 'similar';
-      } else if (autoplayValue.includes('same artist')) {
-        autoplayMode = 'artist';
-      } else if (autoplayValue.includes('same genre')) {
-        autoplayMode = 'genre';
-      } else if (autoplayValue.includes('mixed')) {
-        autoplayMode = 'mixed';
-      }
-    }
-
-    // Extract artwork URL from thumbnail
-    const artworkUrl = embed.thumbnail?.url;
-
-    // Extract duration and position from progress field
-    let duration = undefined;
-    let position = undefined;
-    if (progressField) {
-      // Format is like: "**1:23** ▓▓▓▓▓░░░░░░░░ **5:00**"
-      const timeMatches = progressField.value.match(/\*\*(\d+):(\d+)\*\*/g);
-      if (timeMatches && timeMatches.length >= 2) {
-        // First match is position, last match is duration
-        const posMatch = timeMatches[0].match(/(\d+):(\d+)/);
-        const durMatch = timeMatches[timeMatches.length - 1].match(/(\d+):(\d+)/);
-        if (posMatch) {
-          position = (parseInt(posMatch[1]) * 60 + parseInt(posMatch[2])) * 1000;
-        }
-        if (durMatch) {
-          duration = (parseInt(durMatch[1]) * 60 + parseInt(durMatch[2])) * 1000;
-        }
-      }
-    }
-
-    return {
-      trackTitle,
-      artist,
-      volume,
-      loopMode,
-      isPaused,
-      isPlaying,
-      queueLength,
-      hasQueue: queueLength > 0,
-      autoplayMode,
-      artworkUrl,
-      duration,
-      position
+    // Map textChannelId to channelId if needed (handling data from Audio service)
+    const channelId = data.channelId || data.textChannelId;
+    const context = data.guildId ? this.getVoiceRequestContext(data.guildId) : undefined;
+
+    if (!data.guildId || !channelId) return;
+
+    // Rule 1: Only one UI PRINCIPAL per voice session
+    const sessionKey = this.getUISessionKey(data.guildId, data.voiceChannelId ?? null, channelId);
+    const rawPositionMs = typeof data.positionMs === 'number' ? data.positionMs : 0;
+    const durationMs = typeof data.durationMs === 'number' ? data.durationMs : 0;
+    const normalizedPositionMs = Math.min(durationMs || rawPositionMs, Math.max(0, rawPositionMs));
+
+    const uiUpdateLogPayload = {
+      guildId: data.guildId,
+      requestId: context?.requestId,
+      voiceChannelId: data.voiceChannelId,
+      channelId,
+      uiPushSource: data.uiPushSource,
+      paused: data.paused,
+      isMuted: data.isMuted,
+      volume: data.volume,
+      title: data.title,
+      positionMs: normalizedPositionMs
     };
-  }
-
-  /**
-   * Predict the new state based on the command and current state
-   */
-   
-   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private predictNewState(currentState: any, commandType: string, additionalData: any): any {
-    const newState = { ...currentState };
-
-    switch (commandType) {
-      case 'toggle':
-        // Toggle play/pause
-        newState.isPaused = !currentState.isPaused;
-        break;
-
-      case 'volumeAdjust': {
-        // Adjust volume by delta
-        const delta = parseInt(additionalData.delta || '0', 10);
-        newState.volume = Math.max(0, Math.min(200, currentState.volume + delta));
-        break;
-      }
-
-      case 'loop':
-        // Cycle through loop modes: off → track → queue → off
-        if (currentState.loopMode === 'off') {
-          newState.loopMode = 'track';
-        } else if (currentState.loopMode === 'track') {
-          newState.loopMode = 'queue';
-        } else {
-          newState.loopMode = 'off';
-        }
-        break;
-
-      case 'mute':
-        // Toggle mute (0 volume or restore to last volume, assume 100)
-        newState.volume = currentState.volume === 0 ? 100 : 0;
-        break;
-
-      case 'autoplay': {
-        // Cycle through autoplay modes: off → similar → artist → genre → mixed → off
-        const modes: Array<'off' | 'similar' | 'artist' | 'genre' | 'mixed'> = ['off', 'similar', 'artist', 'genre', 'mixed'];
-        const currentIndex = modes.indexOf(currentState.autoplayMode);
-        const nextIndex = (currentIndex + 1) % modes.length;
-        newState.autoplayMode = modes[nextIndex];
-        break;
-      }
-
-      // Commands that don't change visual state immediately
-      case 'skip':
-      case 'stop':
-      case 'shuffle':
-      case 'clear':
-      case 'seekAdjust':
-      case 'previous':
-        // These will be updated by the audio service's UI update
-        break;
+    if (data.uiPushSource === 'control' || data.uiPushSource === 'track_event') {
+      logger.info(uiUpdateLogPayload, 'Gateway received UI update');
+    } else {
+      logger.debug(uiUpdateLogPayload, 'Gateway received UI update');
     }
 
-    return newState;
-  }
+    const trackingInfo = this.activeInteractions.get(sessionKey);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async checkButtonDJPermissions(interaction: any): Promise<boolean> {
-    try {
-      const guildId = interaction.guildId!;
-      const userId = interaction.user.id;
-
-      // Get guild settings to check if DJ only mode is enabled and get DJ role
-      const guildSettings = await this.settingsService.getGuildSettings(guildId);
-
-      // If DJ only mode is disabled, allow all users
-      if (!guildSettings.djOnlyMode) {
-        return true;
-      }
-
-      // Get user roles for permission checking
-      const userRoles = await this.permissionService.getUserRoles(userId, guildId);
-
-      // Check if user has permission to control music
-      const hasPermission = await this.permissionService.hasPermissionToControlMusic(
-        userId,
-        guildId,
-        userRoles,
-        guildSettings.djRoleId || null
-      );
-
-      if (!hasPermission) {
-        const djRoleName = guildSettings.djRoleId || 'DJ';
-        const showFeedback = await this.shouldUseEphemeral(guildId);
-        if (showFeedback) {
-          await interaction.reply({
-            content: `🚫 DJ Only mode is enabled. You need the **${djRoleName}** role to use music controls.`,
-            ephemeral: true
-          });
-        }
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error({ error, guildId: interaction.guildId, userId: interaction.user.id }, 'Error checking button DJ permissions');
-      const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
-      if (showFeedback) {
-        await interaction.reply({
-          content: '❌ Error checking permissions. Please try again.',
-          ephemeral: true
-        });
-      }
-      return false;
-    }
-  }
-
-  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
-    // Handle music control button interactions
-    if (!interaction.guildId) {
-      await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+    // If we have a blocked UI (e.g. user just deleted it), don't recreate it immediately
+    if (trackingInfo?.uiBlocked) {
+      logger.debug({ guildId: data.guildId, channelId }, 'UI update skipped - UI is blocked');
       return;
     }
 
-    const customId = interaction.customId;
-    logger.info({ customId, guildId: interaction.guildId, userId: interaction.user.id }, 'Processing button interaction');
-
     try {
-      if (customId.startsWith('premium_plan:')) {
-        await this.premiumController.handlePlanButton(interaction);
-        return;
-      }
+      const client = this.discordClientManager.getClient();
+      const targetChannelId = trackingInfo?.channelId ?? channelId;
+      const channel = client.channels.cache.get(targetChannelId) ?? await client.channels.fetch(targetChannelId);
+      if (!channel?.isTextBased() || !('send' in channel)) return;
 
-      if (customId === 'premium_cancel_confirm' || customId === 'premium_cancel_abort') {
-        await this.premiumController.handleCancelButton(interaction);
-        return;
-      }
+      // Resolve guild theme for UI colors
+      const theme = await this.resolveGuildTheme(data.guildId);
 
-      if (customId === 'filters_reset') {
-        const hasPermission = await this.checkButtonDJPermissions(interaction);
-        if (!hasPermission) {
-          return;
-        }
-        await this.handleFilterPresetChange(interaction, 'flat');
-        return;
-      }
+      // Build the UI payload
+      // Map fields from Audio service payload to MusicUIBuilder expectations
+      const uiPayload = this.uiBuilder.buildMusicUI({
+        ...data,
+        trackTitle: data.title,
+        artist: data.author,
+        duration: durationMs,
+        position: normalizedPositionMs,
+        queueLength: data.queueLen,
+        isPaused: data.paused,
+        theme // Pass resolved theme to UI builder
+      });
 
-      if (customId === 'filters_close') {
-        await interaction.deferUpdate();
-        await interaction.deleteReply();
-        return;
-      }
-
-      // Map button interactions to corresponding commands
-      let commandType: string;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let additionalData: any = {};
-
-      switch (customId) {
-        case 'music_playpause':
-          commandType = 'toggle';
-          break;
-        case 'music_skip':
-          commandType = 'skip';
-          break;
-        case 'music_stop':
-          commandType = 'stop';
-          break;
-        case 'music_volume_up':
-          commandType = 'volumeAdjust';
-          additionalData.delta = '10';
-          break;
-        case 'music_volume_down':
-          commandType = 'volumeAdjust';
-          additionalData.delta = '-10';
-          break;
-        case 'music_loop':
-          commandType = 'loop';
-          break;
-        case 'music_shuffle':
-          commandType = 'shuffle';
-          break;
-        case 'music_queue':
-          commandType = 'queue';
-          additionalData.requestId = `queue_${Date.now()}`;
-          break;
-        case 'music_clear':
-          commandType = 'clear';
-          break;
-        case 'music_autoplay':
-          commandType = 'autoplay';
-          break;
-        case 'music_seek_back':
-          commandType = 'seekAdjust';
-          additionalData.deltaMs = '-10000'; // -10 seconds in milliseconds
-          break;
-        case 'music_seek_forward':
-          commandType = 'seekAdjust';
-          additionalData.deltaMs = '10000'; // +10 seconds in milliseconds
-          break;
-        case 'music_previous':
-          commandType = 'previous';
-          break;
-        case 'music_seek_back_30':
-          commandType = 'seekAdjust';
-          additionalData.deltaMs = '-30000'; // -30 seconds in milliseconds
-          break;
-        case 'music_seek_forward_30':
-          commandType = 'seekAdjust';
-          additionalData.deltaMs = '30000'; // +30 seconds in milliseconds
-          break;
-        case 'music_mute':
-          commandType = 'mute';
-          break;
-        case 'music_filters': {
-          const hasPermission = await this.checkButtonDJPermissions(interaction);
-          if (!hasPermission) {
-            return;
-          }
-          await this.openFiltersPanel(interaction);
-          return;
-        }
-        default:
-          // Handle pagination buttons (music_queue_prev:page and music_queue_next:page)
-          if (customId.startsWith('music_queue_prev:') || customId.startsWith('music_queue_next:')) {
-            const parts = customId.split(':');
-            const currentPage = parseInt(parts[1] || '1', 10);
-            const newPage = customId.startsWith('music_queue_prev:') ? currentPage - 1 : currentPage + 1;
-
-            commandType = 'queue';
-            additionalData.requestId = `queue_${Date.now()}`;
-            additionalData.page = newPage;
-            break;
-          }
-
-          {
-            logger.warn({ customId }, 'Unknown button interaction');
-            const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
-            if (showFeedback) {
-              await interaction.reply({ content: '❌ Unknown button action', ephemeral: true });
-            }
-          }
-          return;
-      }
-
-      // Check DJ permissions for control commands (excluding queue which is read-only)
-      if (commandType !== 'queue') {
-        const hasPermission = await this.checkButtonDJPermissions(interaction);
-        if (!hasPermission) {
-          return; // Permission check already handled the response
-        }
-      }
-
-      // Special handling for queue command - always needs defer since it shows a response
-      if (commandType === 'queue') {
-        await interaction.deferReply({ ephemeral: true });
+      // Check if we have an existing message to edit
+      if (trackingInfo?.messageId) {
         try {
-          const guildId = interaction.guildId!;
-
-          // Check for existing pending request (deduplication)
-          const existingRequest = this.pendingQueueRequests.get(guildId);
-          if (existingRequest) {
-            logger.info({
-              guildId,
-              existingRequestId: existingRequest.requestId,
-              age: Date.now() - existingRequest.timestamp
-            }, 'Queue request already in progress, reusing existing request');
-
-            // Reuse the existing promise
-            const response = await existingRequest.promise;
-            if (response?.items && Array.isArray(response.items)) {
-              const queueEmbed = this.uiBuilder.buildQueueEmbed({
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                tracks: response.items.map((item: any) => ({
-                  title: item.title || 'Unknown Track',
-                  artist: undefined,
-                  duration: undefined,
-                  requestedBy: 'Unknown'
-                })),
-                currentTrack: undefined,
-                totalDuration: undefined,
-                page: response.page || 1,
-                totalPages: response.totalPages || 1
-              });
-
-              const navigationButtons = this.uiBuilder.buildQueueNavigationButtons(
-                response.page || 1,
-                response.totalPages || 1
-              );
-
-              await interaction.editReply({
-                embeds: [queueEmbed],
-                components: navigationButtons
-              });
+          const message = await channel.messages.edit(trackingInfo.messageId, uiPayload);
+          if (message) {
+            const editLogPayload = {
+              guildId: data.guildId,
+              requestId: context?.requestId,
+              uiPushSource: data.uiPushSource,
+              messageId: message.id,
+              channelId: targetChannelId
+            };
+            if (data.uiPushSource === 'control' || data.uiPushSource === 'track_event') {
+              logger.info(editLogPayload, 'Gateway UI edit success');
             } else {
-              await interaction.editReply({ content: '📭 Queue is empty' });
+              logger.debug(editLogPayload, 'Gateway UI edit success');
             }
+
+            // Update timestamp
+            this.activeInteractions.set(sessionKey, {
+              ...trackingInfo,
+              lastUpdated: Date.now()
+            });
             return;
-          }
-
-          // Create new request promise
-          const requestPromise = this.executeQueueRequest(guildId, additionalData);
-
-          // Store in pending requests for deduplication
-          this.pendingQueueRequests.set(guildId, {
-            requestId: additionalData.requestId,
-            timestamp: Date.now(),
-            promise: requestPromise
-          });
-
-          const response = await requestPromise;
-
-          if (response?.items && Array.isArray(response.items)) {
-            const queueEmbed = this.uiBuilder.buildQueueEmbed({
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              tracks: response.items.map((item: any) => ({
-                title: item.title || 'Unknown Track',
-                artist: undefined,
-                duration: undefined,
-                requestedBy: 'Unknown'
-              })),
-              currentTrack: undefined,
-              totalDuration: undefined,
-              page: response.page || 1,
-              totalPages: response.totalPages || 1
-            });
-
-            const navigationButtons = this.uiBuilder.buildQueueNavigationButtons(
-              response.page || 1,
-              response.totalPages || 1
-            );
-
-            await interaction.editReply({
-              embeds: [queueEmbed],
-              components: navigationButtons
-            });
-          } else {
-            await interaction.editReply({ content: '📭 Queue is empty' });
           }
         } catch (error) {
-          logger.error({ error, commandType }, 'Failed to get queue response');
-          await interaction.editReply({ content: '❌ Failed to retrieve queue' });
-        } finally {
-          // Always clean up pending request
-          const guildId = interaction.guildId!;
-          this.pendingQueueRequests.delete(guildId);
+          // Message not found or deleted, clear tracking info and create new one
+          logger.warn({
+            guildId: data.guildId,
+            messageId: trackingInfo.messageId,
+            error: error instanceof Error ? error.message : String(error)
+          }, 'Tracked UI message not found or edit failed, creating new one');
+        }
+      } else {
+        logger.info({ guildId: data.guildId, reason: 'no_tracking_id' }, 'No existing UI message tracked, creating new one');
+      }
+
+      // Create new message if no existing one or edit failed
+      const message = await channel.send(uiPayload);
+
+      // Update tracking info
+      this.activeInteractions.set(sessionKey, {
+        messageId: message.id,
+        channelId: targetChannelId,
+        guildId: data.guildId,
+        lastUpdated: Date.now(),
+        processingMessageId: trackingInfo?.processingMessageId
+      });
+
+      const createLogPayload = {
+        guildId: data.guildId,
+        requestId: context?.requestId,
+        uiPushSource: data.uiPushSource,
+        messageId: message.id,
+        channelId: targetChannelId
+      };
+      if (data.uiPushSource === 'control' || data.uiPushSource === 'track_event') {
+        logger.info(createLogPayload, 'Gateway UI create success');
+      } else {
+        logger.debug(createLogPayload, 'Gateway UI create success');
+      }
+    } catch (error) {
+      logger.error({ error, guildId: data.guildId }, 'Failed to handle UI update');
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async handlePanelCommand(message: any): Promise<void> {
+    logger.info({ type: message.type, guildId: message.guildId }, 'Received panel command');
+
+    if (message.type === 'summon') {
+      const guildId = typeof message.guildId === 'string' ? message.guildId : null;
+      const voiceChannelId = typeof message.voiceChannelId === 'string' ? message.voiceChannelId : null;
+      const textChannelId = typeof message.textChannelId === 'string' ? message.textChannelId : null;
+      const requestId = typeof message.requestId === 'string' ? message.requestId : null;
+      const responseChannel = requestId ? `discord-bot:response:${requestId}` : null;
+
+      if (!guildId || !voiceChannelId || !textChannelId) {
+        logger.warn({ message }, 'Invalid summon panel command payload');
+        if (responseChannel) {
+          await this.redisManager.getClient().publish(responseChannel, JSON.stringify({
+            success: false,
+            error: 'Invalid summon payload',
+          }));
         }
         return;
       }
 
-      // For other commands - provide immediate feedback and send command
-      const showButtonFeedback = await this.shouldUseEphemeral(interaction.guildId);
-
-      // OPTIMISTIC UI UPDATE: Update button states immediately before sending command
-      // This provides instant visual feedback while the audio service processes the command
       try {
-        await this.applyOptimisticUIUpdate(interaction, commandType, additionalData);
-      } catch (optimisticError) {
-        logger.warn({ error: optimisticError, commandType }, 'Optimistic UI update failed, continuing with command');
-      }
+        const client = this.discordClientManager.getClient();
+        const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId);
+        const voiceChannel = await guild.channels.fetch(voiceChannelId);
 
-      // All button interactions MUST be acknowledged within 3 seconds
-      if (showButtonFeedback) {
-        // Show feedback with deferReply (displays "Bot is thinking..." then custom message)
-        await interaction.deferReply({ ephemeral: true });
+        if (!voiceChannel?.isVoiceBased()) {
+          throw new Error(`Channel ${voiceChannelId} is not a voice channel`);
+        }
 
-        const actionLabels: Record<string, string> = {
-          'toggle': '⏯️ Toggling playback...',
-          'skip': '⏭️ Skipping track...',
-          'stop': '⏹️ Stopping playback...',
-          'volumeAdjust': '🔊 Adjusting volume...',
-          'loop': '🔁 Cycling loop mode...',
-          'shuffle': '🔀 Shuffling queue...',
-          'clear': '🧹 Clearing queue...',
-          'seedRelated': '▶️ Adding autoplay tracks...',
-          'seekAdjust': '⏩ Seeking...',
-          'autoplay': '▶️ Cycling autoplay mode...',
-          'mute': '🔇 Toggling mute...'
-        };
+        this.rememberUIChannel(guildId, textChannelId, voiceChannelId);
+        this.registerVoiceRequestContext(guildId, requestId ?? `panel_summon_${Date.now()}`, voiceChannelId);
 
-        const feedbackMessage = actionLabels[commandType] || `🎵 ${commandType}...`;
-        await interaction.editReply({ content: feedbackMessage });
-
-        // Auto-delete feedback message after 3 seconds
-        setTimeout(async () => {
-          try {
-            await interaction.deleteReply();
-          } catch (error) {
-            // Ignore deletion errors (message might already be gone)
-            logger.debug({ error, commandType }, 'Button feedback message deletion failed (likely already deleted)');
-          }
-        }, 3000);
-      } else {
-        // No feedback: use deferUpdate to silently acknowledge the interaction
-        // This prevents "This interaction failed" error without showing any loading state
-        await interaction.deferUpdate();
-      }
-
-      // Send command to audio service via Redis Streams
-      try {
-        await this.audioCommandService.sendCommand(
-          commandType,
-          interaction.guildId,
-          additionalData
+        const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = await import('@discordjs/voice');
+        const existing = getVoiceConnection(guildId);
+        const inTargetChannel = existing?.joinConfig.channelId === voiceChannelId;
+        const isReusable = Boolean(
+          existing &&
+          inTargetChannel &&
+          (existing.state.status === VoiceConnectionStatus.Ready ||
+            existing.state.status === VoiceConnectionStatus.Connecting)
         );
 
-        logger.info({ commandType, guildId: interaction.guildId }, 'Button command forwarded to audio service via Redis Streams');
-      } catch (commandError) {
-        logger.error({ error: commandError, commandType, guildId: interaction.guildId }, 'Failed to send command via Redis Streams');
-        throw commandError;
-      }
+        let connection = existing ?? null;
+        if (!isReusable) {
+          if (existing) {
+            try {
+              existing.destroy();
+            } catch (error) {
+              logger.warn({ error, guildId }, 'Failed to destroy stale summon voice connection');
+            }
+          }
 
-    } catch (error) {
-      logger.error({ error, customId }, 'Error handling button interaction');
+          connection = joinVoiceChannel({
+            channelId: voiceChannelId,
+            guildId,
+            adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: true
+          });
+        }
 
-      try {
-        const showFeedback = await this.shouldUseEphemeral(interaction.guildId);
-        if (showFeedback) {
-          if (interaction.deferred) {
-            await interaction.editReply({ content: '❌ Failed to process button action.' });
-          } else {
-            await interaction.reply({ content: '❌ Failed to process button action.', ephemeral: true });
+        await entersState(connection!, VoiceConnectionStatus.Ready, 15_000);
+
+        const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+        const sessionId = me?.voice?.sessionId ?? this.voiceManager.getVoiceStateData(guildId)?.sessionId;
+        const voiceServer = this.voiceManager.getVoiceServerData(guildId);
+
+        if (sessionId) {
+          const voiceStatePacket = {
+            t: 'VOICE_STATE_UPDATE',
+            d: {
+              guild_id: guildId,
+              channel_id: voiceChannelId,
+              user_id: client.user?.id,
+              session_id: sessionId,
+              self_mute: me?.voice?.selfMute ?? false,
+              self_deaf: me?.voice?.selfDeaf ?? true,
+            }
+          };
+          await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(voiceStatePacket));
+        }
+
+        if (voiceServer?.token && voiceServer?.endpoint) {
+          const voiceServerPacket = {
+            t: 'VOICE_SERVER_UPDATE',
+            d: {
+              guild_id: guildId,
+              token: voiceServer.token,
+              endpoint: voiceServer.endpoint
+            }
+          };
+          await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(voiceServerPacket));
+
+          if (sessionId) {
+            await this.redisManager.getAudioClient().publish('discord-bot:to-audio', JSON.stringify({
+              type: 'VOICE_CREDENTIALS',
+              guildId,
+              voiceCredentials: {
+                guildId,
+                sessionId,
+                token: voiceServer.token,
+                endpoint: voiceServer.endpoint
+              }
+            }));
           }
         }
-      } catch (responseError) {
-        logger.error({ responseError }, 'Failed to send error response for button interaction');
+
+        logger.info({
+          guildId,
+          voiceChannelId,
+          textChannelId,
+          requestId
+        }, 'Panel summon voice connection ready');
+
+        if (responseChannel) {
+          await this.redisManager.getClient().publish(responseChannel, JSON.stringify({
+            success: true,
+            guildId,
+            voiceChannelId,
+            textChannelId
+          }));
+        }
+      } catch (error) {
+        logger.error({
+          error: error instanceof Error ? error.message : String(error),
+          guildId,
+          voiceChannelId,
+          textChannelId,
+          requestId
+        }, 'Failed to process summon panel command');
+
+        if (responseChannel) {
+          await this.redisManager.getClient().publish(responseChannel, JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        }
       }
+      return;
+    }
+
+    if (message.type === 'open_filters') {
+      await this.openFiltersPanel(message.guildId, message.channelId);
+    }
+  }
+
+  private async openFiltersPanel(guildId: string, channelId: string): Promise<void> {
+    try {
+      const client = this.discordClientManager.getClient();
+      const channel = await client.channels.fetch(channelId);
+      if (!channel?.isTextBased() || !('send' in channel)) return;
+
+      // Get current filter state from Audio service via Redis
+      // For now, we'll use default state, but in production this should fetch from Audio service
+      const filterState: FilterPanelState = {
+        success: true,
+        presets: [
+          { id: 'flat', label: 'Flat', description: 'No filter applied' },
+          { id: 'bassboost', label: 'Bass Boost', description: 'Boost low frequencies' },
+          { id: 'nightcore', label: 'Nightcore', description: 'Higher pitch and speed' },
+          { id: 'vaporwave', label: 'Vaporwave', description: 'Lower pitch and speed' }
+        ],
+        preset: { id: 'flat', label: 'Flat', description: 'No filter applied' }
+      };
+
+      // Try to fetch actual state if available
+      try {
+        const stateRaw = await this.redisManager.getClient().get(`discord-bot:filters:${guildId}`);
+        if (stateRaw) {
+          const state = JSON.parse(stateRaw);
+          if (state.filter) {
+            const active = filterState.presets.find(p => p.id === state.filter);
+            if (active) filterState.preset = active;
+          }
+        }
+      } catch (error) {
+        logger.warn({ error, guildId }, 'Failed to fetch filter state');
+      }
+
+      const panel = this.uiBuilder.buildFilterPanel(filterState);
+      await channel.send(panel);
+      logger.info({ guildId, channelId }, 'Opened filters panel');
+    } catch (error) {
+      logger.error({ error, guildId }, 'Failed to open filters panel');
     }
   }
 
   private async start(): Promise<void> {
-    // Set up Discord event handlers
-    this.setupDiscordEventHandlers();
+    // Initialize AudioCommandService
+    await this.audioCommandService.initialize();
 
-    // Login to Discord
-    await this.discordClient.login(env.DISCORD_TOKEN);
-    logger.info('Discord client logged in');
-  }
-
-  private setupDiscordEventHandlers(): void {
-    this.discordClient.once(Events.ClientReady, (readyClient) => {
-      logger.info(`Gateway ready! Logged in as ${readyClient.user.tag}`);
-    });
-
-    this.discordClient.on('interactionCreate', async (interaction) => {
-      try {
-        logger.info({ interactionType: interaction.type, user: interaction.user.username }, 'Interaction received');
-
-        // Handle button interactions for music controls
-        if (interaction.isButton()) {
-          logger.info({ customId: interaction.customId, user: interaction.user.username }, 'Processing button interaction');
-          await this.handleButtonInteraction(interaction);
-          return;
-        }
-
-        if (interaction.isStringSelectMenu()) {
-          logger.info({ customId: interaction.customId, user: interaction.user.username }, 'Processing select menu interaction');
-          await this.handleSelectMenuInteraction(interaction);
-          return;
-        }
-
-        if (!interaction.isChatInputCommand()) {
-          logger.info({ interactionType: interaction.type }, 'Not a chat input command or button, ignoring');
-          return;
-        }
-
-        logger.info({ commandName: interaction.commandName, user: interaction.user.username }, 'Processing command');
-
-        // Route commands to appropriate controllers
-        switch (interaction.commandName) {
-          case 'play':
-            await this.musicController.handlePlayCommand(interaction);
-            break;
-          case 'playnext':
-            await this.musicController.handlePlayNextCommand(interaction);
-            break;
-          case 'playnow':
-            await this.musicController.handlePlayNowCommand(interaction);
-            break;
-          case 'pause':
-            await this.musicController.handlePauseCommand(interaction);
-            break;
-          case 'resume':
-            await this.musicController.handleResumeCommand(interaction);
-            break;
-          case 'stop':
-            await this.musicController.handleStopCommand(interaction);
-            break;
-          case 'skip':
-            await this.musicController.handleSkipCommand(interaction);
-            break;
-          case 'volume':
-            await this.musicController.handleVolumeCommand(interaction);
-            break;
-          case 'loop':
-            await this.musicController.handleLoopCommand(interaction);
-            break;
-          case 'queue':
-            await this.musicController.handleQueueCommand(interaction);
-            break;
-          case 'shuffle':
-            await this.musicController.handleShuffleCommand(interaction);
-            break;
-          case 'clear':
-            await this.musicController.handleClearCommand(interaction);
-            break;
-          case 'remove':
-            await this.musicController.handleRemoveCommand(interaction);
-            break;
-          case 'move':
-            await this.musicController.handleMoveCommand(interaction);
-            break;
-          case 'nowplaying':
-            await this.musicController.handleControlCommand(interaction, 'nowplaying');
-            break;
-          case 'seek':
-            await this.musicController.handleSeekCommand(interaction);
-            break;
-          case 'autoplay':
-            await this.musicController.handleAutoplayCommand(interaction);
-            break;
-          case 'voteskip':
-            await this.handleVoteSkipCommand(interaction);
-            break;
-          case 'settings':
-            await this.musicController.handleSettingsCommand(interaction);
-            break;
-          case 'premium':
-            await this.premiumController.handleCommand(interaction);
-            break;
-          default:
-            logger.warn(`Unknown command: ${interaction.commandName}`);
-        }
-      } catch (error) {
-        logger.error({ error }, 'Error handling interaction');
-      }
-    });
-
-    this.discordClient.on('error', (error) => {
-      logger.error({ error }, 'Discord client error');
-    });
-
-    // RULE 3: UI deletion triggers bot disconnect
-    this.discordClient.on(Events.MessageDelete, async (message) => {
-      await this.handleMessageDelete(message);
-    });
-
-    // Handle voice state updates to send Discord credentials to Lavalink
-    this.discordClient.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-      await this.handleDiscordVoiceStateUpdate(oldState, newState);
-    });
-
-    // Handle voice server updates via Discord.js event
-    // The handleVoiceServerUpdate method will automatically send credentials to audio service
-    this.discordClient.on(Events.VoiceServerUpdate, async (update) => {
-      await this.handleVoiceServerUpdate(update);
-    });
-
-    // ============================================================================
-    // CRITICAL: Forward RAW Discord Gateway Events to Audio Service for Lavalink
-    // ============================================================================
-    // Lavalink-client requires raw Discord gateway events via sendRawData() to
-    // establish voice connections. We forward VOICE_SERVER_UPDATE, VOICE_STATE_UPDATE,
-    // and CHANNEL_DELETE to the Audio service for proper Lavalink voice synchronization.
-    //
-    // See: https://lc4.gitbook.io/lavalink-client/ (Discord.js v14 integration)
-    // ============================================================================
-
-    // Track processed raw events to prevent duplicate handling
-    const processedRawEvents = new Map<string, number>();
-    const RAW_EVENT_DEDUP_WINDOW_MS = 1000;
-
-    // Helper to check if event was recently processed
-    const isRecentlyProcessed = (key: string): boolean => {
-      const timestamp = processedRawEvents.get(key);
-      if (timestamp && Date.now() - timestamp < RAW_EVENT_DEDUP_WINDOW_MS) {
-        return true;
-      }
-      processedRawEvents.set(key, Date.now());
-      // Cleanup old entries (older than 5 seconds)
-      for (const [k, v] of processedRawEvents.entries()) {
-        if (Date.now() - v > 5000) processedRawEvents.delete(k);
-      }
-      return false;
+    // Register Discord event handlers
+    const client = this.discordClientManager.getClient();
+    const syncGuildConfiguration = async (guild: Guild): Promise<void> => {
+      await this.settingsService.ensureGuildConfigurationExists(guild.id, {
+        name: guild.name,
+        icon: guild.icon,
+        ownerId: guild.ownerId ?? null,
+        isTestGuild: env.PREMIUM_TEST_GUILD_IDS_LIST.includes(guild.id),
+      });
     };
 
-    // Forward VOICE_SERVER_UPDATE raw events to Audio service for Lavalink
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.discordClient.ws.on(GatewayDispatchEvents.VoiceServerUpdate as any, async (data: any) => {
-      const dedupKey = `VOICE_SERVER_UPDATE:${data.guild_id}:${data.token}`;
-      if (isRecentlyProcessed(dedupKey)) {
-        logger.debug({ guildId: data.guild_id }, 'LAVALINK: Skipping duplicate VOICE_SERVER_UPDATE raw event');
-        return;
-      }
+    client.on(Events.ClientReady, () => {
+      logger.info(`Logged in as ${client.user?.tag}!`);
 
-      logger.info({
-        guildId: data.guild_id,
-        hasToken: !!data.token,
-        hasEndpoint: !!data.endpoint
-      }, 'LAVALINK: Forwarding raw VOICE_SERVER_UPDATE to Audio service');
+      // Set initial presence
+      client.user?.setPresence({
+        activities: [{ name: 'High Quality Music 🎵' }],
+        status: 'online'
+      });
 
-      try {
-        // Forward the complete raw packet to Audio service for manager.sendRawData()
-        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
-          t: 'VOICE_SERVER_UPDATE',
-          d: data
-        }));
-
-        // Also handle via standard flow for voice credentials (belt and suspenders)
-        await this.handleVoiceServerUpdate({
-          token: data.token,
-          guild: { id: data.guild_id },
-          endpoint: data.endpoint
+      const guilds = [...client.guilds.cache.values()];
+      void Promise.allSettled(guilds.map((guild) => syncGuildConfiguration(guild)))
+        .then((results) => {
+          const failed = results.filter((result) => result.status === 'rejected').length;
+          logger.info({
+            totalGuilds: guilds.length,
+            syncedGuilds: guilds.length - failed,
+            failedGuilds: failed,
+          }, 'Synchronized guild metadata into configuration tables');
         });
-      } catch (error) {
-        logger.error({
-          error: error instanceof Error ? error.message : String(error),
-          guildId: data.guild_id
-        }, 'LAVALINK: Failed to forward VOICE_SERVER_UPDATE to Audio service');
-      }
     });
 
-    // Forward VOICE_STATE_UPDATE raw events to Audio service for Lavalink
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.discordClient.ws.on(GatewayDispatchEvents.VoiceStateUpdate as any, async (data: any) => {
-      const dedupKey = `VOICE_STATE_UPDATE:${data.guild_id}:${data.user_id}:${data.session_id || 'none'}`;
-      if (isRecentlyProcessed(dedupKey)) {
-        logger.debug({ guildId: data.guild_id }, 'LAVALINK: Skipping duplicate VOICE_STATE_UPDATE raw event');
-        return;
-      }
+    client.on(Events.GuildCreate, (guild) => {
+      void syncGuildConfiguration(guild)
+        .then(() => logger.info({ guildId: guild.id, guildName: guild.name }, 'Synchronized new guild metadata'))
+        .catch((error) => logger.error({
+          error: error instanceof Error ? error.message : String(error),
+          guildId: guild.id,
+        }, 'Failed to synchronize guild metadata on GuildCreate'));
+    });
 
-      logger.debug({
-        guildId: data.guild_id,
-        userId: data.user_id,
-        hasSessionId: !!data.session_id
-      }, 'LAVALINK: Forwarding raw VOICE_STATE_UPDATE to Audio service');
+    client.on(Events.GuildUpdate, (_oldGuild, newGuild) => {
+      void syncGuildConfiguration(newGuild)
+        .catch((error) => logger.warn({
+          error: error instanceof Error ? error.message : String(error),
+          guildId: newGuild.id,
+        }, 'Failed to refresh guild metadata on GuildUpdate'));
+    });
 
+    client.on(Events.InteractionCreate, async (interaction) => {
       try {
-        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
-          t: 'VOICE_STATE_UPDATE',
-          d: data
-        }));
+        await this.musicController.handleInteraction(interaction);
       } catch (error) {
-        logger.error({
-          error: error instanceof Error ? error.message : String(error),
-          guildId: data.guild_id
-        }, 'LAVALINK: Failed to forward VOICE_STATE_UPDATE to Audio service');
+        logger.error({ error, interactionId: interaction.id }, 'Interaction handling failed');
       }
     });
 
-    // Forward CHANNEL_DELETE events (needed for cleanup when voice channels are deleted)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.discordClient.ws.on(GatewayDispatchEvents.ChannelDelete as any, async (data: any) => {
-      // Only forward voice channel deletions
-      if (data.type !== 2) return; // 2 = GUILD_VOICE channel type
+    client.on(Events.MessageDelete, async (message) => {
+      if (!message.guildId) return;
 
-      logger.debug({
-        channelId: data.id,
-        guildId: data.guild_id
-      }, 'LAVALINK: Forwarding raw CHANNEL_DELETE to Audio service');
+      // Check if this message is a tracked UI Principal (by messageId across sessions)
+      let matchedKey: string | null = null;
+      let trackingInfo: {
+        messageId: string;
+        channelId: string;
+        guildId: string;
+        lastUpdated: number;
+        processingMessageId?: string;
+        uiBlocked?: boolean;
+      } | undefined;
 
-      try {
-        await this.audioRedisClient.publish('discord-bot:lavalink-raw-events', JSON.stringify({
-          t: 'CHANNEL_DELETE',
-          d: data
-        }));
-      } catch (error) {
-        logger.error({
-          error: error instanceof Error ? error.message : String(error),
-          channelId: data.id
-        }, 'LAVALINK: Failed to forward CHANNEL_DELETE to Audio service');
-      }
-    });
-  }
-
-  private async handleSelectMenuInteraction(interaction: StringSelectMenuInteraction): Promise<void> {
-    if (!interaction.guildId) {
-      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
-      return;
-    }
-
-    switch (interaction.customId) {
-      case 'filters_select': {
-        const selected = interaction.values?.[0];
-        if (!selected) {
-          await interaction.reply({ content: '❌ Please choose a filter preset.', ephemeral: true });
-          return;
+      for (const [key, info] of this.activeInteractions.entries()) {
+        if (info.messageId === message.id) {
+          matchedKey = key;
+          trackingInfo = info;
+          break;
         }
-
-        const hasPermission = await this.checkButtonDJPermissions(interaction);
-        if (!hasPermission) {
-          return;
-        }
-
-        await this.handleFilterPresetChange(interaction, selected);
-        return;
       }
-      default:
-        logger.warn({ customId: interaction.customId }, 'Unknown select menu interaction');
-        await interaction.reply({ content: '❌ Unknown selection', ephemeral: true });
-    }
-  }
 
-  private async openFiltersPanel(interaction: ButtonInteraction): Promise<void> {
-    const guildId = interaction.guildId;
-    if (!guildId) {
-      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
-      return;
-    }
+      if (trackingInfo && matchedKey) {
+        logger.info({ guildId: message.guildId, messageId: message.id }, 'UI Principal deleted - allowing recreation without disconnect');
 
-    await interaction.deferReply({ ephemeral: true });
-
-    const state = await this.fetchFilterState(guildId);
-    const view = this.uiBuilder.buildFilterPanel(state);
-
-    await interaction.editReply(view);
-
-    if (!state.success && state.error) {
-      await interaction.followUp({ content: `❌ ${state.error}`, ephemeral: true });
-    }
-  }
-
-  private async handleFilterPresetChange(
-    interaction: ButtonInteraction | StringSelectMenuInteraction,
-    presetId: string,
-  ): Promise<void> {
-    if (!interaction.guildId) {
-      await interaction.reply({ content: 'This action can only be used in a server.', ephemeral: true });
-      return;
-    }
-
-    await interaction.deferUpdate();
-
-    const state = await this.applyFilterPreset(interaction.guildId, presetId);
-    const view = this.uiBuilder.buildFilterPanel(state);
-
-    await interaction.editReply(view);
-
-    if (!state.success && state.error) {
-      await interaction.followUp({ content: `❌ ${state.error}`, ephemeral: true });
-    } else if (state.message) {
-      await interaction.followUp({ content: state.message, ephemeral: true });
-    }
-  }
-
-  private async fetchFilterState(guildId: string): Promise<FilterPanelState> {
-    try {
-      const response = await this.audioCommandService.sendCommand('filters', guildId, {
-        action: 'get',
-      });
-      return this.normalizeFilterState(response);
-    } catch (error) {
-      logger.error({ error, guildId }, 'Failed to fetch filter state');
-      return {
-        success: false,
-        presets: [],
-        error: 'Failed to load filter presets. Please try again shortly.',
-      };
-    }
-  }
-
-  private async applyFilterPreset(guildId: string, presetId: string): Promise<FilterPanelState> {
-    try {
-      const response = await this.audioCommandService.sendCommand('filters', guildId, {
-        action: 'apply',
-        preset: presetId,
-      });
-      return this.normalizeFilterState(response);
-    } catch (error) {
-      logger.error({ error, guildId, presetId }, 'Failed to apply filter preset');
-      return {
-        success: false,
-        presets: [],
-        error: 'Failed to apply audio filter. Please try again.',
-      };
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private normalizeFilterState(response: any): FilterPanelState {
-    const presets: FilterPanelState['presets'] = Array.isArray(response?.presets)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ? response.presets.map((preset: any) => ({
-          id: String(preset.id ?? preset.value ?? preset.name ?? 'flat'),
-          label: String(preset.label ?? preset.name ?? preset.id ?? 'Flat'),
-          description: preset.description ?? preset.details ?? undefined,
-        }))
-      : [];
-
-    if (presets.length === 0) {
-      presets.push({ id: 'flat', label: 'Flat', description: 'All enhancements disabled' });
-    }
-
-    const activePresetRaw = response?.preset;
-    const activePresetId = activePresetRaw?.id ?? activePresetRaw?.value ?? activePresetRaw?.name ?? presets[0].id;
-    const activePreset = presets.find((preset) => preset.id === activePresetId) ?? presets[0];
-
-    return {
-      success: response?.success !== false,
-      preset: activePreset,
-      presets,
-      message: response?.message,
-      error: response?.error,
-    };
-  }
-
-
-  /**
-   * Handle message deletion events to detect UI deletion (Rule 3)
-   * RULE 3: Deleting UI PRINCIPAL must disconnect bot immediately
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleMessageDelete(message: any): Promise<void> {
-    try {
-      // Check if deleted message was a UI PRINCIPAL message tracked in our system
-      const channelKey = `${message.guildId}:${message.channelId}`;
-      const trackedInteraction = this.activeInteractions.get(channelKey);
-
-      if (trackedInteraction && trackedInteraction.messageId === message.id) {
-        logger.info({
-          guildId: message.guildId,
-          channelId: message.channelId,
-          messageId: message.id
-        }, 'Tracked UI PRINCIPAL message was deleted by user, disconnecting bot immediately (Rule 3)');
-
-        // CRITICAL FIX: Set UI blocked flag instead of deleting to prevent recreation
-        this.activeInteractions.set(channelKey, {
-          ...trackedInteraction,
-          uiBlocked: true,
+        // Clear tracking so the next UI update recreates the message.
+        this.activeInteractions.set(matchedKey, {
+          ...trackingInfo,
+          messageId: '', // Clear message ID since it's gone
+          uiBlocked: false,
           lastUpdated: Date.now()
         });
+      }
+    });
 
-        // Disconnect bot from voice channel immediately
-        const disconnectCommand = {
-          type: 'disconnect',
-          guildId: message.guildId,
-          channelId: message.channelId,
-          reason: 'UI_DELETED',
-          timestamp: Date.now()
-        };
+    client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+      // Handle voice state updates (disconnects, channel moves)
+      // This is critical for tracking bot's voice connection status
+      if (newState.member?.id === client.user?.id) {
+        const transitionReason = !newState.channelId
+          ? 'disconnected'
+          : (oldState.channelId && oldState.channelId !== newState.channelId ? 'channel_moved' : 'state_refreshed');
+        const context = this.getVoiceRequestContext(newState.guild.id);
+        if (!newState.channelId) {
+          // Bot was disconnected. Apply short grace period to avoid stopping playback
+          // on transient Discord voice transitions.
+          logger.info({
+            guildId: newState.guild.id,
+            oldChannelId: oldState.channelId,
+            newChannelId: newState.channelId,
+            requestId: context?.requestId,
+            reason: transitionReason,
+            graceMs: this.transientVoiceDisconnectGraceMs,
+          }, 'VOICE_CONNECT: Bot disconnected from voice channel, scheduling grace stop');
 
-        logger.info({ disconnectCommand }, 'Sending DISCONNECT command to audio service due to UI deletion');
-        await this.redisClient.publish('discord-bot:commands', JSON.stringify(disconnectCommand));
+          this.clearPendingVoiceDisconnectStop(newState.guild.id);
+          const disconnectTimer = setTimeout(async () => {
+            this.pendingVoiceDisconnectStops.delete(newState.guild.id);
+            const activeConnection = getVoiceConnection(newState.guild.id);
+            if (activeConnection?.joinConfig.channelId) {
+              logger.info({
+                guildId: newState.guild.id,
+                channelId: activeConnection.joinConfig.channelId,
+              }, 'VOICE_CONNECT: Skipping delayed stop because voice connection recovered');
+              return;
+            }
 
-        // Also disconnect from voice channel in Discord
-        const voiceConnection = getVoiceConnection(message.guildId);
-        if (voiceConnection) {
-          logger.info({ guildId: message.guildId }, 'Disconnecting bot from Discord voice channel (Rule 3)');
-          voiceConnection.destroy();
+            this.voiceManager.clearVoiceServerData(newState.guild.id);
+            this.voiceManager.clearVoiceStateData(newState.guild.id);
+
+            await this.redisManager.publish('discord-bot:commands', {
+              guildId: newState.guild.id,
+              type: 'stop',
+              reason: 'voice_disconnect'
+            });
+
+            logger.warn({
+              guildId: newState.guild.id,
+              requestId: context?.requestId,
+            }, 'VOICE_CONNECT: Executed delayed stop after disconnect grace period');
+          }, this.transientVoiceDisconnectGraceMs);
+
+          this.pendingVoiceDisconnectStops.set(newState.guild.id, disconnectTimer);
         } else {
-          logger.debug({ guildId: message.guildId }, 'No voice connection found to destroy (tracked UI)');
+          this.clearPendingVoiceDisconnectStop(newState.guild.id);
+          // Bot joined or moved channel
+          if (newState.sessionId) {
+            this.voiceManager.setVoiceStateData(newState.guild.id, newState.sessionId, newState.channelId);
+          }
+          logger.info({
+            guildId: newState.guild.id,
+            oldChannelId: oldState.channelId,
+            channelId: newState.channelId,
+            sessionId: newState.sessionId,
+            requestId: context?.requestId,
+            reason: transitionReason,
+          }, 'VOICE_CONNECT: Bot voice state updated');
         }
-
-        return;
       }
 
-      // TEMPORARY FIX: Disable Rule 3 completely to debug voice connection issues
-      // eslint-disable-next-line no-constant-condition
-      if (false) {
+      // Listener Limit Check
+      // Check if a user joined the channel where the bot is currently playing
+      const botChannelId = newState.guild.members.me?.voice.channelId;
+      if (botChannelId && newState.channelId === botChannelId && !newState.member?.user.bot) {
+        // A user joined the bot's channel
+        const channel = newState.channel;
+        if (channel && channel.isVoiceBased()) {
+          const memberCount = channel.members.filter(m => !m.user.bot).size;
+
+          try {
+            // Get guild owner's tier (or guild subscription if implemented)
+            // For now, we check the guild owner's subscription
+            const { subscriptionService } = await import('@discord-bot/database');
+            const { getQuotaForTier } = await import('@discord-bot/config');
+
+            const dbTier = await subscriptionService.getUserTier(newState.guild.ownerId);
+
+            // Map database tier (uppercase) to config tier (lowercase)
+            // FREE -> free, GOLD -> basic, DIAMOND -> premium
+            let configTier: 'free' | 'basic' | 'premium' | 'enterprise' = 'free';
+            if (dbTier === 'GOLD') configTier = 'basic';
+            else if (dbTier === 'DIAMOND') configTier = 'premium';
+            else if (dbTier === 'ENTERPRISE') configTier = 'enterprise';
+
+            const maxListeners = getQuotaForTier(configTier, 'maxListeners');
+
+            if (maxListeners !== -1 && memberCount > maxListeners) {
+              logger.warn({
+                guildId: newState.guild.id,
+                memberCount,
+                maxListeners,
+                tier: configTier
+              }, 'Listener limit exceeded');
+
+              // Send warning to the last known UI channel
+              const textChannelId = this.lastUIChannel.get(this.getUIChannelMapKey(newState.guild.id, botChannelId));
+              if (textChannelId) {
+                const textChannel = await newState.guild.channels.fetch(textChannelId);
+                if (textChannel?.isTextBased() && 'send' in textChannel) {
+                  await textChannel.send({
+                    content: `⚠️ **Listener Limit Exceeded**\nYour current plan (**${dbTier}**) supports up to **${maxListeners}** listeners. There are currently **${memberCount}** users in the channel.\n\nPlease upgrade to **Premium** or **Enterprise** for unlimited listeners.`
+                  });
+                }
+              }
+            }
+
+          } catch (error) {
+            logger.error({ error }, 'Failed to check listener limits');
+          }
+        }
+      }
+    });
+
+
+    // Handle raw voice events for Lavalink
+    client.on(Events.Raw, (d) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const packet = d as any;
+      if (!['VOICE_STATE_UPDATE', 'VOICE_SERVER_UPDATE'].includes(packet.t)) return;
+
+      const guildId = packet.d.guild_id;
+      if (!guildId) return;
+
+      // Store voice server data when received
+      if (packet.t === 'VOICE_SERVER_UPDATE') {
+        this.voiceManager.setVoiceServerData(guildId, packet.d.token, packet.d.endpoint);
+      } else if (packet.t === 'VOICE_STATE_UPDATE') {
+        // Only forward voice state updates for the bot itself
+        if (client.user?.id && packet.d.user_id !== client.user.id) {
+          return;
+        }
+        if (packet.d.session_id) {
+          this.voiceManager.setVoiceStateData(guildId, packet.d.session_id, packet.d.channel_id ?? null);
+        }
+      }
+      const counter = this.trackVoiceEvent(guildId, packet.t as 'VOICE_STATE_UPDATE' | 'VOICE_SERVER_UPDATE');
+
+      // Forward to Audio service via dedicated Redis client
+      // Lavalink needs these events to establish voice connection
+      logger.info({
+        type: packet.t,
+        guildId,
+        requestId: counter.requestId,
+        voiceChannelId: packet.d.channel_id,
+        expectedVoiceChannelId: counter.voiceChannelId,
+        voiceStateUpdateCount: counter.voiceStateUpdates,
+        voiceServerUpdateCount: counter.voiceServerUpdates,
+        endpoint: packet.t === 'VOICE_SERVER_UPDATE' ? packet.d.endpoint : undefined,
+        hasToken: packet.t === 'VOICE_SERVER_UPDATE' ? !!packet.d.token : undefined,
+        sessionId: packet.t === 'VOICE_STATE_UPDATE' ? packet.d.session_id : undefined
+      }, 'GATEWAY_RAW: Forwarding voice event to discord-bot:voice-events');
+      this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet))
+        .then(() => logger.debug({ type: packet.t, guildId }, 'GATEWAY_RAW: Successfully published voice event'))
+        .catch(error => logger.error({ error }, 'Failed to forward voice event to Audio service'));
+    });
+
+    // Fallback: forward VOICE_SERVER_UPDATE via dedicated event to avoid missing tokens/endpoints
+    // Some gateway/client states may not surface this via Raw in time for Audio service.
+    client.on(Events.VoiceServerUpdate, (data) => {
+      try {
+        const guildId = data.guild_id;
+        if (!guildId) return;
+
+        const existing = this.voiceManager.getVoiceServerData(guildId);
+        const isRecent = existing?.processedAt && (Date.now() - existing.processedAt) < 5000;
+        const isSame = existing?.token === data.token && existing?.endpoint === data.endpoint;
+        if (isRecent && isSame) {
+          return;
+        }
+
+        this.voiceManager.setVoiceServerData(guildId, data.token, data.endpoint);
+        const counter = this.trackVoiceEvent(guildId, 'VOICE_SERVER_UPDATE');
+
+        const packet = {
+          t: 'VOICE_SERVER_UPDATE',
+          d: data
+        };
 
         logger.info({
-          guildId: message.guildId,
-          channelId: message.channelId,
-          messageId: message.id
-        }, 'Untracked UI PRINCIPAL message was deleted by user, disconnecting bot immediately (Rule 3)');
-
-        // CRITICAL FIX: Block UI recreation for this channel
-        const channelKey = `${message.guildId}:${message.channelId}`;
-        this.activeInteractions.set(channelKey, {
-          messageId: '',
-          channelId: message.channelId,
-          guildId: message.guildId,
-          lastUpdated: Date.now(),
-          uiBlocked: true
-        });
-
-        // Disconnect bot from voice channel immediately
-        const disconnectCommand = {
-          type: 'disconnect',
-          guildId: message.guildId,
-          channelId: message.channelId,
-          reason: 'UI_DELETED',
-          timestamp: Date.now()
-        };
-
-        logger.info({ disconnectCommand }, 'Sending DISCONNECT command to audio service due to UI deletion');
-        await this.redisClient.publish('discord-bot:commands', JSON.stringify(disconnectCommand));
-
-        // Also disconnect from voice channel in Discord
-        const voiceConnection = getVoiceConnection(message.guildId);
-        if (voiceConnection) {
-          logger.info({ guildId: message.guildId }, 'Disconnecting bot from Discord voice channel (Rule 3)');
-          voiceConnection?.destroy();
-        } else {
-          logger.debug({ guildId: message.guildId }, 'No voice connection found to destroy (untracked UI)');
-        }
-      }
-    } catch (error: unknown) {
-      logger.error({ error }, 'Error handling message deletion');
-    }
-  }
-
-  /**
-   * Execute a queue request and wait for response from audio service
-   * Implements proper Redis pub/sub pattern with request-response correlation
-   */
-   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async executeQueueRequest(guildId: string, additionalData: any): Promise<any> {
-    logger.info({
-      guildId,
-      requestId: additionalData.requestId,
-      page: additionalData.page
-    }, 'gateway: sending queue command to audio service via Redis Streams');
-
-    try {
-      // Use Redis Streams AudioCommandService instead of pub/sub
-      const response = await this.audioCommandService.sendQueueCommand(guildId, {
-        timeout: 10000, // 10 seconds timeout
-        retries: 2,
-        page: additionalData.page || 1
-      });
-
-      logger.info({
-        guildId,
-        requestId: additionalData.requestId,
-        page: additionalData.page,
-        response
-      }, 'gateway: received queue response via Redis Streams');
-
-      return response;
-    } catch (error) {
-      logger.error({
-        error,
-        guildId,
-        requestId: additionalData.requestId,
-        page: additionalData.page
-      }, 'gateway: failed to get queue response via Redis Streams');
-      throw error;
-    }
-  }
-
-  /**
-   * Wait for a response from the audio service via Redis
-   * Following Redis v5 best practices for subscription management with retry logic
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async waitForAudioResponse(channel: string, timeoutMs: number = 5000, maxRetries: number = 2): Promise<any> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await this.attemptRedisResponse(channel, timeoutMs);
+          type: 'VOICE_SERVER_UPDATE',
+          guildId,
+          requestId: counter.requestId,
+          voiceChannelId: counter.voiceChannelId,
+          voiceStateUpdateCount: counter.voiceStateUpdates,
+          voiceServerUpdateCount: counter.voiceServerUpdates,
+          endpoint: data.endpoint,
+          hasToken: !!data.token
+        }, 'GATEWAY_RAW: Forwarding voice event to discord-bot:voice-events (fallback)');
+        this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet))
+          .then(() => logger.debug({ type: 'VOICE_SERVER_UPDATE', guildId }, 'GATEWAY_RAW: Successfully published voice event (fallback)'))
+          .catch(error => logger.error({ error }, 'Failed to forward voice event to Audio service (fallback)'));
       } catch (error) {
-        lastError = error as Error;
-
-        // Check if error is retryable (connection issues, not parse errors)
-        const isRetryable = this.isRetryableRedisError(error as Error);
-
-        if (!isRetryable || attempt === maxRetries) {
-          throw error;
-        }
-
-        // Exponential backoff with jitter (following Redis official pattern)
-        const jitter = Math.floor(Math.random() * 200);
-        const delay = Math.min(Math.pow(2, attempt) * 100, 1000) + jitter;
-
-        logger.warn({
-          channel,
-          attempt: attempt + 1,
-          maxRetries: maxRetries + 1,
-          delay,
-          error: (error as Error).message
-        }, 'Redis operation failed, retrying...');
-
-        await new Promise(resolve => setTimeout(resolve, delay));
+        logger.error({ error }, 'Failed to process VoiceServerUpdate event');
       }
-    }
-
-    throw lastError || new Error('All retry attempts failed');
-  }
-
-  /**
-   * Single attempt to get response from Redis
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async attemptRedisResponse(channel: string, timeoutMs: number): Promise<any> {
-    return new Promise((resolve, reject) => {
-      let timeout: NodeJS.Timeout;
-
-      // Define listener function to maintain reference for cleanup
-      const listener = (message: string) => {
-        try {
-          logger.info({ channel, message }, 'gateway: received Redis response');
-          clearTimeout(timeout);
-          // Unsubscribe with specific listener reference to avoid memory leaks
-          this.redisSubscriber.unsubscribe(channel, listener);
-          const response = JSON.parse(message);
-          resolve(response);
-        } catch (error: unknown) {
-          logger.error({ channel, message, error: error instanceof Error ? error.message : String(error) }, 'gateway: error parsing Redis response');
-          clearTimeout(timeout);
-          // Ensure cleanup on error
-          this.redisSubscriber.unsubscribe(channel, listener);
-          reject(error);
-        }
-      };
-
-      // Set timeout with proper cleanup
-      timeout = setTimeout(() => {
-        // Clean unsubscribe with listener reference
-        this.redisSubscriber.unsubscribe(channel, listener);
-        reject(new Error(`Timeout waiting for response on ${channel}`));
-      }, timeoutMs);
-
-      // Subscribe with listener reference for proper cleanup
-      this.redisSubscriber.subscribe(channel, listener).catch((error: Error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
     });
+
+    // Login to Discord
+    await this.discordClientManager.login(env.DISCORD_TOKEN);
   }
 
-  /**
-   * Determine if a Redis error is retryable based on error type
-   */
-  private isRetryableRedisError(error: Error): boolean {
-    const retryableErrors = [
-      'ECONNREFUSED',
-      'ENOTFOUND',
-      'ETIMEDOUT',
-      'ECONNRESET',
-      'EPIPE',
-      'EHOSTUNREACH',
-      'EAI_AGAIN'
-    ];
-
-    // Check error message or code for retryable patterns
-    const errorMessage = error.message.toLowerCase();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const errorCode = (error as any).code;
-
-    return retryableErrors.some(retryableError =>
-      errorMessage.includes(retryableError.toLowerCase()) ||
-      errorCode === retryableError
-    ) || errorMessage.includes('connection') || errorMessage.includes('network');
-  }
-
-  async shutdown(): Promise<void> {
+  public async shutdown(): Promise<void> {
     logger.info('Shutting down Gateway application...');
 
-    try {
-      // Clean up voice credential refresh timers
-      for (const [guildId, timer] of this.voiceRefreshTimers) {
-        clearTimeout(timer);
-        logger.info({ guildId }, 'VOICE_CONNECT: Cleaned up voice refresh timer on shutdown');
+    for (const timer of this.pendingVoiceDisconnectStops.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingVoiceDisconnectStops.clear();
+
+    if (this.healthServer) {
+      await this.healthServer.stop();
+    }
+
+    if (this.discordClientManager) {
+      await this.discordClientManager.logout();
+    }
+
+    if (this.redisManager) {
+      await this.redisManager.disconnect();
+    }
+
+    logger.info('Gateway application shutdown complete');
+  }
+
+  private cleanupActiveInteractions(): void {
+    const now = Date.now();
+    const expiryTime = 3600000; // 1 hour
+
+    let cleanedCount = 0;
+    for (const [key, info] of this.activeInteractions.entries()) {
+      if (now - info.lastUpdated > expiryTime) {
+        this.activeInteractions.delete(key);
+        cleanedCount++;
       }
-      this.voiceRefreshTimers.clear();
-      this.voiceServerData.clear();
+    }
 
-      if (this.discordClient) {
-        this.discordClient.destroy();
-      }
-
-      if (this.redisClient) {
-        await this.redisClient.quit();
-      }
-
-      if (this.redisSubscriber) {
-        await this.redisSubscriber.quit();
-      }
-
-      if (this.audioRedisClient) {
-        await this.audioRedisClient.quit();
-      }
-
-      if (this.healthServer) {
-        await this.healthServer.shutdown();
-      }
-
-      await prisma.$disconnect();
-
-      logger.info('Gateway application shut down successfully');
-    } catch (error) {
-      logger.error({ error }, 'Error during shutdown');
+    if (cleanedCount > 0) {
+      logger.info({ cleanedCount, remaining: this.activeInteractions.size }, 'Cleaned up expired interaction tracking entries');
     }
   }
 }
-
-/**
- * Application Entry Point
- */
-async function main(): Promise<void> {
-  const app = new GatewayApplication();
-
-  // Graceful shutdown handling
-  process.on('SIGINT', async () => {
-    logger.info('Received SIGINT, shutting down gracefully...');
-    await app.shutdown();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    logger.info('Received SIGTERM, shutting down gracefully...');
-    await app.shutdown();
-    process.exit(0);
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    logger.error({ reason, promise }, 'Unhandled Rejection');
-  });
-
-  process.on('uncaughtException', (error) => {
-    logger.error({ error }, 'Uncaught Exception');
-    process.exit(1);
-  });
-
-  // Start the application
-  await app.initialize();
-}
-
-// Run the application
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
-    logger.error({ error }, 'Failed to start Gateway application');
-    process.exit(1);
-  });
-}
-
-export { GatewayApplication };

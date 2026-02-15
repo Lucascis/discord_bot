@@ -157,7 +157,7 @@ describe('GuildMutex', () => {
   it('should not interfere between different guilds under heavy load', async () => {
     const guild1Results: number[] = [];
     const guild2Results: number[] = [];
-    const tasks: Promise<number>[] = [];
+    const tasks: Promise<string>[] = [];
 
     // Create interleaved tasks for two guilds
     for (let i = 0; i < 50; i++) {
@@ -189,7 +189,7 @@ describe('GuildMutex', () => {
 
   it('should properly clean up completed chains', async () => {
     // This test verifies memory management by ensuring completed chains don't accumulate
-    const tasks: Promise<number>[] = [];
+    const tasks: Promise<string>[] = [];
 
     // Run many tasks across different guilds
     for (let guildNum = 0; guildNum < 10; guildNum++) {

@@ -1,28 +1,26 @@
-// Environment variable loader - must be imported first
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load from project root .env file (when running from root with pnpm dev:all)
-const rootPath = path.resolve(process.cwd(), '.env');
-// Also try parent path (when running directly from gateway folder)
-const parentPath = path.resolve(process.cwd(), '..', '.env');
-const localPath = path.resolve('.env');
+const envDebug = process.env.ENV_DEBUG === 'true';
+const candidatePaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '..', '.env'),
+];
 
-console.log('🔧 Loading environment variables...');
-console.log('Current working directory:', process.cwd());
-console.log('Trying paths:');
-console.log('  - rootPath:', rootPath);
-console.log('  - parentPath:', parentPath);
-console.log('  - localPath:', localPath);
+const loadedFrom: string[] = [];
+for (const envPath of candidatePaths) {
+  const result = dotenv.config({ path: envPath });
+  if (!result.error) {
+    loadedFrom.push(envPath);
+  }
+}
 
-// Try root path first (most common case)
-dotenv.config({ path: rootPath });
-// Also try parent path as fallback
-dotenv.config({ path: parentPath });
-// Also try local path as fallback
-dotenv.config({ path: localPath });
-
-console.log('✅ Environment variables loaded successfully');
-console.log('DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? 'SET' : 'MISSING');
-console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'MISSING');
-console.log('LAVALINK_PASSWORD:', process.env.LAVALINK_PASSWORD ? 'SET' : 'MISSING');
+if (envDebug) {
+  console.info('[env-loader][gateway] Loaded environment files', loadedFrom);
+  console.info('[env-loader][gateway] Key presence', {
+    DISCORD_TOKEN: Boolean(process.env.DISCORD_TOKEN),
+    DATABASE_URL: Boolean(process.env.DATABASE_URL),
+    REDIS_URL: Boolean(process.env.REDIS_URL),
+    LAVALINK_PASSWORD: Boolean(process.env.LAVALINK_PASSWORD),
+  });
+}

@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { logger, PerformanceMonitor } from '@discord-bot/logger';
+const serializeError = (error) => error instanceof Error ? { message: error.message, stack: error.stack } : error;
 export class RedisPoolManager {
     constructor() {
         this.pools = new Map();
@@ -17,10 +18,11 @@ export class RedisPoolManager {
         }
         const pool = new RedisConnectionPool(name, config);
         this.pools.set(name, pool);
-        logger.info(`Created Redis connection pool '${name}'`, {
+        logger.info({
+            pool: name,
             minConnections: config.minConnections,
             maxConnections: config.maxConnections
-        });
+        }, `Created Redis connection pool '${name}'`);
         return pool;
     }
     getPool(name) {
@@ -32,7 +34,9 @@ export class RedisPoolManager {
         this.pools.clear();
         logger.info('All Redis connection pools closed');
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getPoolStats() {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const stats = {};
         for (const [name, pool] of this.pools) {
             stats[name] = pool.getStats();
@@ -60,7 +64,11 @@ export class RedisConnectionPool {
                 await this.createConnection();
             }
             catch (error) {
-                logger.error(`Failed to create initial connection ${i} for pool '${this.name}'`, error);
+                logger.error({
+                    pool: this.name,
+                    attempt: i,
+                    error: serializeError(error)
+                }, `Failed to create initial connection ${i} for pool '${this.name}'`);
             }
         }
         logger.info(`Redis pool '${this.name}' initialized with ${this.connections.length} connections`);
@@ -86,7 +94,11 @@ export class RedisConnectionPool {
         };
         // Connection event handlers
         redis.on('error', (error) => {
-            logger.error(`Redis connection error in pool '${this.name}', connection '${connectionId}'`, error);
+            logger.error({
+                pool: this.name,
+                connectionId,
+                error: serializeError(error)
+            }, `Redis connection error in pool '${this.name}', connection '${connectionId}'`);
             this.removeConnection(connection);
         });
         redis.on('close', () => {
@@ -94,16 +106,26 @@ export class RedisConnectionPool {
             this.removeConnection(connection);
         });
         redis.on('reconnecting', () => {
-            logger.info(`Redis connection reconnecting in pool '${this.name}', connection '${connectionId}'`);
+            logger.info({
+                pool: this.name,
+                connectionId
+            }, `Redis connection reconnecting in pool '${this.name}', connection '${connectionId}'`);
         });
         try {
             await redis.connect();
             this.connections.push(connection);
-            logger.debug(`Created Redis connection '${connectionId}' for pool '${this.name}'`);
+            logger.debug({
+                pool: this.name,
+                connectionId
+            }, `Created Redis connection '${connectionId}' for pool '${this.name}'`);
             return connection;
         }
         catch (error) {
-            logger.error(`Failed to connect Redis connection '${connectionId}' for pool '${this.name}'`, error);
+            logger.error({
+                pool: this.name,
+                connectionId,
+                error: serializeError(error)
+            }, `Failed to connect Redis connection '${connectionId}' for pool '${this.name}'`);
             throw error;
         }
     }
@@ -125,11 +147,17 @@ export class RedisConnectionPool {
                 const newConnection = await this.createConnection();
                 newConnection.acquired = true;
                 newConnection.lastUsed = new Date();
-                logger.debug(`Created and acquired new connection '${newConnection.id}' for pool '${this.name}'`);
+                logger.debug({
+                    pool: this.name,
+                    connectionId: newConnection.id
+                }, `Created and acquired new connection '${newConnection.id}' for pool '${this.name}'`);
                 return newConnection;
             }
             catch (error) {
-                logger.error(`Failed to create new connection for pool '${this.name}'`, error);
+                logger.error({
+                    pool: this.name,
+                    error: serializeError(error)
+                }, `Failed to create new connection for pool '${this.name}'`);
                 // Fall through to waiting queue
             }
         }
@@ -165,7 +193,10 @@ export class RedisConnectionPool {
             const request = this.waitingQueue.shift();
             connection.acquired = true;
             request.resolve(connection);
-            logger.debug(`Fulfilled queued request for connection '${connection.id}' in pool '${this.name}'`);
+            logger.debug({
+                pool: this.name,
+                connectionId: connection.id
+            }, `Fulfilled queued request for connection '${connection.id}' in pool '${this.name}'`);
         }
     }
     removeConnection(connection) {
@@ -179,13 +210,20 @@ export class RedisConnectionPool {
                 }
             }
             catch (error) {
-                logger.debug(`Error disconnecting connection '${connection.id}'`, error);
+                logger.debug({
+                    pool: this.name,
+                    connectionId: connection.id,
+                    error: serializeError(error)
+                }, `Error disconnecting connection '${connection.id}'`);
             }
             logger.debug(`Removed connection '${connection.id}' from pool '${this.name}'`);
             // Maintain minimum connections
             if (this.connections.length < this.config.minConnections && !this.closed) {
                 this.createConnection().catch(error => {
-                    logger.error(`Failed to maintain minimum connections for pool '${this.name}'`, error);
+                    logger.error({
+                        pool: this.name,
+                        error: serializeError(error)
+                    }, `Failed to maintain minimum connections for pool '${this.name}'`);
                 });
             }
         }
@@ -204,7 +242,11 @@ export class RedisConnectionPool {
                     await connection.redis.ping();
                 }
                 catch (error) {
-                    logger.warn(`Health check failed for connection '${connection.id}' in pool '${this.name}'`, error);
+                    logger.warn({
+                        pool: this.name,
+                        connectionId: connection.id,
+                        error: serializeError(error)
+                    }, `Health check failed for connection '${connection.id}' in pool '${this.name}'`);
                     unhealthyConnections.push(connection);
                 }
             }
@@ -269,7 +311,11 @@ export class RedisConnectionPool {
                 }
             }
             catch (error) {
-                logger.debug(`Error disconnecting connection '${connection.id}' during pool close`, error);
+                logger.debug({
+                    pool: this.name,
+                    connectionId: connection.id,
+                    error: serializeError(error)
+                }, `Error disconnecting connection '${connection.id}' during pool close`);
             }
         });
         await Promise.all(disconnectPromises);

@@ -514,8 +514,8 @@ export class SubscriptionService {
   private getQuotaLimits(tier: SubscriptionTier): any {
     const quotas = {
       free: { queueSize: 50, monthlyPlaytime: 36000, concurrentSessions: 1, apiCallsPerDay: 100 },
-      basic: { queueSize: 100, monthlyPlaytime: 108000, concurrentSessions: 2, apiCallsPerDay: 500 },
-      premium: { queueSize: 500, monthlyPlaytime: 432000, concurrentSessions: 5, apiCallsPerDay: 2000 },
+      basic: { queueSize: 100, monthlyPlaytime: 108000, concurrentSessions: 1, apiCallsPerDay: 500 },
+      premium: { queueSize: 500, monthlyPlaytime: 432000, concurrentSessions: 3, apiCallsPerDay: 2000 },
       enterprise: { queueSize: 1000, monthlyPlaytime: -1, concurrentSessions: -1, apiCallsPerDay: -1 }
     };
 

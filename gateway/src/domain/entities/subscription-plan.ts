@@ -120,7 +120,7 @@ export class SubscriptionPlan {
       9.99,
       'monthly',
       {
-        maxGuilds: 5,
+        maxGuilds: 1,
         maxQueueSize: 100,
         maxTrackDuration: 1800000, // 30 minutes
         canSkipAds: true,
@@ -129,7 +129,7 @@ export class SubscriptionPlan {
         prioritySupport: false,
         analyticsAccess: true,
         apiAccess: false,
-        maxConcurrentStreams: 3
+        maxConcurrentStreams: 1
       },
       ['basic_playback', 'queue_management', 'basic_controls', 'high_quality_audio', 'analytics', 'extended_queue']
     );
@@ -143,7 +143,7 @@ export class SubscriptionPlan {
       19.99,
       'monthly',
       {
-        maxGuilds: 25,
+        maxGuilds: 3,
         maxQueueSize: 500,
         maxTrackDuration: 3600000, // 1 hour
         canSkipAds: true,
@@ -152,7 +152,7 @@ export class SubscriptionPlan {
         prioritySupport: true,
         analyticsAccess: true,
         apiAccess: true,
-        maxConcurrentStreams: 10
+        maxConcurrentStreams: 3
       },
       ['basic_playback', 'queue_management', 'basic_controls', 'high_quality_audio', 'analytics', 'extended_queue', 'custom_branding', 'api_access', 'priority_support']
     );

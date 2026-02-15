@@ -11,7 +11,6 @@
 import { IPaymentProvider, PaymentProviderConfig, PaymentProviderConfigError } from './payment-provider.interface.js';
 import { StubPaymentProvider } from './stub-payment-provider.js';
 import { StripePaymentProvider } from './stripe-payment-provider.js';
-// import { MercadoPagoPaymentProvider } from './mercadopago-payment-provider.js'; // TODO: Implement
 
 /**
  * Payment provider factory configuration
@@ -79,15 +78,11 @@ export class PaymentProviderFactory {
       console.log('[PaymentFactory] Stripe provider initialized');
     }
 
-    // TODO: Initialize MercadoPago if configured
     if (this.config.providers.mercadopago) {
-      // this.providers.set('mercadopago', new MercadoPagoPaymentProvider(this.config.providers.mercadopago));
       console.log('[PaymentFactory] MercadoPago provider configuration found but implementation pending');
     }
 
-    // TODO: Initialize PayPal if configured
     if (this.config.providers.paypal) {
-      // this.providers.set('paypal', new PayPalPaymentProvider(this.config.providers.paypal));
       console.log('[PaymentFactory] PayPal provider configuration found but implementation pending');
     }
   }
@@ -195,7 +190,6 @@ export class PaymentProviderFactory {
     try {
       const provider = this.getProvider(primaryProvider);
 
-      // TODO: Add health check
       // const isHealthy = await this.checkProviderHealth(provider);
       // if (!isHealthy) throw new Error('Provider unhealthy');
 

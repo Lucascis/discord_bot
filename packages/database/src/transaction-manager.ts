@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from './client.js';
 import { getLogger } from './logger-interface.js';
 
 export class TransactionError extends Error {
@@ -37,7 +37,7 @@ export class TransactionManager {
   private activeTransactions = new Map<string, TransactionMetrics>();
   private transactionCounter = 0;
 
-  constructor(private prisma: PrismaClient) {}
+  constructor(private prisma: PrismaClient) { }
 
   /**
    * Execute operations within an atomic transaction with retry logic
@@ -103,7 +103,7 @@ export class TransactionManager {
                     get(modelTarget, modelProp) {
                       const modelOriginal = modelTarget[modelProp as keyof typeof modelTarget];
                       if (typeof modelOriginal === 'function') {
-                        return function(...args: unknown[]) {
+                        return function (...args: unknown[]) {
                           operationTracker(`${String(prop)}.${String(modelProp)}`);
                           // eslint-disable-next-line @typescript-eslint/no-explicit-any
                           return (modelOriginal as any).apply(modelTarget, args);

@@ -43,6 +43,9 @@ export interface DeviceCapabilities {
   connectionType: 'wifi' | 'mobile' | 'ethernet';
   batteryLevel?: number; // 0-100
   isLowPowerMode?: boolean;
+  maxBitrate?: number;
+  maxSampleRate?: number;
+  maxChannels?: number;
 }
 
 export interface StreamingPerformance {
@@ -276,7 +279,11 @@ export class AudioQualityManagementUseCase {
       const validation = this.audioQualityDomainService.validateAdaptiveConfig(
         adaptiveConfig,
         userTier,
-        deviceCapabilities
+        {
+          maxBitrate: deviceCapabilities.maxBitrate ?? deviceCapabilities.maxBandwidth,
+          maxSampleRate: deviceCapabilities.maxSampleRate ?? 48000,
+          maxChannels: deviceCapabilities.maxChannels ?? 2
+        }
       );
 
       if (!validation.isValid) {

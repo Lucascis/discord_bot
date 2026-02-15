@@ -167,9 +167,15 @@ graph TD
 
 **Solution**:
 1. **Option 1 - Generate poToken (Recommended)**:
-   ```bash
-   npm install -g youtube-po-token-generator
-   youtube-po-token-generator
+   - Prefer automated sync in Audio service:
+   ```env
+   YOUTUBE_TOKEN_AUTO_ENABLED=true
+   YOUTUBE_TOKEN_AUTO_REFRESH_MS=1800000
+   ```
+   - Optional external provider fallback:
+   ```env
+   YOUTUBE_TOKEN_AUTO_ENDPOINT=https://your-token-provider.example.com/token
+   YOUTUBE_TOKEN_AUTO_ENDPOINT_BEARER=your-bearer-token
    ```
    Add to `.env`:
    ```env

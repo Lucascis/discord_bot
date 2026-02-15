@@ -9,8 +9,6 @@ type LavalinkTrack = {
     uri: string;
     identifier: string;
     length: number;
-    isStream?: boolean;
-    isSeekable?: boolean;
     artworkUrl?: string | null;
     sourceName?: string;
   };
@@ -66,8 +64,7 @@ function mapLavalinkTrack(track: LavalinkTrack): Track {
     uri: info.uri,
     identifier: info.identifier,
     duration: info.length,
-    isSeekable: info.isSeekable ?? true,
-    isStream: info.isStream ?? false,
+    isSeekable: true,
     thumbnail: info.artworkUrl ?? undefined,
     source,
     requester: undefined
@@ -122,11 +119,11 @@ export async function searchTracksViaLavalink(
     totalResults: mappedTracks.length,
     playlistInfo: payload.playlistInfo
       ? {
-          name: payload.playlistInfo.name ?? '',
-          author: '',
-          uri: identifier,
-          trackCount: mappedTracks.length
-        }
+        name: payload.playlistInfo.name ?? '',
+        author: '',
+        uri: identifier,
+        trackCount: mappedTracks.length
+      }
       : undefined
   };
 }

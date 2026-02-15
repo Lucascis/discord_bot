@@ -96,11 +96,18 @@ export function LogExecution(_target: unknown, _propertyKey: string, descriptor:
       const result = await originalMethod.apply(this, args);
       const executionTime = Date.now() - startTime;
       
-      logger.debug(`Command ${this?.metadata?.name || 'unknown'} executed in ${executionTime}ms`);
+      logger.debug({
+        commandName: this?.metadata?.name || 'unknown',
+        executionTime
+      }, 'Command executed');
       return result;
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      logger.error(`Command ${this?.metadata?.name || 'unknown'} failed after ${executionTime}ms:`, error);
+      logger.error({
+        commandName: this?.metadata?.name || 'unknown',
+        executionTime,
+        error: error instanceof Error ? { message: error.message, stack: error.stack } : error
+      }, 'Command failed');
       throw error;
     }
   };

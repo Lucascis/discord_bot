@@ -5,7 +5,44 @@ import { searchOptimizer } from '../services/search-optimizer.js';
 import { PerformanceTracker, SearchThrottler } from '../performance.js';
 import { logger } from '@discord-bot/logger';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 export type SearchResultLike = { tracks: unknown[] };
+type TrackLikeRecord = Record<string, unknown>;
+
+function isTrackLikeRecord(value: unknown): value is TrackLikeRecord {
+  return !!value && typeof value === 'object';
+}
+
+function sanitizeTracksForCache(tracks: unknown[]): unknown[] {
+  // Keep cache footprint bounded. Playback uses live search result, not cached copy.
+  return tracks
+    .slice(0, 40)
+    .map((track) => {
+      if (!isTrackLikeRecord(track)) return null;
+
+      const encoded = typeof track.encoded === 'string'
+        ? track.encoded
+        : (typeof track.track === 'string' ? track.track : undefined);
+
+      const info = isTrackLikeRecord(track.info) ? track.info : undefined;
+      const pluginInfo = isTrackLikeRecord(track.pluginInfo) ? track.pluginInfo : undefined;
+      const userData = isTrackLikeRecord(track.userData) ? track.userData : undefined;
+
+      if (!encoded && !info) {
+        return null;
+      }
+
+      const payload: TrackLikeRecord = {};
+      if (encoded) payload.encoded = encoded;
+      if (info) payload.info = info;
+      if (pluginInfo) payload.pluginInfo = pluginInfo;
+      if (userData) payload.userData = userData;
+      return payload;
+    })
+    .filter((track): track is TrackLikeRecord => track !== null);
+}
 
 /**
  * Enhanced Smart Search with Multi-Layer Caching and Metrics
@@ -25,22 +62,15 @@ export async function smartSearch(
 ): Promise<SearchResultLike> {
   const startTime = Date.now();
   const isUrl = /^https?:\/\//i.test(query);
+  const cacheQuery = normalizeQueryForCache(query);
 
   // Detect source from query
   const source = detectSource(query);
 
-  // Try to get from enhanced cache first (URLs are not cached)
+  // Try to get from enhanced cache first (URLs are not cached).
+  // Cache is intentionally user-agnostic to avoid duplicated payloads in memory.
   if (!isUrl) {
-    // Try exact match first
-    let cached = await searchCache.getCachedSearchResult(query, source, userId);
-
-    // If no exact match, try normalized version for better hit rates
-    if (!cached) {
-      const normalizedQuery = normalizeQueryForCache(query);
-      if (normalizedQuery !== query) {
-        cached = await searchCache.getCachedSearchResult(normalizedQuery, source, userId);
-      }
-    }
+    const cached = await searchCache.getCachedSearchResult(cacheQuery, source);
 
     if (cached) {
       const searchLatency = Date.now() - startTime;
@@ -91,7 +121,11 @@ export async function smartSearch(
 
         return result;
       } catch (error) {
-        logger.info('Player search failed, using alternative search method:', error);
+        logger.info({
+          error: serializeError(error),
+          query,
+          guildId
+        }, 'Player search failed, using alternative search method');
         // Just throw the error and let the calling code handle no results
         // since we can't reliably access the manager from here
         throw error;
@@ -119,14 +153,11 @@ export async function smartSearch(
   // Track for search optimization
   searchOptimizer.trackSearch(query, source, searchLatency, false);
 
-  // Cache successful results (not URLs) - cache both original and normalized queries
+  // Cache successful results (not URLs).
   if (resultCount > 0 && !isUrl) {
-    await searchCache.cacheSearchResult(query, result.tracks, source, userId);
-
-    // Also cache normalized version for better hit rates
-    const normalizedQuery = normalizeQueryForCache(query);
-    if (normalizedQuery !== query) {
-      await searchCache.cacheSearchResult(normalizedQuery, result.tracks, source, userId);
+    const cacheableTracks = sanitizeTracksForCache(result.tracks);
+    if (cacheableTracks.length > 0) {
+      await searchCache.cacheSearchResult(cacheQuery, cacheableTracks, source);
     }
   }
 
@@ -183,4 +214,3 @@ function detectSource(query: string): string {
   // Default to youtube for text searches
   return 'youtube';
 }
-

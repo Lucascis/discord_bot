@@ -681,12 +681,6 @@ export class AdaptiveCacheManager {
       // Clear only the largest/oldest entries from each cache
       // This preserves frequently accessed items while freeing memory
 
-      // Force garbage collection if available
-      if (global.gc) {
-        global.gc();
-        logger.info('Manual garbage collection triggered');
-      }
-
       logger.info('Gradual cache cleanup completed');
     } catch (error) {
       logger.error({ error }, 'Gradual cache cleanup failed, falling back to full flush');

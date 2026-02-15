@@ -621,11 +621,16 @@ export class AudioQualityDomainService {
    * Validate adaptive streaming configuration
    */
   validateAdaptiveConfig(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config: any,
+    config: {
+      minQuality: AudioQualityLevel;
+      maxQuality: AudioQualityLevel;
+    },
     tier: SubscriptionTier,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
-    deviceCapabilities: any // TODO: [ADAPTIVE-STREAMING] Use deviceCapabilities to validate against device limits. See TECHNICAL_DEBT_AND_DECISIONS.md
+    deviceCapabilities: {
+      maxBitrate: number;
+      maxSampleRate: number;
+      maxChannels: number;
+    }
   ): { isValid: boolean; errors: string[] } {
     const errors: string[] = [];
 
@@ -640,6 +645,21 @@ export class AudioQualityDomainService {
 
     if (!availableQualities.includes(config.maxQuality)) {
       errors.push(`Maximum quality ${config.maxQuality} not available for ${tier} tier`);
+    }
+
+    const minConfig = new AudioQuality(config.minQuality).config;
+    const maxConfig = new AudioQuality(config.maxQuality).config;
+
+    if (minConfig.bitrate > deviceCapabilities.maxBitrate || maxConfig.bitrate > deviceCapabilities.maxBitrate) {
+      errors.push('Requested quality bitrate exceeds device capabilities');
+    }
+
+    if (minConfig.sampleRate > deviceCapabilities.maxSampleRate || maxConfig.sampleRate > deviceCapabilities.maxSampleRate) {
+      errors.push('Requested quality sample rate exceeds device capabilities');
+    }
+
+    if (minConfig.channels > deviceCapabilities.maxChannels || maxConfig.channels > deviceCapabilities.maxChannels) {
+      errors.push('Requested channel configuration exceeds device capabilities');
     }
 
     return {

@@ -1,6 +1,6 @@
 import { Counter, Histogram, register } from 'prom-client';
 import { getLogger } from './logger-interface.js';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from './client.js';
 
 // Database performance metrics
 export const dbQueryCounter = new Counter({

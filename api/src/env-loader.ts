@@ -1,23 +1,28 @@
-// Environment variable loader - must be imported first
 import dotenv from 'dotenv';
 import path from 'path';
 
-// In test environment, load .env.test from project root
-if (process.env.NODE_ENV === 'test') {
-  const testEnvPath = path.resolve(process.cwd(), '..', '.env.test');
-  dotenv.config({ path: testEnvPath });
-} else {
-  // Load from project root .env file
-  const rootPath = path.resolve(process.cwd(), '..', '.env');
-  const localPath = path.resolve('.env');
+const envDebug = process.env.ENV_DEBUG === 'true';
+const candidatePaths = process.env.NODE_ENV === 'test'
+  ? [path.resolve(process.cwd(), '..', '.env.test')]
+  : [
+    path.resolve(process.cwd(), '..', '.env'),
+    path.resolve(process.cwd(), '.env'),
+  ];
 
-  // Try root path first
-  dotenv.config({ path: rootPath });
-  // Also try local path as fallback
-  dotenv.config({ path: localPath });
+const loadedFrom: string[] = [];
+for (const envPath of candidatePaths) {
+  const result = dotenv.config({ path: envPath });
+  if (!result.error) {
+    loadedFrom.push(envPath);
+  }
 }
 
-console.log('✅ Environment variables loaded successfully');
-console.log('DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? 'SET' : 'MISSING');
-console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'MISSING');
-console.log('LAVALINK_PASSWORD:', process.env.LAVALINK_PASSWORD ? 'SET' : 'MISSING');
+if (envDebug) {
+  console.info('[env-loader][api] Loaded environment files', loadedFrom);
+  console.info('[env-loader][api] Key presence', {
+    DISCORD_TOKEN: Boolean(process.env.DISCORD_TOKEN),
+    DATABASE_URL: Boolean(process.env.DATABASE_URL),
+    REDIS_URL: Boolean(process.env.REDIS_URL),
+    LAVALINK_PASSWORD: Boolean(process.env.LAVALINK_PASSWORD),
+  });
+}

@@ -3,11 +3,13 @@
  * Core service for managing subscriptions, features, and usage limits
  */
 
-import { PrismaClient,
+import {
+  PrismaClient,
   SubscriptionTier,
   SubscriptionStatus,
   BillingInterval,
-  Prisma } from '@prisma/client';
+  Prisma
+} from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { getPlanByTier, needsUpgrade, getNextTier } from './plans.js';
 import { tierHasFeature, getFeatureValue } from './features.js';
@@ -21,6 +23,8 @@ import type {
   UsageTrackingUpdate,
   UsageStats,
 } from './types.js';
+
+type SubscriptionRecord = Prisma.SubscriptionGetPayload<{}>;
 
 export class SubscriptionService {
   private testGuildIds: Set<string> = new Set();
@@ -123,7 +127,7 @@ export class SubscriptionService {
   /**
    * Create a new subscription
    */
-  async createSubscription(params: CreateSubscriptionParams) {
+  async createSubscription(params: CreateSubscriptionParams): Promise<SubscriptionRecord> {
     const { guildId, tier, billingCycle, stripeCustomerId, trialDays } = params;
 
     const now = new Date();
@@ -247,7 +251,7 @@ export class SubscriptionService {
   /**
    * Update subscription
    */
-  async updateSubscription(guildId: string, params: UpdateSubscriptionParams) {
+  async updateSubscription(guildId: string, params: UpdateSubscriptionParams): Promise<SubscriptionRecord> {
     // Find customer and current subscription
     const customer = await this.prisma.customer.findUnique({
       where: { discordUserId: guildId },

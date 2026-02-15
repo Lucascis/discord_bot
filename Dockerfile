@@ -1,5 +1,7 @@
 # Multi-stage Docker build for production optimization
-FROM node:22-alpine AS base
+FROM node:22.11.0-alpine3.20 AS base
+
+ENV PNPM_VERSION=10.23.0
 
 # Security and build metadata
 LABEL maintainer="discord-bot-team" \
@@ -11,9 +13,13 @@ LABEL maintainer="discord-bot-team" \
       security.scan="trivy" \
       security.base="node:22-alpine"
 
-# Enable corepack for pnpm and install OpenSSL for Prisma detection
-RUN corepack enable pnpm \
-  && apk add --no-cache openssl ca-certificates
+# Install pnpm explicitly (avoids corepack key fetch issues) and runtime deps for build tooling
+RUN apk add --no-cache openssl ca-certificates \
+  && npm config set fetch-retries 5 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && for i in 1 2 3 4 5; do npm install -g "pnpm@${PNPM_VERSION}" && break || sleep $((i * 2)); done \
+  && pnpm config set store-dir /pnpm-store
 
 # Set working directory
 WORKDIR /app
@@ -22,6 +28,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Copy all package.json files (for dependency resolution)
+COPY packages/audio-control/package.json ./packages/audio-control/package.json
 COPY packages/cache/package.json ./packages/cache/package.json
 COPY packages/cluster/package.json ./packages/cluster/package.json
 COPY packages/commands/package.json ./packages/commands/package.json
@@ -32,6 +39,7 @@ COPY packages/event-store/package.json ./packages/event-store/package.json
 COPY packages/logger/package.json ./packages/logger/package.json
 COPY packages/observability/package.json ./packages/observability/package.json
 COPY packages/performance/package.json ./packages/performance/package.json
+COPY packages/tsconfig/package.json ./packages/tsconfig/package.json
 COPY packages/subscription/package.json ./packages/subscription/package.json
 
 # Copy service package.json files
@@ -39,6 +47,7 @@ COPY gateway/package.json ./gateway/package.json
 COPY audio/package.json ./audio/package.json
 COPY api/package.json ./api/package.json
 COPY worker/package.json ./worker/package.json
+COPY apps/panel/package.json ./apps/panel/package.json
 
 # Copy Prisma schema BEFORE installation (required for postinstall hook)
 COPY packages/database/prisma ./packages/database/prisma
@@ -67,6 +76,7 @@ RUN pnpm --filter @discord-bot/database build || true
 
 # Infrastructure packages
 RUN pnpm --filter @discord-bot/cache build || true
+RUN pnpm --filter @discord-bot/audio-control build || true
 RUN pnpm --filter @discord-bot/event-store build || true
 
 # Advanced packages (depend on infrastructure)
@@ -84,17 +94,26 @@ RUN pnpm --filter gateway build || true
 RUN pnpm --filter audio build || true
 RUN pnpm --filter api build || true
 RUN pnpm --filter worker build || true
+# Dummy DATABASE_URL for build (Prisma validation)
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+RUN pnpm --filter @discord-bot/panel build
 
 # Production stage - final optimized image
-FROM node:22-alpine AS production
+FROM node:22.11.0-alpine3.20 AS production
+
+ENV PNPM_VERSION=10.23.0
 
 # Create non-root user for security (Alpine)
 RUN addgroup -g 1001 nodejs \
   && adduser -D -u 1001 -G nodejs appuser
 
-# Enable corepack for pnpm and install runtime dependencies
-RUN corepack enable pnpm \
-  && apk add --no-cache openssl ca-certificates wget
+# Install pnpm and runtime dependencies
+RUN apk add --no-cache openssl ca-certificates wget \
+  && npm config set fetch-retries 5 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && for i in 1 2 3 4 5; do npm install -g "pnpm@${PNPM_VERSION}" && break || sleep $((i * 2)); done \
+  && pnpm config set store-dir /pnpm-store
 
 # Set working directory
 WORKDIR /app
@@ -113,6 +132,7 @@ COPY --from=builder --chown=appuser:nodejs /app/gateway ./gateway
 COPY --from=builder --chown=appuser:nodejs /app/audio ./audio
 COPY --from=builder --chown=appuser:nodejs /app/api ./api
 COPY --from=builder --chown=appuser:nodejs /app/worker ./worker
+COPY --from=builder --chown=appuser:nodejs /app/apps ./apps
 
 # Copy pre-installed node_modules from builder layer to avoid reinstalling
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules

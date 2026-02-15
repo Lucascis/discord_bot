@@ -5,11 +5,14 @@
 
 set -e
 
+# Redirect all output to log file
+exec > >(tee -a /Users/lucascisterna/Documents/repos/discord_bot/startup_debug_internal.log) 2>&1
+
 echo "🚀 Starting Discord Bot with integrated Lavalink..."
 
 # Function to check if Lavalink is ready
 check_lavalink() {
-    curl -s http://localhost:2334/v4/info > /dev/null 2>&1
+    curl -s http://localhost:2333/v4/info > /dev/null 2>&1
 }
 
 # Start Lavalink in background

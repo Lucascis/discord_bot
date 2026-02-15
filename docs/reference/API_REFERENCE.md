@@ -2031,7 +2031,7 @@ NODE_ENV=development
 ### Support & Resources
 
 - **Documentation:** See `docs/` directory
-- **Architecture:** See `CLAUDE.md` for system architecture
+- **Architecture:** See `docs/ARCHITECTURE.md` for system architecture
 - **Setup Guide:** See `docs/SETUP.md`
 - **GitHub Issues:** Report bugs and request features
 
@@ -2040,3 +2040,31 @@ NODE_ENV=development
 **Last Updated:** 2025-10-31
 **API Version:** 1.0.0
 **Documentation Version:** 1.0.0
+## Runtime Config APIs (Admin + Guild)
+
+### Superadmin endpoints
+
+- `GET /api/v1/admin/config/definitions`
+- `GET /api/v1/admin/config/global`
+- `PUT /api/v1/admin/config/global/:key`
+- `GET /api/v1/admin/config/guilds/:guildId`
+- `PUT /api/v1/admin/config/guilds/:guildId/:key`
+- `GET /api/v1/admin/config/audit`
+
+Required headers:
+
+- `x-api-key: <API_KEY>`
+- `x-discord-user-id: <superadmin discord id>`
+
+### Guild admin endpoints
+
+- `GET /api/v1/guilds/:guildId/runtime-config`
+- `PUT /api/v1/guilds/:guildId/runtime-config/:key`
+
+Response contract includes:
+
+- `effectiveValue`
+- `source` (`guild|global|env`)
+- `hotReloadApplied`
+- `requiresRestart`
+- `blockedByPlan`

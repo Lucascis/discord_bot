@@ -60,6 +60,7 @@ interface PredictiveQuery {
  * Smart Cache Warming System
  */
 export class PredictiveCacheManager {
+  private readonly backgroundWarmingEnabled = false;
   private userPatterns = new TTLMap<string, UserPattern>({
     maxSize: 500,
     defaultTTL: 1800000, // 30 minutes
@@ -81,8 +82,12 @@ export class PredictiveCacheManager {
   private warmingInProgress = new Set<string>();
 
   constructor() {
-    this.startPredictiveAnalysis();
-    this.startCacheWarming();
+    if (this.backgroundWarmingEnabled) {
+      this.startPredictiveAnalysis();
+      void this.startCacheWarming();
+    } else {
+      logger.info('Predictive cache background warming disabled for stability');
+    }
   }
 
   /**

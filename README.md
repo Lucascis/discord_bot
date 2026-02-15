@@ -19,10 +19,21 @@
 - **Advanced Autoplay**: 4 intelligent recommendation modes (similar, artist, genre, mixed)
 - **SponsorBlock Integration**: Auto-skip sponsor segments
 
-### 💎 Enterprise Billing System
+### 🤖 AI Features (Diamond Tier)
+- **AI DJ**: Dynamic voice commentary between tracks using TTS and LLM.
+- **Real-time Search**: Context-aware song introductions using live search data.
+- **Smart Recommendations**: AI-curated suggestions based on listening history.
+
+### 👥 Community & Growth
+- **Referral System**: Invite friends and earn rewards.
+- **Promo Codes**: Redeem codes for premium access.
+- **Collaborative Playlists**: Build playlists together with friends.
+- **Listener Limits**: Tier-based limits on voice channel listeners.
+
+### 💎 Billing & Plans
 - **Multi-Provider Support**: Stripe, MercadoPago, PayPal (pluggable architecture)
 - **Regional Routing**: Automatic provider selection by country
-- **4-Tier Plans**: FREE, BASIC, PREMIUM, ENTERPRISE
+- **3-Tier Plans**: FREE (1 instancia), PLUS (1 instancia, panel + audio dual) y PRO (3 instancias en distintos guilds, audio dual, 24/7)
 - **Feature Flags**: 15+ configurable tier-based features
 - **Customer Management**: Complete CRM with lifecycle tracking
 - **Analytics & Metrics**: Revenue, churn, LTV, cohort analysis
@@ -106,23 +117,38 @@ curl http://localhost:3000/health
 | **[Project Structure](docs/PROJECT_STRUCTURE.md)** | Architecture and codebase structure |
 | **[Billing System](docs/ENTERPRISE_BILLING_SYSTEM.md)** | Payment integration and monetization |
 | **[Market Research](docs/MARKET_RESEARCH.md)** | Competitive landscape & positioning |
-| **[Claude Instructions](CLAUDE.md)** | AI assistant development guidelines |
-| **Panel Web (apps/panel)** | Next.js dashboard/landing que consume los endpoints `/api/v1/plans` y muestra el control centralizado. Ejecutar `pnpm --filter @discord-bot/panel dev` |
+| **Panel Web (apps/panel)** | Next.js dashboard/landing que consume los endpoints `/api/v1/plans` y muestra el control centralizado. |
 
-### Panel Web – variables necesarias
+### Panel Web – ejecución y variables necesarias
 
-Configurar un `.env.local` dentro de `apps/panel` con los secretos de autenticación y endpoint de la API:
+En este monorepo las variables del panel se leen desde el `.env` de la raíz (el mismo que usan los servicios de Docker). Los valores mínimos ya están definidos:
 
-```
+```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
-NEXT_PUBLIC_PANEL_API_KEY=tu_api_key
-NEXTAUTH_SECRET=clave_super_secreta
-AUTH_DISCORD_CLIENT_ID=discord_app_client_id
-AUTH_DISCORD_CLIENT_SECRET=discord_app_client_secret
-PANEL_STAFF_DISCORD_IDS=123456789012345678,987654321098765432
+NEXT_PUBLIC_PANEL_API_KEY=<mismas credenciales que API_KEY>
+NEXTAUTH_SECRET=<secreto largo y aleatorio>
+AUTH_DISCORD_CLIENT_ID=<ID de la app de Discord>
+AUTH_DISCORD_CLIENT_SECRET=<secret de la app de Discord>
+PANEL_STAFF_DISCORD_IDS=<IDs de usuarios staff separados por coma>
 ```
 
-El flujo de login usa Discord OAuth; tras autenticarse, los usuarios ven su nombre/avatar en la navbar y pueden cerrar sesión. Asegurate de registrar la URL `http://localhost:3000/api/auth/callback/discord` (o el dominio correspondiente) en el Discord Developer Portal. Solo los IDs listados en `PANEL_STAFF_DISCORD_IDS` pueden acceder al Plan Engine (`/admin/plans`), donde se editan planes/pricios en caliente.
+Para desarrollo/producción local con la API en Docker:
+
+```bash
+# API y servicios (incluye gateway/audio/worker/DB/Redis/Lavalink)
+docker-compose up -d
+
+# Panel en modo producción sobre el build ya generado
+cd apps/panel
+PORT=3004 pnpm start
+```
+
+Luego accede a `http://localhost:3004`:
+
+- Botón “Ingresar con Discord” → login OAuth.
+- Como administrador, usa una cuenta cuyo ID esté en `PANEL_STAFF_DISCORD_IDS` para ver `/admin/plans` (Plan Engine).
+
+Asegúrate de registrar la URL `http://localhost:3004/api/auth/callback/discord` (o el dominio correspondiente) en el Discord Developer Portal. Solo los IDs listados en `PANEL_STAFF_DISCORD_IDS` pueden acceder al Plan Engine (`/admin/plans`), donde se editan planes/precios en caliente.
 
 ### Subscription Plans are Database-Driven
 Every tier (Free, Basic, Premium, Enterprise) is configured in PostgreSQL via the `subscription_plans` and `subscription_prices` tables. The services will refuse to boot until at least one active plan and its price records exist. See the deployment guide for seeding instructions.
@@ -322,6 +348,8 @@ docker-compose up -d
 ```bash
 docker-compose -f docker-compose.production.yml up -d
 ```
+
+> Instancias: Discord solo permite 1 conexión de voz por bot y guild. Plus/Pro habilitan más instancias simultáneas en distintos servidores (hasta 3 en Pro); si re-invocás en el mismo guild, el bot se moverá al nuevo canal.
 
 ### Scaling
 

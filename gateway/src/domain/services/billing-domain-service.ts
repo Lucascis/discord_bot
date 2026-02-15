@@ -671,14 +671,12 @@ export class BillingDomainService {
   validateAndApplyPromoCode(
     promoCode: string,
     finalPrice: number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    tier: SubscriptionTier // TODO: [PROMO-VALIDATION] Use tier for tier-specific promo code validation. See TECHNICAL_DEBT_AND_DECISIONS.md
+    tier: SubscriptionTier
   ): { isValid: boolean; adjustment: PriceAdjustment; discount?: number; reason?: string } {
-    // Simple validation logic
-    const promoCodes: Record<string, { discount: number; validUntil: Date; usageLimit?: number }> = {
+    const promoCodes: Record<string, { discount: number; validUntil: Date; usageLimit?: number; allowedTiers?: SubscriptionTier[] }> = {
       'WELCOME20': { discount: 0.20, validUntil: new Date('2024-12-31') },
-      'SAVE15': { discount: 0.15, validUntil: new Date('2024-12-31') },
-      'STUDENT': { discount: 0.50, validUntil: new Date('2024-12-31') }
+      'SAVE15': { discount: 0.15, validUntil: new Date('2024-12-31'), allowedTiers: ['basic', 'premium', 'enterprise'] },
+      'STUDENT': { discount: 0.50, validUntil: new Date('2024-12-31'), allowedTiers: ['basic', 'premium'] }
     };
 
     const promo = promoCodes[promoCode.toUpperCase()];
@@ -688,6 +686,14 @@ export class BillingDomainService {
         isValid: false,
         adjustment: { type: 'discount', amount: 0, description: 'Invalid promo code' },
         reason: 'Invalid promo code'
+      };
+    }
+
+    if (promo.allowedTiers && !promo.allowedTiers.includes(tier)) {
+      return {
+        isValid: false,
+        adjustment: { type: 'discount', amount: 0, description: `Promo code not valid for ${tier} tier` },
+        reason: 'Promo code not applicable to this subscription tier'
       };
     }
 

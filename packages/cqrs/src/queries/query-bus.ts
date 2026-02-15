@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@discord-bot/logger';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Base Query Interface
  * All queries must extend this interface
@@ -79,10 +82,10 @@ export class QueryBus implements IQueryBus {
     }
 
     this.handlers.set(handler.queryType, handler);
-    logger.info('Query handler registered', {
+    logger.info({
       queryType: handler.queryType,
       handlerName: handler.constructor.name
-    });
+    }, 'Query handler registered');
   }
 
   async ask<TQuery extends IQuery, TResult>(
@@ -94,10 +97,10 @@ export class QueryBus implements IQueryBus {
       const handler = this.handlers.get(query.queryType);
       if (!handler) {
         const error = `No handler registered for query type: ${query.queryType}`;
-        logger.error('Query handler not found', {
+        logger.error({
           queryType: query.queryType,
           queryId: query.queryId
-        });
+        }, 'Query handler not found');
 
         return {
           success: false,
@@ -105,24 +108,24 @@ export class QueryBus implements IQueryBus {
         };
       }
 
-      logger.debug('Executing query', {
+      logger.debug({
         queryType: query.queryType,
         queryId: query.queryId,
         userId: query.metadata.userId,
         guildId: query.metadata.guildId
-      });
+      }, 'Executing query');
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await handler.handle(query as any);
 
       const executionTime = Date.now() - startTime;
-      logger.debug('Query executed successfully', {
+      logger.debug({
         queryType: query.queryType,
         queryId: query.queryId,
         executionTimeMs: executionTime,
         userId: query.metadata.userId,
         guildId: query.metadata.guildId
-      });
+      }, 'Query executed successfully');
 
       return {
         success: true,
@@ -138,14 +141,14 @@ export class QueryBus implements IQueryBus {
       const executionTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      logger.error('Query execution failed', {
+      logger.error({
         queryType: query.queryType,
         queryId: query.queryId,
-        error: errorMessage,
+        error: serializeError(error),
         executionTimeMs: executionTime,
         userId: query.metadata.userId,
         guildId: query.metadata.guildId
-      });
+      }, 'Query execution failed');
 
       return {
         success: false,
@@ -164,10 +167,10 @@ export class QueryBus implements IQueryBus {
       return [];
     }
 
-    logger.debug('Executing query batch', {
+    logger.debug({
       batchSize: queries.length,
       queryTypes: [...new Set(queries.map(q => q.queryType))]
-    });
+    }, 'Executing query batch');
 
     const results = await Promise.allSettled(
       queries.map(query => this.ask(query))

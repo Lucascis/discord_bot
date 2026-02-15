@@ -35,7 +35,7 @@ export const PREMIUM_FEATURES = {
         lyricsEnabled: false,
         sponsorBlockEnabled: true,
         advancedSearchEnabled: false,
-        maxAudioQuality: 'medium',
+        maxAudioQuality: 'standard',
         volumeLimit: 100,
         maxQueueSize: 50,
         maxSongDuration: 1800, // 30 minutes
@@ -56,7 +56,7 @@ export const PREMIUM_FEATURES = {
         maxQueueSize: 100,
         maxSongDuration: 3600, // 1 hour
         allowExplicitContent: true,
-        premiumServers: 3,
+        premiumServers: 1,
         customBotEnabled: false,
         prioritySupport: false,
     },
@@ -72,7 +72,7 @@ export const PREMIUM_FEATURES = {
         maxQueueSize: 500,
         maxSongDuration: 7200, // 2 hours
         allowExplicitContent: true,
-        premiumServers: 10,
+        premiumServers: 3,
         customBotEnabled: true,
         prioritySupport: true,
     },
@@ -174,7 +174,7 @@ export const PRICING_TIERS = {
             'Volume up to 150%',
             'Up to 100 songs in queue',
             'Songs up to 1 hour',
-            'Use on up to 3 servers',
+            'Use on 1 server',
         ],
     },
     premium: {
@@ -192,7 +192,7 @@ export const PRICING_TIERS = {
             'Songs up to 2 hours',
             'Custom bot branding',
             'Priority support',
-            'Use on up to 10 servers',
+            'Use on up to 3 servers',
         ],
     },
     enterprise: {

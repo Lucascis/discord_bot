@@ -7,7 +7,39 @@
 }
 
 body {
-  @apply bg-[#0d011b] text-white font-sans antialiased;
+  @apply bg-background text-white font-sans antialiased selection:bg-brand-500/30 selection:text-brand-200;
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(124, 58, 237, 0.22), transparent 34%),
+    radial-gradient(circle at 85% 12%, rgba(34, 211, 238, 0.16), transparent 32%),
+    linear-gradient(160deg, rgba(3, 0, 20, 1) 0%, rgba(0, 0, 0, 1) 72%);
+  background-attachment: fixed;
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-glass;
+}
+
+.glass-card {
+  @apply bg-white/5 backdrop-blur-md border border-white/5 hover:bg-white/10 transition-colors duration-300;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+}
+
+.gradient-text {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/70;
 }
 
 .gradient-border {
@@ -20,10 +52,23 @@ body {
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(120deg, #a855f7, #22d3ee);
+  background: linear-gradient(120deg, #7c3aed, #22d3ee, #f472b6);
   -webkit-mask: 
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
           mask-composite: exclude;
+  pointer-events: none;
+}
+
+.aggressive-surface {
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.16), rgba(0, 0, 0, 0.5)),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.04) 6px,
+      transparent 6px,
+      transparent 12px
+    );
 }

@@ -116,7 +116,7 @@ export enum ClusterEventType {
 export const ClusterEventSchema = z.object({
   type: z.nativeEnum(ClusterEventType),
   timestamp: z.number(),
-  data: z.record(z.unknown())
+  data: z.record(z.string(), z.unknown())
 });
 
 export type ClusterEvent = z.infer<typeof ClusterEventSchema>;

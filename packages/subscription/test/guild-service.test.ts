@@ -4,10 +4,32 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PrismaClient, SubscriptionTier, SubscriptionStatus } from '@prisma/client';
+import { PrismaClient, SubscriptionTier, SubscriptionStatus } from '@discord-bot/database';
 import { GuildService } from '../src/guild-service.js';
 
 // Mock Prisma Client
+vi.mock('@discord-bot/database', async () => {
+  return {
+    PrismaClient: vi.fn(),
+    SubscriptionTier: {
+      FREE: 'FREE',
+      BASIC: 'BASIC',
+      PREMIUM: 'PREMIUM',
+      ENTERPRISE: 'ENTERPRISE',
+    },
+    SubscriptionStatus: {
+      ACTIVE: 'ACTIVE',
+      CANCELED: 'CANCELED',
+      PAST_DUE: 'PAST_DUE',
+      INCOMPLETE: 'INCOMPLETE',
+      INCOMPLETE_EXPIRED: 'INCOMPLETE_EXPIRED',
+      TRIALING: 'TRIALING',
+      UNPAID: 'UNPAID',
+      PAUSED: 'PAUSED',
+    },
+  };
+});
+
 const mockPrisma = {
   guild: {
     findUnique: vi.fn(),
@@ -39,7 +61,7 @@ describe('GuildService', () => {
   });
 
   describe('getGuildTier', () => {
-    it('should return ENTERPRISE for test guilds', async () => {
+    it('should return PREMIUM for test guilds', async () => {
       // Mock guild creation
       (mockPrisma.guild.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
       (mockPrisma.guild.create as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -58,7 +80,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'sub-1',
         guildId: 'guild-1',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -76,7 +98,7 @@ describe('GuildService', () => {
 
       const tier = await guildService.getGuildTier(testGuildId1);
 
-      expect(tier).toBe(SubscriptionTier.ENTERPRISE);
+      expect(tier).toBe(SubscriptionTier.PREMIUM);
       expect(mockPrisma.guildSubscription.create).toHaveBeenCalled();
     });
 
@@ -177,7 +199,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'sub-test-1',
         guildId: 'guild-test-1',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -205,13 +227,13 @@ describe('GuildService', () => {
       expect(mockPrisma.guildSubscription.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           guildId: 'guild-test-1',
-          tier: SubscriptionTier.ENTERPRISE,
+          tier: SubscriptionTier.PREMIUM,
           status: SubscriptionStatus.ACTIVE,
         }),
       });
     });
 
-    it('should create GuildSubscription with ENTERPRISE tier', async () => {
+    it('should create GuildSubscription with PREMIUM tier', async () => {
       // Mock existing guild
       const mockGuild = {
         id: 'guild-test-2',
@@ -232,7 +254,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'sub-test-2',
         guildId: 'guild-test-2',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -252,13 +274,13 @@ describe('GuildService', () => {
 
       expect(mockPrisma.guildSubscription.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          tier: SubscriptionTier.ENTERPRISE,
+          tier: SubscriptionTier.PREMIUM,
           status: SubscriptionStatus.ACTIVE,
         }),
       });
     });
 
-    it('should update existing subscription to ENTERPRISE if not already', async () => {
+    it('should update existing subscription to PREMIUM if not already', async () => {
       // Mock existing guild
       const mockGuild = {
         id: 'guild-test-3',
@@ -296,7 +318,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.update as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'sub-test-3',
         guildId: 'guild-test-3',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -317,7 +339,7 @@ describe('GuildService', () => {
       expect(mockPrisma.guildSubscription.update).toHaveBeenCalledWith({
         where: { guildId: 'guild-test-3' },
         data: expect.objectContaining({
-          tier: SubscriptionTier.ENTERPRISE,
+          tier: SubscriptionTier.PREMIUM,
           status: SubscriptionStatus.ACTIVE,
         }),
       });
@@ -420,7 +442,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         id: 'sub-1',
         guildId: 'guild-1',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -437,7 +459,7 @@ describe('GuildService', () => {
       });
 
       const tier1 = await guildService.getGuildTier(testGuildId1);
-      expect(tier1).toBe(SubscriptionTier.ENTERPRISE);
+      expect(tier1).toBe(SubscriptionTier.PREMIUM);
 
       // Mock for second test guild
       (mockPrisma.guild.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
@@ -455,7 +477,7 @@ describe('GuildService', () => {
       (mockPrisma.guildSubscription.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         id: 'sub-2',
         guildId: 'guild-2',
-        tier: SubscriptionTier.ENTERPRISE,
+        tier: SubscriptionTier.PREMIUM,
         status: SubscriptionStatus.ACTIVE,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -472,7 +494,7 @@ describe('GuildService', () => {
       });
 
       const tier2 = await guildService.getGuildTier(testGuildId2);
-      expect(tier2).toBe(SubscriptionTier.ENTERPRISE);
+      expect(tier2).toBe(SubscriptionTier.PREMIUM);
     });
   });
 

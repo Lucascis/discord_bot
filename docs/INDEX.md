@@ -6,44 +6,43 @@ Comprehensive documentation for the enterprise Discord music bot with microservi
 
 | **Document** | **Purpose** | **Audience** |
 |-------------|-------------|--------------|
-| [**Project Status**](PROJECT_STATUS.md) | Current operational status & recent updates | All users |
 | [**Development Guide**](DEVELOPMENT_GUIDE.md) | Setup, workflow, and development practices | Developers |
 | [**Deployment Guide**](DEPLOYMENT_GUIDE.md) | Production deployment instructions | DevOps |
+| [**Project Structure**](PROJECT_STRUCTURE.md) | Directory layout and organization | All users |
 
 ## 📋 Complete Documentation
 
 ### 🎯 **Project Overview**
-- [**Project Status**](PROJECT_STATUS.md) - ✅ Current operational status (v2.9.8)
 - [**Architecture**](ARCHITECTURE.md) - 🏗️ Microservices design & system structure
 - [**Changelog**](CHANGELOG.md) - 📝 Technical changes & version history
+- [**Project Structure**](PROJECT_STRUCTURE.md) - 📁 Directory layout
 
 ### 🛠️ **Development**
 - [**Development Guide**](DEVELOPMENT_GUIDE.md) - 👨‍💻 Setup, workflow, coding standards
 - [**Configuration**](CONFIGURATION.md) - ⚙️ Environment variables & settings
 - [**Contributing**](CONTRIBUTING.md) - 🤝 Contribution guidelines & AI assistance
+- [**Testing Guide**](TESTING_GUIDE.md) - 🧪 Testing strategies and commands
 
 ### 🚀 **Operations**
 - [**Deployment Guide**](DEPLOYMENT_GUIDE.md) - 🐳 Docker, Kubernetes, production setup
 - [**Metrics**](METRICS.md) - 📊 Monitoring, observability, performance
+- [**Plan Configuration**](operations/PLAN_CONFIGURATION.md) - 💳 Runtime plan matrix, DB sync, tier audit
+- [**Lavalink Troubleshooting**](operations/LAVALINK_TROUBLESHOOTING.md) - 🔊 Voice/playback incident playbook
+- [**Troubleshooting**](guides/TROUBLESHOOTING.md) - 🔧 Common issues and solutions
 
 ## 🎵 Current Bot Status
 
-**✅ YourBot#0000** - **PRODUCTION-READY**
-- All slash commands working (`/pause` issue resolved in v2.9.8)
+**✅ PRODUCTION-READY**
 - Microservices architecture stable
-- 346/354 tests passing (97.7% success rate)
-
-### Recent Fixes (v2.9.8)
-- ✅ Fixed `/pause`, `/resume`, `/stop`, `/skip` commands (case mismatch resolved)
-- ✅ Gateway-Audio service communication optimized
-- ✅ Command validation consistency across all services
+- Distributed architecture with Redis pub/sub
+- Enterprise-grade audio processing with Lavalink
 
 ## 🔗 Navigation
 
 ### For New Developers
-1. [Project Status](PROJECT_STATUS.md) - Understand current state
+1. [Development Guide](DEVELOPMENT_GUIDE.md) - Start coding
 2. [Architecture](ARCHITECTURE.md) - Learn system design
-3. [Development Guide](DEVELOPMENT_GUIDE.md) - Start coding
+3. [Project Structure](PROJECT_STRUCTURE.md) - Understand layout
 
 ### For Operations
 1. [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production setup
@@ -57,4 +56,4 @@ Comprehensive documentation for the enterprise Discord music bot with microservi
 
 ---
 
-**📌 Status**: Documentation restructured September 2025 for clarity and maintainability. All technical debt consolidated into appropriate documents.
+**📌 Status**: Documentation audited November 2025. All technical debt consolidated into appropriate documents.

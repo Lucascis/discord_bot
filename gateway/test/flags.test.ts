@@ -26,43 +26,21 @@ describe('flags helpers', () => {
     clearFlagCache();
   });
 
-  it('getAutomixEnabled prefers "autoplay" but supports legacy "automix"', async () => {
-    ff.findUnique
-      .mockResolvedValueOnce({ enabled: false }) // autoplay
-      .mockResolvedValueOnce({ enabled: true }); // automix (legacy)
-    // Because first is false, we should still return false without checking legacy
+  it('getAutomixEnabled checks "autoplay" flag', async () => {
+    ff.findUnique.mockResolvedValueOnce({ enabled: true }); // autoplay
     const a = await getAutomixEnabled('g1');
-    expect(a).toBe(false);
-
-    // Clear cache to test different scenario
-    clearFlagCache();
-    
-    ff.findUnique
-      .mockResolvedValueOnce(null) // autoplay
-      .mockResolvedValueOnce({ enabled: true }); // automix (legacy)
-    const b = await getAutomixEnabled('g2'); // Use different guild ID to avoid cache conflicts
-    expect(b).toBe(true);
-  });
-
-  it('setAutomixEnabled migrates legacy record to autoplay', async () => {
-    ff.findUnique
-      .mockResolvedValueOnce({ id: 'legacy-id' }); // legacy automix exists
-    await setAutomixEnabled('g1', true);
-    expect(ff.update).toHaveBeenCalledWith({ where: { id: 'legacy-id' }, data: { enabled: true, name: 'autoplay' } });
+    expect(a).toBe(true);
+    expect(ff.findUnique).toHaveBeenCalledWith({ where: { guildId_name: { guildId: 'g1', name: 'autoplay' } }, select: { enabled: true } });
   });
 
   it('setAutomixEnabled updates existing autoplay or creates new', async () => {
-    // No legacy, has autoplay
-    ff.findUnique
-      .mockResolvedValueOnce(null) // legacy
-      .mockResolvedValueOnce({ id: 'auto-id' }); // autoplay
+    // Has autoplay
+    ff.findUnique.mockResolvedValueOnce({ id: 'auto-id' }); // autoplay
     await setAutomixEnabled('g2', false);
     expect(ff.update).toHaveBeenCalledWith({ where: { id: 'auto-id' }, data: { enabled: false } });
 
-    // No legacy, no autoplay
-    ff.findUnique
-      .mockResolvedValueOnce(null) // legacy
-      .mockResolvedValueOnce(null); // autoplay
+    // No autoplay
+    ff.findUnique.mockResolvedValueOnce(null); // autoplay
     await setAutomixEnabled('g3', true);
     expect(ff.create).toHaveBeenCalledWith({ data: { guildId: 'g3', name: 'autoplay', enabled: true } });
   });

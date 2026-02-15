@@ -22,9 +22,8 @@ export class UpgradeCommand extends BaseCommand {
           .setDescription('Choose your subscription plan')
           .setRequired(true)
           .addChoices(
-            { name: 'Premium ($9.99/month)', value: 'premium' },
-            { name: 'Pro ($19.99/month)', value: 'pro' },
-            { name: 'Enterprise ($99.99/month)', value: 'enterprise' }
+            { name: 'Plus ($4.99/month)', value: 'plus' },
+            { name: 'Pro ($10.00/month)', value: 'pro' }
           )
       );
   }

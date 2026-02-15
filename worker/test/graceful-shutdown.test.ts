@@ -27,7 +27,7 @@ vi.mock('../src/utils/redis-client.js', () => ({
 
 describe('graceful-shutdown', () => {
   let processExit: any;
-  let processAddListener: any;
+  let processOn: any;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -37,9 +37,7 @@ describe('graceful-shutdown', () => {
 
     // Mock process.exit to prevent actual exit
     processExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
-
-    // Mock process.addListener to capture event handlers
-    processAddListener = vi.spyOn(process, 'addListener');
+    processOn = vi.spyOn(process, 'on');
   });
 
   afterEach(async () => {
@@ -54,7 +52,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      expect(processAddListener).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+      expect(processOn).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
     });
 
     it('should register SIGINT handler', async () => {
@@ -62,7 +60,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      expect(processAddListener).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+      expect(processOn).toHaveBeenCalledWith('SIGINT', expect.any(Function));
     });
 
     it('should register uncaughtException handler', async () => {
@@ -70,7 +68,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      expect(processAddListener).toHaveBeenCalledWith('uncaughtException', expect.any(Function));
+      expect(processOn).toHaveBeenCalledWith('uncaughtException', expect.any(Function));
     });
 
     it('should register unhandledRejection handler', async () => {
@@ -78,7 +76,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      expect(processAddListener).toHaveBeenCalledWith('unhandledRejection', expect.any(Function));
+      expect(processOn).toHaveBeenCalledWith('unhandledRejection', expect.any(Function));
     });
 
     it('should register exit handler', async () => {
@@ -86,7 +84,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      expect(processAddListener).toHaveBeenCalledWith('exit', expect.any(Function));
+      expect(processOn).toHaveBeenCalledWith('exit', expect.any(Function));
     });
 
     it('should log initialization', async () => {
@@ -343,7 +341,7 @@ describe('graceful-shutdown', () => {
       initializeGracefulShutdown();
 
       // Find the uncaughtException handler
-      const uncaughtHandler = processAddListener.mock.calls.find(
+      const uncaughtHandler = processOn.mock.calls.find(
         call => call[0] === 'uncaughtException'
       )?.[1];
 
@@ -360,7 +358,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      const rejectionHandler = processAddListener.mock.calls.find(
+      const rejectionHandler = processOn.mock.calls.find(
         call => call[0] === 'unhandledRejection'
       )?.[1];
 
@@ -398,7 +396,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      const sigtermHandler = processAddListener.mock.calls.find(
+      const sigtermHandler = processOn.mock.calls.find(
         call => call[0] === 'SIGTERM'
       )?.[1];
 
@@ -411,7 +409,7 @@ describe('graceful-shutdown', () => {
 
       initializeGracefulShutdown();
 
-      const sigintHandler = processAddListener.mock.calls.find(
+      const sigintHandler = processOn.mock.calls.find(
         call => call[0] === 'SIGINT'
       )?.[1];
 

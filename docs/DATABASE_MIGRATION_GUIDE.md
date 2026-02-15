@@ -1,4 +1,4 @@
-# 🗄️ Database Migration Guide - Enterprise Billing System
+# 🗄️ Database Migration Guide - Billing System
 
 **Status:** PENDING INTEGRATION
 **Created:** November 5, 2025
@@ -137,7 +137,7 @@ model PaymentMethod {
 }
 
 model SubscriptionPlan {
-  // Definiciones de planes (Premium, Pro, Enterprise)
+  // Definiciones de planes (Free, Plus, Pro)
 }
 
 model SubscriptionPrice {
@@ -267,7 +267,6 @@ pnpm --filter @discord-bot/database prisma studio
 - [ ] Servicios compilan sin errores
 - [ ] Verificado en Prisma Studio
 - [ ] Documentación actualizada
-- [ ] TODO comments agregados en código
 
 ---
 

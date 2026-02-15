@@ -167,6 +167,13 @@ export const CommandMessageSchema = z.union([
     type: z.literal('mute'),
     guildId: z.string().min(1, 'guildId is required'),
   }),
+  // Summon command
+  z.object({
+    type: z.literal('summon'),
+    guildId: z.string().min(1, 'guildId is required'),
+    voiceChannelId: z.string().min(1, 'voiceChannelId is required'),
+    textChannelId: z.string().min(1, 'textChannelId is required'),
+  }),
   // Filters command
   z.object({
     type: z.literal('filters'),

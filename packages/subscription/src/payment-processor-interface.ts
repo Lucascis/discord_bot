@@ -7,7 +7,7 @@
  * @module packages/subscription/payment-processor-interface
  */
 
-import { SubscriptionTier, BillingInterval } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@discord-bot/database';
 
 export interface PaymentCustomer {
   /** Unique ID from payment provider */

@@ -1,5 +1,5 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -67,7 +67,7 @@ export class TelemetryManager {
 
       // Initialize SDK
       this.sdk = new NodeSDK({
-        resource: new Resource({
+        resource: resourceFromAttributes({
           'service.name': this.config.serviceName,
           'service.version': this.config.serviceVersion,
         }),
@@ -86,18 +86,18 @@ export class TelemetryManager {
       this.tracer = trace.getTracer(this.config.serviceName, this.config.serviceVersion);
       this.meter = metrics.getMeter(this.config.serviceName, this.config.serviceVersion);
 
-      logger.info('OpenTelemetry initialized successfully', {
+      logger.info({
         serviceName: this.config.serviceName,
         serviceVersion: this.config.serviceVersion,
         environment: this.config.environment,
         jaegerEnabled: this.config.jaeger?.enabled,
         prometheusEnabled: this.config.prometheus?.enabled
-      });
+      }, 'OpenTelemetry initialized successfully');
 
     } catch (error) {
-      logger.error('Failed to initialize OpenTelemetry', {
+      logger.error({
         error: error instanceof Error ? error.message : String(error)
-      });
+      }, 'Failed to initialize OpenTelemetry');
       throw error;
     }
   }

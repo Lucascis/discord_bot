@@ -1,5 +1,497 @@
 # Changelog
 
+## [3.0.16] - Release Gate Stabilization + Legacy Test Removal - 2026-02-15
+
+### Test Agent
+
+- ✅ Stabilized Discord real-audio e2e probe flow for repeated release-gate runs:
+  - improved probe user selection fallback to prioritize bot speakers in channel.
+  - fixed decoder listener lifecycle to avoid accumulating listeners in long runs.
+  - added candidate probing strategy for speaking users within timeout budget.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/probe/discord-audio-probe.ts`
+- ✅ Updated audibility test orchestration to reduce false negatives:
+  - summon only when current runtime state is not already attached to target voice channel.
+  - wait for active Lavalink playback stats before asserting `players/playingPlayers`.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/audio-audibility.test.ts`
+- ✅ Updated release script env hydration/validation for deterministic host-driven e2e execution:
+  - `DISCORD_TEST_USER_ID`, `API_KEY`, `API_BASE_URL`, runtime Lavalink/Redis envs.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/test-voice-release-main.sh`
+
+### Shared/Infra Agent
+
+- ✅ Added missing Opus decoder dependency required by probe decoding path:
+  - `opusscript@0.0.8` (dev dependency)
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/package.json`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/pnpm-lock.yaml`
+- ✅ Removed remaining legacy Discord e2e token path:
+  - deleted `DISCORD_TEST_TOKEN` from env contract and env templates.
+  - removed obsolete skipped test file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/music-playback.test.ts`
+
+---
+
+## [3.0.15] - Legacy Test Cleanup + Probe Clarification - 2026-02-15
+
+### Shared/Infra Agent + Test Agent
+
+- ✅ Removed legacy Discord test token from env governance:
+  - deleted `DISCORD_TEST_TOKEN` from `/Users/lucascisterna/Documents/repos/discord_bot/config/env.contract.json`
+  - removed key/comment from:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/.env`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/.env.example`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/.env.test`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/.env.staging`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/.env.production`
+- ✅ Removed deprecated skipped e2e suite that depended on legacy token:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/music-playback.test.ts`
+- ✅ Env contract/order/security validated after cleanup:
+  - `pnpm env:check`
+  - `pnpm env:security:check`
+
+---
+
+## [3.0.14] - Release Gate Hardening (Probe + E2E Env) - 2026-02-15
+
+### Test Agent + Shared/Infra Agent
+
+- ✅ Fixed false-positive release-gate behavior where audio e2e could be skipped silently:
+  - `scripts/test-voice-release-main.sh` now exports and validates:
+    - `DISCORD_TEST_USER_ID`
+    - `API_KEY`
+    - `API_BASE_URL` (default `http://localhost:3000`)
+    - host-side runtime env for diagnostics (`REDIS_URL`, `LAVALINK_HOST`, `LAVALINK_PORT`, `LAVALINK_PASSWORD`)
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/test-voice-release-main.sh`
+
+- ✅ Updated voice diagnostic test to be deterministic and architecture-aligned:
+  - no longer depends on legacy `nowplaying` pubsub response path.
+  - validates Lavalink `/v4/stats` + Redis pubsub health with dedicated diag channel.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/voice-diagnostic.test.ts`
+
+- ✅ Updated audio audibility e2e to use API summon/play path (same path as smoke) instead of direct Redis publish:
+  - avoids bypassing gateway voice handshake.
+  - requires `API_KEY` + `DISCORD_TEST_USER_ID`.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/audio-audibility.test.ts`
+
+- ✅ Added explicit probe permission diagnostics:
+  - probe now fails with actionable reason when missing `ViewChannel/Connect` in target voice channel.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/tests/e2e/probe/discord-audio-probe.ts`
+
+---
+
+## [3.0.13] - Release Gate Continuation + YouTube Plugin Update - 2026-02-15
+
+### Shared/Infra Agent
+
+- ✅ Continued Docker-first release gate execution after reboot:
+  - `pnpm env:check`
+  - `pnpm env:security:check`
+  - `pnpm deploy:docker:up`
+  - `pnpm test:web:panel:main`
+  - `pnpm test:voice:smoke:main` (multiple runs)
+- ✅ Updated Lavalink YouTube plugin in compose env to latest stable line:
+  - `LAVALINK_PLUGINS_0_DEPENDENCY=dev.lavalink.youtube:youtube-plugin:1.17.0`
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/docker-compose.yml`
+- ✅ Re-seeded plans/runtime metadata in Docker stack:
+  - `docker compose -p discordbot_main exec -T worker pnpm tsx packages/database/prisma/seed.ts`
+
+### Test Agent
+
+- ✅ Captured diagnostics bundle with health/stats/log snapshots:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/logs/diagnostics/20260215T172725Z`
+- ⚠️ Strict real-audio release gate remains blocked until probe credentials are configured:
+  - `DISCORD_PROBE_TOKEN` (currently empty in `.env`)
+
+---
+
+## [3.0.12] - Lavalink Docker Hardening + Stable Build Graph - 2026-02-15
+
+### Shared/Infra Agent
+
+- ✅ Fixed Lavalink restart loop on Docker Desktop (`YAMLException: Resource deadlock avoided`):
+  - moved Lavalink config from host bind-mount to image-baked config.
+  - new file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/lavalink/Dockerfile`
+  - updated compose:
+    - `lavalink` now uses `build: ./lavalink` instead of direct image + bind mount.
+    - removed `./lavalink/application.yml:/opt/Lavalink/application.yml:ro`.
+    - `gateway`/`audio` now wait on `lavalink` `service_healthy`.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/docker-compose.yml`
+
+### Gateway Agent + Audio Agent
+
+- ✅ Reduced high-volume periodic now-playing log noise while keeping control-path observability:
+  - periodic UI updates are now logged as `debug` (control/track-event remain `info`).
+  - Gateway now includes and propagates `uiPushSource`.
+  - UI edit path now uses direct `channel.messages.edit(...)` to cut one extra fetch call.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
+
+### Shared Build Reliability
+
+- ✅ Prevented TS project-reference stale-output failures (`TS6305`) by forcing build mode in reference-heavy packages:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/cluster/package.json`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/cqrs/package.json`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/event-store/package.json`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/observability/package.json`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/performance/package.json`
+
+---
+
+## [3.0.11] - Discord UI Controls + Panel UX/Lyrics Refresh - 2026-02-14
+
+### Gateway Agent + Audio Agent
+
+- ✅ Fixed Discord control gaps in message components:
+  - `music_previous` button now mapped to `previous`.
+  - queue buttons now support interactive pagination (`music_queue_prev:*`, `music_queue_next:*`) using Redis Streams queue responses.
+  - filter actions now publish compatible command shape (`type=filters`, `action=apply`, `preset=*`) for Audio handlers.
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/presentation/controllers/music-controller.ts`
+- ✅ Stabilized now-playing progress behavior on track transitions:
+  - removed risky seconds→ms normalization in gateway UI updates.
+  - forced UI refresh with `positionMs=0` on `trackStart`, `skip`, and `previous`.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+
+### Panel Agent + API Agent
+
+- ✅ Updated paid-plan summon behavior:
+  - panel summon UI is now enabled for all paid tiers (`BASIC`, `PREMIUM`, `ENTERPRISE`).
+  - API summon gate now blocks only `FREE`.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/SummonBotPanel.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/GuildDashboard.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/player.ts`
+- ✅ Improved guild presentation reliability:
+  - metadata hydration now refreshes when icon is missing.
+  - fallback name avoids raw guild ID rendering.
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
+- ✅ Refreshed panel UX with stronger visual direction and better media resilience:
+  - aggressive hero/navbar restyle while preserving existing palette.
+  - fallback handling for broken artwork and guild icon thumbnails.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/Hero.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/Navbar.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/Sidebar.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/styles/globals.css`
+- ✅ Replaced mock lyrics with real provider-backed flow and doubled lyrics view area:
+  - new server route using LRCLIB lookup + cache.
+  - web player now renders dual lyrics panes (live focus + timeline).
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/api/lyrics/route.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/lib/lyrics-client.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/WebPlayer.tsx`
+
+### Shared/Infra Agent
+
+- ✅ AGENTS documentation now includes official Discord.js references for Gateway/Panel/Test changes:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/AGENTS.md`
+
+---
+
+## [3.0.10] - YouTube Token Automation + Fallback Hardening - 2026-02-14
+
+### Audio Agent
+
+- ✅ Added automated YouTube `poToken/visitorData` synchronization service with fallback chain:
+  1) local library provider (`youtube-po-token-generator`),  
+  2) optional endpoint provider,  
+  3) static env fallback.
+- ✅ Audio now updates Lavalink dynamically through `POST /youtube` and avoids re-sending unchanged tokens.
+- ✅ New service file:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/services/youtube-token-sync.ts`
+- ✅ Integrated startup/shutdown hooks:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+- ✅ Hardened token automation reliability:
+  - provider calls now use timeout guards to prevent hanging sync cycles.
+  - startup sync logs explicit structured outcomes (`youtube_token_sync: lavalink /youtube updated` / failure causes).
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/services/youtube-token-sync.ts`
+
+### Shared/Infra Agent
+
+- ✅ Added env contract + synchronized `.env*` for automated token workflow:
+  - `YOUTUBE_TOKEN_AUTO_ENABLED`
+  - `YOUTUBE_TOKEN_AUTO_REFRESH_MS`
+  - `YOUTUBE_TOKEN_AUTO_ENDPOINT`
+  - `YOUTUBE_TOKEN_AUTO_ENDPOINT_BEARER`
+- Files:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/config/env.contract.json`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/.env`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/.env.example`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/.env.test`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/.env.staging`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/.env.production`
+- ✅ Hardened env parsing for optional token endpoint in config schema (empty/whitespace-safe) to avoid startup regression when endpoint is intentionally unset:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/index.ts`
+- ✅ Set Docker runtime defaults to automated token generation in operational envs:
+  - `YOUTUBE_TOKEN_AUTO_ENABLED=true` in `.env`, `.env.staging`, `.env.production`
+  - `YOUTUBE_TOKEN_AUTO_ENABLED=false` in `.env.test` (deterministic CI/tests)
+
+### Documentation / Agent Governance
+
+- ✅ Updated troubleshooting and AGENTS reference for YouTube token automation and fallback behavior:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/docs/operations/LAVALINK_TROUBLESHOOTING.md`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/docs/guides/TROUBLESHOOTING.md`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/AGENTS.md`
+
+---
+
+## [3.0.9] - Docker Hygiene + Voice Stability Hardening - 2026-02-13
+
+### Shared/Infra Agent
+
+- ✅ Added Docker project guardrail helper to enforce single project operation on `discordbot_main`:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/_docker-main.sh`
+- ✅ Standardized operational scripts to use `docker compose -p discordbot_main` with conflict checks and stale container cleanup:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/deploy-docker-build.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/deploy-docker-up.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/deploy-docker-rollback.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/test-voice-release-main.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/voice-microcut-diag.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/panel-web-smoke.sh`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/voice-panel-smoke.sh`
+- ✅ Updated Lavalink troubleshooting runbook for project-scoped compose commands:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/docs/operations/LAVALINK_TROUBLESHOOTING.md`
+
+### Audio Agent + Gateway Agent
+
+- ✅ Reduced microcut risk by hardening voice sync/recovery behavior:
+  - duplicate voice syncs now skip by credential signature when playback is stable (not TTL-based).
+  - playback guard now tolerates transient stats gaps, raises stall threshold, and applies recovery cooldown to avoid reconnect bursts.
+  - explicit `track_interruption_marker` signal emitted for incident diagnostics.
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+- ✅ Reduced runtime pause pressure by removing forced GC from hot monitoring paths:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/logger/src/performance.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/logger/src/performance.js`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/performance.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/services/adaptive-cache.ts`
+- ✅ Added delayed stop grace window for transient Discord voice disconnects to avoid false stop/reconnect churn:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
+
+### API Agent + Panel Agent
+
+- ✅ Improved guild metadata reliability for panel rendering:
+  - increased Discord guild hydration timeout to reduce fallback-to-ID behavior.
+  - premium flag for panel actions now restricted to effective `PREMIUM|ENTERPRISE`.
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
+- ✅ Gateway now synchronizes guild metadata/config records on startup and guild updates to keep panel names/icons fresh:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
+
+### Plan Governance
+
+- ✅ Re-aligned runtime limits/config metadata for BASIC/PREMIUM/ENTERPRISE consistency:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/limits.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/premium-features.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-premium-config.ts`
+
+---
+
+## [3.0.8] - Panel Summon + Guild Thumbnail + Voice Sync Guard - 2026-02-13
+
+### API Agent + Panel Agent
+
+- ✅ Fixed guild icon payload for panel sidebar:
+  - `/api/v1/guilds` and `/api/v1/guilds/:guildId` now return full Discord CDN icon URLs (instead of raw icon hash), preserving fallback if URL is already present.
+- ✅ Unified effective tier resolution for panel flows:
+  - Added shared tier resolver (`db tier + env override`) and reused it in guild list, tier debug, and player panel endpoints.
+  - `POST /api/v1/player/:guildId/summon` and `GET /api/v1/player/:guildId/instances` now use effective tier (including `PREMIUM_TEST_GUILD_IDS`) consistently.
+  - Premium-only summon gate is now explicit (`PREMIUM|ENTERPRISE`) and instances endpoint exposes effective tier.
+- Files:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/services/effective-guild-tier.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/player.ts`
+
+### Audio Agent
+
+- ✅ Hardened cached voice-credential connect path to prevent crash on Lavalink timeout:
+  - `waitForVoiceCredentials` now catches `syncVoiceToLavalink` failures in cached-connect flow and logs warning without crashing process.
+- File:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+
+### Validation Executed
+
+- ✅ `pnpm --filter api build`
+- ✅ `pnpm --filter audio build`
+- ✅ `pnpm --filter @discord-bot/panel build`
+- ✅ `pnpm --filter api test guilds.test.ts`
+- ✅ `pnpm env:check`
+- ✅ `pnpm env:security:check`
+- ✅ `pnpm test:web:panel:main`
+- ✅ `pnpm test:voice:smoke:main` (PASS with now-playing progression and active playback)
+- ✅ Live API checks:
+  - `/api/v1/guilds` returns `name` + CDN `icon` correctly.
+  - `/api/v1/player/:guildId/summon` accepted with premium tier.
+  - `/api/v1/player/:guildId/instances` reports effective `tier=PREMIUM`.
+
+---
+
+## [3.0.7] - Guild Name Hydration For Panel List - 2026-02-13
+
+### API Agent
+
+- ✅ Fixed panel guild naming fallback that showed raw `guildId` instead of Discord server name.
+- ✅ `/api/v1/guilds` and `/api/v1/guilds/:guildId` now hydrate missing/stale guild metadata from Discord API (`/guilds/:id`) when DB metadata is absent or unusable.
+- ✅ Hydrated metadata is persisted via `prisma.guild.upsert` to avoid repeating fallback lookups.
+- ✅ Added bounded timeout/error handling for Discord metadata lookup so failures remain non-blocking and route response remains stable.
+- File:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
+
+### Test Agent
+
+- ✅ Updated API test mock coverage for `@discord-bot/database` exports and `prisma.guild` write operations used by hydration flow.
+- ✅ Verified `guilds` route suite passes after changes.
+- File:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/api/test/setup.ts`
+
+---
+
+## [3.0.6] - Panel Stabilization & Docker Web Validation - 2026-02-12
+
+### Panel Agent + Shared/Infra Agent
+
+- ✅ Added dedicated `Panel Agent` ownership to `/Users/lucascisterna/Documents/repos/discord_bot/AGENTS.md` with explicit handoffs to API and Shared/Infra.
+- ✅ Fixed panel build instability for Next 16 font target resolution:
+  - `next/font/local/target.css` compatibility patched in prebuild flow.
+  - ensured patch script handles both workspace-local and root `node_modules/.pnpm` layouts.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/patch-next-font.js`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/next.config.mjs`
+- ✅ Refactored panel UI/runtime typing and control flow:
+  - removed unsafe `any` usage in auth/session callbacks.
+  - resolved dashboard/playlists/subscription lint debt and dead imports.
+  - hardened web player action state handling (`isExecutingAction`) and surfaced refresh/web-audio status in UI.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/auth.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/dashboard/page.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/dashboard/playlists/PlaylistsClient.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/dashboard/playlists/page.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/app/dashboard/subscription/page.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/PlaylistManager.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/SubscriptionContent.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/SubscriptionManager.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/WebPlayer.tsx`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/lib/api-client.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/package.json`
+- ✅ Added web smoke gate for main Docker stack:
+  - new script validates panel root/auth providers/protected-route redirect and core API contracts used by dashboard.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/panel-web-smoke.sh`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/package.json`
+
+### Validation Executed
+
+- ✅ `pnpm --filter @discord-bot/panel lint`
+- ✅ `pnpm --filter @discord-bot/panel test`
+- ✅ `pnpm --filter @discord-bot/panel exec tsc --noEmit`
+- ✅ `pnpm --filter @discord-bot/panel build`
+- ✅ `docker compose -p discordbot_main up -d --build panel`
+- ✅ `pnpm test:web:panel:main`
+- ✅ `pnpm test:voice:smoke:main`
+
+---
+
+## [3.0.5] - Plan Normalization & QA Tier Consistency - 2026-02-12
+
+### Shared/Infra Agent
+
+- ✅ Normalized commercial plan limits in runtime templates:
+  - `BASIC` (Plus) now capped to `maxGuilds=1`.
+  - `PREMIUM` (Pro) now capped to `maxGuilds=3`.
+  - Files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/plans.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/limits.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/features.ts`
+- ✅ Added operations reference for plan sync/audit:
+  - `/Users/lucascisterna/Documents/repos/discord_bot/docs/operations/PLAN_CONFIGURATION.md`
+- ✅ Hardened diagnostics script for the active Docker project:
+  - `pnpm diag:voice:microcut` now uses `COMPOSE_PROJECT_NAME` (default `discordbot_main`) instead of relying on stale default compose project state.
+  - File:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/voice-microcut-diag.sh`
+
+### Gateway Agent + API Agent
+
+- ✅ Fixed QA override consistency for `PREMIUM_TEST_GUILD_IDS`:
+  - effective tier now resolves to `PREMIUM` instead of `ENTERPRISE`.
+  - Files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/guild-service.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/presentation/controllers/premium-controller.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
+- ✅ Implemented panel summon handling in gateway:
+  - `discord-bot:panel-commands` now processes `summon` by joining target voice channel and producing voice credentials flow for Audio.
+  - file:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
+
+### Config Agent Surface (Plan quotas)
+
+- ✅ Synced premium quota metadata to match commercial positioning:
+  - Plus: 1 server/session baseline.
+  - Pro: up to 3 servers/sessions baseline.
+  - Files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-premium-config.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/premium-features.ts`
+- ✅ Added Docker-main smoke validation for panel invoke flow:
+  - new script `pnpm test:voice:smoke:main` performs `summon -> play -> now-playing > 0ms`.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/scripts/voice-panel-smoke.sh`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/package.json`
+
+---
+
+## [3.0.4] - Latency & Microcut Mitigation (Discord Voice) - 2026-02-12
+
+### Audio Agent
+
+- ✅ Reduced false-positive recovery reconnects in playback guard:
+  - recovery now waits for repeated stall samples before reconnecting.
+  - guard no longer reconnects when Lavalink still reports active playback.
+  - file: `/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`
+
+### Shared/Infra Agent
+
+- ✅ Lavalink runtime tuned for lower stutter risk:
+  - mounted explicit Lavalink config file into container.
+  - reduced `opusEncodingQuality` from `10` to `8` (CPU relief with minimal quality impact).
+  - restored `playerUpdateInterval` to `5` for stable progress updates.
+  - lowered Lavalink log verbosity (`INFO`) to reduce runtime overhead.
+  - tuned JVM GC flags for shorter pauses.
+  - files:
+    - `/Users/lucascisterna/Documents/repos/discord_bot/lavalink/application.yml`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/docker-compose.yml`
+
+---
+
+## [3.0.3] - Voice Transport Stabilization & UI Asset Recovery - 2026-02-12
+
+### Audio/Gateway Incident Fix (Docker Main Stack)
+
+- ✅ **Voice transport stabilization** (`/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`):
+  - Added explicit Lavalink voice sync via `updatePlayer.voice` after credential merge.
+  - Added guarded recovery path to resync voice when playback appears active but transport stalls.
+- ✅ **Playback stall detection improved** (`/Users/lucascisterna/Documents/repos/discord_bot/audio/src/index.ts`):
+  - Progress guard now checks position advance and triggers one controlled reconnect/replay cycle.
+- ✅ **Now Playing thumbnail recovery** (`/Users/lucascisterna/Documents/repos/discord_bot/audio/src/utils/track.ts`):
+  - Added YouTube artwork fallback (`i.ytimg.com`) when `artworkUrl` is missing in track metadata.
+- ✅ **Gateway UI timing normalization** (`/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`):
+  - Normalizes `positionMs` payloads that arrive in seconds to avoid frozen/misaligned progress rendering.
+
+### Validation Outcome
+
+- ✅ Real Discord validation: audio audible again, UI progressing, and thumbnail restored.
+- ⚠️ Follow-up remains: enforce full `docker compose build` reproducibility after unrelated API type errors (`runtime-config-service.ts`) are cleaned up.
+
+---
+
 ## [3.0.2] - Premium QA Sandbox & Filter UI Hardening - 2025-11-03
 
 ### 🎯 Enterprise QA Enhancements
@@ -1419,10 +1911,6 @@ api/src/routes/v1/
 #### Documentación Actualizada
 
 **📚 Nuevos Documentos:**
-- `docs/DEVELOPMENT_METHODOLOGY.md` - Metodología de investigación oficial
-- `docs/STRUCTURAL_ANALYSIS.md` - Análisis completo con resultados
-- `docs/PROJECT_ANALYSIS.md` - Overview arquitectónico
-- `docs/ERROR_ANALYSIS.md` - Análisis del fix de audio playback
 - `docs/CHANGELOG.md` - Este archivo
 
 #### Estructura Real Actual (Validada vs Documentación Oficial)
@@ -1443,9 +1931,6 @@ discord_bot/
 ├── scripts/                 # Build & utility scripts
 ├── lavalink/                # Lavalink server configs & plugins
 ├── monitoring/              # Monitoring configurations
-├── deploy/                  # Deployment configurations
-├── reports/                 # Generated reports
-└── logs/                    # Application logs
 ```
 
 **✅ Validación**: Esta estructura sigue **perfectamente** las mejores prácticas oficiales de Node.js TypeScript monorepos según Turborepo, Nx y documentación oficial.

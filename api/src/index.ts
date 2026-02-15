@@ -5,9 +5,9 @@ import { app } from './app.js';
 import { logger, initializeSentry } from '@discord-bot/logger';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { env } from '@discord-bot/config';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+// import { NodeSDK } from '@opentelemetry/sdk-node';
+// import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+// import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { loadPlansFromDatabase } from '@discord-bot/subscription';
 
 async function startServer() {
@@ -26,9 +26,10 @@ async function startServer() {
     profilesSampleRate: env.SENTRY_PROFILES_SAMPLE_RATE
   });
 
-  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+  const port = env.PORT;
   app.listen(port, () => logger.info(`API listening on ${port}`));
 
+  /*
   if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
     const sdk = new NodeSDK({
       traceExporter: new OTLPTraceExporter({ url: env.OTEL_EXPORTER_OTLP_ENDPOINT }),
@@ -36,6 +37,7 @@ async function startServer() {
     });
     void sdk.start();
   }
+  */
 }
 
 void startServer();

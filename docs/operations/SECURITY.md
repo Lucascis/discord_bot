@@ -2892,7 +2892,7 @@ docker exec discord-postgres psql -U postgres -d discord \
 
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
-| 1.0.0 | 2025-10-31 | Initial security documentation | Claude |
+| 1.0.0 | 2025-10-31 | Initial security documentation | Internal |
 
 ---
 

@@ -228,7 +228,7 @@ export class DynamicRateLimiter {
     this.skipSuccessfulRequests = options.skipSuccessfulRequests ?? false;
     this.keyGenerator = options.keyGenerator ?? this.defaultKeyGenerator;
     this.handler = options.handler ?? this.defaultHandler;
-    this.limitResolver = options.limitResolver ?? ((tier) => getLimitValue('api_rate_limit', tier));
+    this.limitResolver = options.limitResolver ?? ((tier) => getLimitValue('API_RATE_LIMIT', tier));
     this.defaultTier = options.defaultTier ?? FREE_TIER;
     this.skip = options.skip;
     this.subscriptionCacheTtlMs = options.subscriptionCacheTtlMs ?? DEFAULT_SUBSCRIPTION_CACHE_TTL_MS;
@@ -332,6 +332,10 @@ export class DynamicRateLimiter {
     try {
       const limit = this.limitResolver(tier);
       if (typeof limit !== 'number' || Number.isNaN(limit)) {
+        return UNLIMITED;
+      }
+      // Defensivo: si el plan no define límite o devuelve 0, tratamos como ilimitado
+      if (limit <= 0) {
         return UNLIMITED;
       }
       return limit;

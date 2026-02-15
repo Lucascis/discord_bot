@@ -4,6 +4,7 @@
  */
 
 import { logger } from '@discord-bot/logger';
+import type Redis from 'ioredis';
 
 export interface EventBus {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -16,15 +17,33 @@ export interface EventBus {
 export class RedisEventBus implements EventBus {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private subscribers: Map<string, (data: any) => void> = new Map();
+  private readonly publisher: Redis;
+  private readonly subscriber: Redis;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(private readonly redisClient: any) {}
+  constructor(private readonly redisClient: Redis) {
+    this.publisher = redisClient;
+    this.subscriber = redisClient.duplicate();
+
+    this.subscriber.on('message', (channel: string, message: string) => {
+      const handler = this.subscribers.get(channel);
+      if (!handler) {
+        return;
+      }
+      try {
+        const data = JSON.parse(message);
+        handler(data);
+      } catch (parseError) {
+        logger.error({ parseError, channel, message }, 'Failed to parse Redis message');
+      }
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async publish(channel: string, data: any): Promise<void> {
     try {
       const message = JSON.stringify(data);
-      await this.redisClient.publish(channel, message);
+      await this.publisher.publish(channel, message);
 
       logger.debug({
         channel,
@@ -42,14 +61,12 @@ export class RedisEventBus implements EventBus {
     try {
       this.subscribers.set(channel, handler);
 
-      await this.redisClient.subscribe(channel, (message: string) => {
-        try {
-          const data = JSON.parse(message);
-          handler(data);
-        } catch (parseError) {
-          logger.error({ parseError, channel, message }, 'Failed to parse Redis message');
-        }
-      });
+      const status = this.subscriber.status as string;
+      if (status !== 'ready' && status !== 'connecting') {
+        await this.subscriber.connect();
+      }
+
+      await this.subscriber.subscribe(channel);
 
       logger.info({ channel }, 'Subscribed to Redis channel');
     } catch (error) {
@@ -60,7 +77,7 @@ export class RedisEventBus implements EventBus {
 
   async unsubscribe(channel: string): Promise<void> {
     try {
-      await this.redisClient.unsubscribe(channel);
+      await this.subscriber.unsubscribe(channel);
       this.subscribers.delete(channel);
 
       logger.info({ channel }, 'Unsubscribed from Redis channel');
@@ -76,6 +93,7 @@ export class RedisEventBus implements EventBus {
         await this.unsubscribe(channel);
       }
 
+      await this.subscriber.quit();
       logger.info('Redis event bus disposed');
     } catch (error) {
       logger.error({ error }, 'Error disposing Redis event bus');

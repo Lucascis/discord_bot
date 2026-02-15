@@ -8,7 +8,7 @@
  * @status NOT_IMPLEMENTED - Placeholder for future implementation
  */
 
-import { SubscriptionTier, BillingInterval } from '@prisma/client';
+import { SubscriptionTier, BillingInterval } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import {
   IPaymentProcessor,

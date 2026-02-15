@@ -23,9 +23,14 @@ export type RuntimePlan = {
   limits?: Record<string, unknown>;
 };
 
+const PUBLIC_SUBSCRIPTION_TIERS = new Set(['FREE', 'BASIC', 'PREMIUM']);
+
 export async function getRuntimePlans(): Promise<RuntimePlan[]> {
   try {
-    return await apiFetch<RuntimePlan[]>('/api/v1/plans/runtime');
+    const plans = await apiFetch<RuntimePlan[]>('/api/v1/plans/runtime');
+    return Array.isArray(plans)
+      ? plans.filter((plan) => PUBLIC_SUBSCRIPTION_TIERS.has(plan.tier.toUpperCase()))
+      : [];
   } catch {
     return [];
   }
@@ -33,7 +38,9 @@ export async function getRuntimePlans(): Promise<RuntimePlan[]> {
 
 export async function getDatabasePlans(): Promise<Array<{ tierName: string; prices: PlanPrice[]; description?: string }>> {
   try {
-    return await apiFetch<Array<{ tierName: string; prices: PlanPrice[]; description?: string }>>('/api/v1/plans');
+    const dbPlans = await apiFetch<Array<{ tierName: string; prices: PlanPrice[]; description?: string }>>('/api/v1/plans');
+    if (!Array.isArray(dbPlans)) return [];
+    return dbPlans.filter((plan) => PUBLIC_SUBSCRIPTION_TIERS.has(plan.tierName.toUpperCase()));
   } catch {
     return [];
   }

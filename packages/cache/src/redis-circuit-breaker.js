@@ -22,7 +22,7 @@ export class RedisCircuitBreaker {
         // Initialize fallback cache configuration
         this.fallbackCacheMaxSize = config.fallbackCache?.maxSize ?? 100;
         this.cleanupIntervalMs = config.fallbackCache?.cleanupIntervalMs ?? 300000; // 5 minutes
-         
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.redis = new Redis(redisOptions);
         this.redis.on('error', (error) => {
             logger.error({

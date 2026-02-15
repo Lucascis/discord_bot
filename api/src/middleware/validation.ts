@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+type ParamsDictionary = Record<string, string>;
 import { z, ZodSchema, ZodError } from 'zod';
 import { ValidationError } from './error-handler.js';
 
@@ -40,7 +41,14 @@ export const guildSettingsSchema = z.object({
   autoplay: z.boolean().optional(),
   djRoleId: snowflakeSchema.optional(),
   maxQueueSize: z.number().int().min(1).max(1000).optional(),
-  allowExplicitContent: z.boolean().optional()
+  allowExplicitContent: z.boolean().optional(),
+  defaultSearchSource: z.enum(['youtube', 'spotify', 'soundcloud']).optional(),
+  announceNowPlaying: z.boolean().optional(),
+  deleteInvokeMessage: z.boolean().optional(),
+  uiTheme: z.object({
+    playingColor: z.string().regex(/^#?[0-9a-fA-F]{6}$/, 'Color must be a 6 digit hex code').optional(),
+    pausedColor: z.string().regex(/^#?[0-9a-fA-F]{6}$/, 'Color must be a 6 digit hex code').optional()
+  }).optional()
 });
 
 // Track add validation
@@ -76,7 +84,7 @@ export function validate(schemas: ValidationSchemas) {
 
       // Validate URL parameters
       if (schemas.params) {
-        req.params = schemas.params.parse(req.params);
+        req.params = schemas.params.parse(req.params) as ParamsDictionary;
       }
 
       // Validate query parameters
@@ -90,7 +98,7 @@ export function validate(schemas: ValidationSchemas) {
     } catch (error) {
       if (error instanceof ZodError) {
         // Transform Zod validation errors to user-friendly format
-        const validationDetails = error.errors.map(err => ({
+        const validationDetails = error.issues.map((err) => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code,
@@ -212,7 +220,7 @@ export const validateWebhookHeaders = (req: Request, res: Response, next: NextFu
     next();
   } catch (error) {
     if (error instanceof ZodError) {
-      throw new ValidationError('Invalid webhook headers', error.errors);
+      throw new ValidationError('Invalid webhook headers', error.issues);
     }
     throw error;
   }

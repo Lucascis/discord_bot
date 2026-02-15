@@ -8,7 +8,7 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test'
     },
-    // No setupFiles needed - tests use mocks
+    setupFiles: ['./test/setup.ts'],
     testTimeout: 10000,
     hookTimeout: 10000,
     pool: 'forks',

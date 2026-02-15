@@ -125,19 +125,19 @@ async function requestFromAudio<T>(
   return new Promise<T>((resolve, reject) => {
     let settled = false;
 
-      const cleanup = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        void redis.unsubscribe(responseChannel).catch(() => undefined);
-        if (typeof redis.off === 'function') {
-          redis.off('message', onMessage);
-        } else {
-          redis.removeListener('message', onMessage);
-        }
-        clearTimeout(timeout);
-      };
+    const cleanup = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      void redis.unsubscribe(responseChannel).catch(() => undefined);
+      if (typeof redis.off === 'function') {
+        redis.off('message', onMessage);
+      } else {
+        redis.removeListener('message', onMessage);
+      }
+      clearTimeout(timeout);
+    };
 
     const timeout = setTimeout(() => {
       cleanup();
@@ -309,7 +309,6 @@ router.delete('/:guildId/queue/tracks/:position',
         identifier: targetItem.id,
         duration: targetItem.duration,
         isSeekable: true,
-        isStream: false,
         thumbnail: undefined,
         source: inferSourceFromUrl(targetItem.url),
         requester: {

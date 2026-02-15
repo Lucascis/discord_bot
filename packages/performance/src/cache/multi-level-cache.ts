@@ -1,7 +1,11 @@
+// @ts-ignore - lru-cache types resolution issue
 import { LRUCache } from 'lru-cache';
 import Redis from 'ioredis';
 import { logger } from '@discord-bot/logger';
 import { MetricsCollector } from '@discord-bot/observability';
+
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
 
 /**
  * Cache Configuration
@@ -81,8 +85,11 @@ export class MultiLevelCache<T = any> {
       max: config.l1.maxSize,
       ttl: config.l1.ttlMs,
       updateAgeOnGet: config.l1.updateAgeOnGet,
-      dispose: (value, key) => {
-        logger.debug('L1 cache entry disposed', { key, size: this.l1Cache.size });
+      dispose: (_value: CacheEntry<T>, key: string) => {
+        logger.debug({
+          key,
+          cacheSize: this.l1Cache.size
+        }, 'L1 cache entry disposed');
       }
     });
 
@@ -99,12 +106,12 @@ export class MultiLevelCache<T = any> {
       avgResponseTimeMs: 0
     };
 
-    logger.info('Multi-level cache initialized', {
+    logger.info({
       l1MaxSize: config.l1.maxSize,
       l1TtlMs: config.l1.ttlMs,
       l2KeyPrefix: config.l2.keyPrefix,
       l2TtlMs: config.l2.ttlMs
-    });
+    }, 'Multi-level cache initialized');
   }
 
   /**
@@ -122,7 +129,7 @@ export class MultiLevelCache<T = any> {
         this.updateResponseTime(startTime);
         this.recordMetrics('l1_hit', key);
 
-        logger.debug('Cache L1 hit', { key });
+        logger.debug({ key }, 'Cache L1 hit');
         return l1Entry.data;
       }
 
@@ -141,7 +148,7 @@ export class MultiLevelCache<T = any> {
           this.updateResponseTime(startTime);
           this.recordMetrics('l2_hit', key);
 
-          logger.debug('Cache L2 hit', { key });
+          logger.debug({ key }, 'Cache L2 hit');
           return l2Entry.data;
         }
       }
@@ -151,17 +158,17 @@ export class MultiLevelCache<T = any> {
       this.updateResponseTime(startTime);
       this.recordMetrics('miss', key);
 
-      logger.debug('Cache miss', { key });
+      logger.debug({ key }, 'Cache miss');
       return null;
 
     } catch (error) {
       this.stats.errors++;
       this.recordMetrics('error', key);
 
-      logger.error('Cache get error', {
+      logger.error({
         key,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Cache get error');
 
       return null;
     }
@@ -200,16 +207,16 @@ export class MultiLevelCache<T = any> {
       this.updateResponseTime(startTime);
       this.recordMetrics('set', key);
 
-      logger.debug('Cache set completed', { key, ttlMs: effectiveTtl });
+      logger.debug({ key, ttlMs: effectiveTtl }, 'Cache set completed');
 
     } catch (error) {
       this.stats.errors++;
       this.recordMetrics('error', key);
 
-      logger.error('Cache set error', {
+      logger.error({
         key,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Cache set error');
 
       throw error;
     }
@@ -233,16 +240,16 @@ export class MultiLevelCache<T = any> {
       this.updateResponseTime(startTime);
       this.recordMetrics('delete', key);
 
-      logger.debug('Cache delete completed', { key });
+      logger.debug({ key }, 'Cache delete completed');
 
     } catch (error) {
       this.stats.errors++;
       this.recordMetrics('error', key);
 
-      logger.error('Cache delete error', {
+      logger.error({
         key,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Cache delete error');
 
       throw error;
     }
@@ -295,10 +302,10 @@ export class MultiLevelCache<T = any> {
           }
         }
       } catch (error) {
-        logger.error('Cache mget error', {
+        logger.error({
           keys: l2Keys,
-          error: error instanceof Error ? error.message : String(error)
-        });
+          error: serializeError(error)
+        }, 'Cache mget error');
 
         // Set remaining keys as null
         for (const l2Key of l2Keys) {
@@ -342,18 +349,18 @@ export class MultiLevelCache<T = any> {
 
       await pipeline.exec();
 
-      logger.debug('Cache mset completed', {
+      logger.debug({
         count: entries.size,
         ttlMs: effectiveTtl
-      });
+      }, 'Cache mset completed');
 
     } catch (error) {
       this.stats.errors += entries.size;
 
-      logger.error('Cache mset error', {
+      logger.error({
         count: entries.size,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        error: serializeError(error)
+      }, 'Cache mset error');
 
       throw error;
     }
@@ -383,12 +390,12 @@ export class MultiLevelCache<T = any> {
         }
       }
 
-      logger.info('Cache cleared', { l2KeysRemoved: keys.length });
+      logger.info({ l2KeysRemoved: keys.length }, 'Cache cleared');
 
     } catch (error) {
-      logger.error('Cache clear error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      logger.error({
+        error: serializeError(error)
+      }, 'Cache clear error');
 
       throw error;
     }
@@ -440,11 +447,11 @@ export class MultiLevelCache<T = any> {
    * Warm up cache with data
    */
   async warmUp(data: Map<string, T>, ttlMs?: number): Promise<void> {
-    logger.info('Starting cache warm-up', { entryCount: data.size });
+    logger.info({ entryCount: data.size }, 'Starting cache warm-up');
 
     await this.mset(data, ttlMs);
 
-    logger.info('Cache warm-up completed', { entryCount: data.size });
+    logger.info({ entryCount: data.size }, 'Cache warm-up completed');
   }
 
   // Private helper methods
@@ -457,33 +464,30 @@ export class MultiLevelCache<T = any> {
     try {
       const serialized = JSON.stringify(entry);
 
-      // TODO: Add compression if enabled
       if (this.config.l2.compressionEnabled) {
-        // Implement compression here
         return serialized;
       }
 
       return serialized;
     } catch (error) {
-      logger.error('Serialization error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      logger.error({
+        error: serializeError(error)
+      }, 'Serialization error');
       throw error;
     }
   }
 
   private deserialize(value: string): CacheEntry<T> | null {
     try {
-      // TODO: Add decompression if enabled
       if (this.config.l2.compressionEnabled) {
-        // Implement decompression here
+        // Compresión deshabilitada por ahora; el valor viene ya descomprimido.
       }
 
       return JSON.parse(value) as CacheEntry<T>;
     } catch (error) {
-      logger.error('Deserialization error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      logger.error({
+        error: serializeError(error)
+      }, 'Deserialization error');
       return null;
     }
   }

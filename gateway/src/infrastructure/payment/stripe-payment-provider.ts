@@ -26,6 +26,9 @@ import {
   PaymentProviderValidationError,
 } from './payment-provider.interface.js';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Custom error class for Stripe-specific errors
  */
@@ -108,18 +111,18 @@ export class StripePaymentProvider implements IPaymentProvider {
 
     // Initialize Stripe client with API version and retry configuration
     this.stripe = new Stripe(config.apiKey, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2023-10-16' as any,
       typescript: true,
       maxNetworkRetries: 2,
       timeout: 30000, // 30 second timeout
       telemetry: false, // Disable telemetry for privacy
     });
 
-    logger.info('[StripeProvider] Initialized', {
+    logger.info({
       testMode: this.isTestMode(),
       supportedCurrencies: config.supportedCurrencies,
       supportedCountries: config.supportedCountries,
-    });
+    }, '[StripeProvider] Initialized');
   }
 
   // ============================================================================
@@ -148,7 +151,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     metadata?: Record<string, string>;
   }): Promise<PaymentCustomer> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Creating customer', { email: data.email });
+      logger.info({ email: data.email }, '[StripeProvider] Creating customer');
 
       try {
         const customer = await this.stripe.customers.create({
@@ -157,7 +160,7 @@ export class StripePaymentProvider implements IPaymentProvider {
           metadata: data.metadata || {},
         });
 
-        logger.info('[StripeProvider] Customer created', { customerId: customer.id });
+        logger.info({ customerId: customer.id }, '[StripeProvider] Customer created');
 
         return this.mapStripeCustomer(customer);
       } catch (error) {
@@ -175,7 +178,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async getCustomer(customerId: string): Promise<PaymentCustomer> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Getting customer', { customerId });
+      logger.debug({ customerId }, '[StripeProvider] Getting customer');
 
       try {
         const customer = await this.stripe.customers.retrieve(customerId);
@@ -211,7 +214,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     }
   ): Promise<PaymentCustomer> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Updating customer', { customerId });
+      logger.info({ customerId }, '[StripeProvider] Updating customer');
 
       try {
         const customer = await this.stripe.customers.update(customerId, {
@@ -220,7 +223,7 @@ export class StripePaymentProvider implements IPaymentProvider {
           metadata: data.metadata,
         });
 
-        logger.info('[StripeProvider] Customer updated', { customerId });
+        logger.info({ customerId }, '[StripeProvider] Customer updated');
 
         return this.mapStripeCustomer(customer);
       } catch (error) {
@@ -239,11 +242,11 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async deleteCustomer(customerId: string): Promise<void> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Deleting customer', { customerId });
+      logger.info({ customerId }, '[StripeProvider] Deleting customer');
 
       try {
         await this.stripe.customers.del(customerId);
-        logger.info('[StripeProvider] Customer deleted', { customerId });
+        logger.info({ customerId }, '[StripeProvider] Customer deleted');
       } catch (error) {
         throw this.handleStripeError(error, 'delete_customer');
       }
@@ -268,14 +271,14 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async attachPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Attaching payment method', { customerId, paymentMethodId });
+      logger.info({ customerId, paymentMethodId }, '[StripeProvider] Attaching payment method');
 
       try {
         await this.stripe.paymentMethods.attach(paymentMethodId, {
           customer: customerId,
         });
 
-        logger.info('[StripeProvider] Payment method attached', { customerId, paymentMethodId });
+        logger.info({ customerId, paymentMethodId }, '[StripeProvider] Payment method attached');
       } catch (error) {
         throw this.handleStripeError(error, 'attach_payment_method');
       }
@@ -290,11 +293,11 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async detachPaymentMethod(paymentMethodId: string): Promise<void> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Detaching payment method', { paymentMethodId });
+      logger.info({ paymentMethodId }, '[StripeProvider] Detaching payment method');
 
       try {
         await this.stripe.paymentMethods.detach(paymentMethodId);
-        logger.info('[StripeProvider] Payment method detached', { paymentMethodId });
+        logger.info({ paymentMethodId }, '[StripeProvider] Payment method detached');
       } catch (error) {
         throw this.handleStripeError(error, 'detach_payment_method');
       }
@@ -310,7 +313,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async listPaymentMethods(customerId: string): Promise<PaymentMethod[]> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Listing payment methods', { customerId });
+      logger.debug({ customerId }, '[StripeProvider] Listing payment methods');
 
       try {
         // Get customer to check default payment method
@@ -345,7 +348,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async setDefaultPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Setting default payment method', { customerId, paymentMethodId });
+      logger.info({ customerId, paymentMethodId }, '[StripeProvider] Setting default payment method');
 
       try {
         await this.stripe.customers.update(customerId, {
@@ -354,7 +357,7 @@ export class StripePaymentProvider implements IPaymentProvider {
           },
         });
 
-        logger.info('[StripeProvider] Default payment method set', { customerId, paymentMethodId });
+        logger.info({ customerId, paymentMethodId }, '[StripeProvider] Default payment method set');
       } catch (error) {
         throw this.handleStripeError(error, 'set_default_payment_method');
       }
@@ -390,11 +393,11 @@ export class StripePaymentProvider implements IPaymentProvider {
     metadata?: Record<string, string>;
   }): Promise<PaymentIntent> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Creating payment intent', {
+      logger.info({
         amount: data.amount,
         currency: data.currency,
         customerId: data.customerId,
-      });
+      }, '[StripeProvider] Creating payment intent');
 
       try {
         const params: Stripe.PaymentIntentCreateParams = {
@@ -417,10 +420,10 @@ export class StripePaymentProvider implements IPaymentProvider {
 
         const intent = await this.stripe.paymentIntents.create(params);
 
-        logger.info('[StripeProvider] Payment intent created', {
+        logger.info({
           paymentIntentId: intent.id,
           status: intent.status,
-        });
+        }, '[StripeProvider] Payment intent created');
 
         return this.mapStripePaymentIntent(intent);
       } catch (error) {
@@ -438,15 +441,15 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async capturePaymentIntent(paymentIntentId: string): Promise<PaymentIntent> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Capturing payment intent', { paymentIntentId });
+      logger.info({ paymentIntentId }, '[StripeProvider] Capturing payment intent');
 
       try {
         const intent = await this.stripe.paymentIntents.capture(paymentIntentId);
 
-        logger.info('[StripeProvider] Payment intent captured', {
+        logger.info({
           paymentIntentId,
           status: intent.status,
-        });
+        }, '[StripeProvider] Payment intent captured');
 
         return this.mapStripePaymentIntent(intent);
       } catch (error) {
@@ -464,12 +467,12 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async cancelPaymentIntent(paymentIntentId: string): Promise<PaymentIntent> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Canceling payment intent', { paymentIntentId });
+      logger.info({ paymentIntentId }, '[StripeProvider] Canceling payment intent');
 
       try {
         const intent = await this.stripe.paymentIntents.cancel(paymentIntentId);
 
-        logger.info('[StripeProvider] Payment intent canceled', { paymentIntentId });
+        logger.info({ paymentIntentId }, '[StripeProvider] Payment intent canceled');
 
         return this.mapStripePaymentIntent(intent);
       } catch (error) {
@@ -487,7 +490,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async getPaymentIntent(paymentIntentId: string): Promise<PaymentIntent> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Getting payment intent', { paymentIntentId });
+      logger.debug({ paymentIntentId }, '[StripeProvider] Getting payment intent');
 
       try {
         const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
@@ -527,10 +530,10 @@ export class StripePaymentProvider implements IPaymentProvider {
     metadata?: Record<string, string>;
   }): Promise<Subscription> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Creating subscription', {
+      logger.info({
         customerId: data.customerId,
         priceId: data.priceId,
-      });
+      }, '[StripeProvider] Creating subscription');
 
       try {
         const params: Stripe.SubscriptionCreateParams = {
@@ -552,10 +555,10 @@ export class StripePaymentProvider implements IPaymentProvider {
 
         const subscription = await this.stripe.subscriptions.create(params);
 
-        logger.info('[StripeProvider] Subscription created', {
+        logger.info({
           subscriptionId: subscription.id,
           status: subscription.status,
-        });
+        }, '[StripeProvider] Subscription created');
 
         return this.mapStripeSubscription(subscription);
       } catch (error) {
@@ -573,7 +576,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async getSubscription(subscriptionId: string): Promise<Subscription> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Getting subscription', { subscriptionId });
+      logger.debug({ subscriptionId }, '[StripeProvider] Getting subscription');
 
       try {
         const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
@@ -601,7 +604,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     }
   ): Promise<Subscription> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Updating subscription', { subscriptionId });
+      logger.info({ subscriptionId }, '[StripeProvider] Updating subscription');
 
       try {
         const params: Stripe.SubscriptionUpdateParams = {};
@@ -627,7 +630,7 @@ export class StripePaymentProvider implements IPaymentProvider {
 
         const subscription = await this.stripe.subscriptions.update(subscriptionId, params);
 
-        logger.info('[StripeProvider] Subscription updated', { subscriptionId });
+        logger.info({ subscriptionId }, '[StripeProvider] Subscription updated');
 
         return this.mapStripeSubscription(subscription);
       } catch (error) {
@@ -646,7 +649,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async cancelSubscription(subscriptionId: string, cancelImmediately = false): Promise<Subscription> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Canceling subscription', { subscriptionId, cancelImmediately });
+      logger.info({ subscriptionId, cancelImmediately }, '[StripeProvider] Canceling subscription');
 
       try {
         let subscription: Stripe.Subscription;
@@ -659,10 +662,10 @@ export class StripePaymentProvider implements IPaymentProvider {
           });
         }
 
-        logger.info('[StripeProvider] Subscription canceled', {
+        logger.info({
           subscriptionId,
           status: subscription.status,
-        });
+        }, '[StripeProvider] Subscription canceled');
 
         return this.mapStripeSubscription(subscription);
       } catch (error) {
@@ -680,7 +683,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async listSubscriptions(customerId: string): Promise<Subscription[]> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Listing subscriptions', { customerId });
+      logger.debug({ customerId }, '[StripeProvider] Listing subscriptions');
 
       try {
         const subscriptions = await this.stripe.subscriptions.list({
@@ -722,10 +725,10 @@ export class StripePaymentProvider implements IPaymentProvider {
     metadata?: Record<string, string>;
   }): Promise<RefundResult> {
     return this.executeWithRetry(async () => {
-      logger.info('[StripeProvider] Creating refund', {
+      logger.info({
         paymentIntentId: data.paymentIntentId,
         amount: data.amount,
-      });
+      }, '[StripeProvider] Creating refund');
 
       try {
         const params: Stripe.RefundCreateParams = {
@@ -743,10 +746,10 @@ export class StripePaymentProvider implements IPaymentProvider {
 
         const refund = await this.stripe.refunds.create(params);
 
-        logger.info('[StripeProvider] Refund created', {
+        logger.info({
           refundId: refund.id,
           status: refund.status,
-        });
+        }, '[StripeProvider] Refund created');
 
         return this.mapStripeRefund(refund);
       } catch (error) {
@@ -764,7 +767,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async getRefund(refundId: string): Promise<RefundResult> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Getting refund', { refundId });
+      logger.debug({ refundId }, '[StripeProvider] Getting refund');
 
       try {
         const refund = await this.stripe.refunds.retrieve(refundId);
@@ -788,7 +791,7 @@ export class StripePaymentProvider implements IPaymentProvider {
    */
   async getInvoice(invoiceId: string): Promise<Invoice> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Getting invoice', { invoiceId });
+      logger.debug({ invoiceId }, '[StripeProvider] Getting invoice');
 
       try {
         const invoice = await this.stripe.invoices.retrieve(invoiceId, {
@@ -818,7 +821,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     }
   ): Promise<Invoice[]> {
     return this.executeWithRetry(async () => {
-      logger.debug('[StripeProvider] Listing invoices', { customerId, options });
+      logger.debug({ customerId, options }, '[StripeProvider] Listing invoices');
 
       try {
         const params: Stripe.InvoiceListParams = {
@@ -871,7 +874,7 @@ export class StripePaymentProvider implements IPaymentProvider {
       logger.debug('[StripeProvider] Webhook signature verified');
       return true;
     } catch (error) {
-      logger.error('[StripeProvider] Webhook signature verification failed', { error });
+      logger.error({ error: serializeError(error) }, '[StripeProvider] Webhook signature verification failed');
       return false;
     }
   }
@@ -896,7 +899,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     try {
       const stripeEvent = JSON.parse(payload) as Stripe.Event;
 
-      logger.debug('[StripeProvider] Parsing webhook event', { type: stripeEvent.type });
+      logger.debug({ type: stripeEvent.type }, '[StripeProvider] Parsing webhook event');
 
       return {
         id: stripeEvent.id,
@@ -990,10 +993,10 @@ export class StripePaymentProvider implements IPaymentProvider {
         // Retry on network errors or rate limits
         if (attempt < this.maxRetries) {
           const delay = this.retryDelay * Math.pow(2, attempt - 1);
-          logger.warn(`[StripeProvider] ${operationName} failed, retrying in ${delay}ms`, {
+          logger.warn({
             attempt,
             error: lastError.message,
-          });
+          }, `[StripeProvider] ${operationName} failed, retrying in ${delay}ms`);
           await this.sleep(delay);
         }
       }
@@ -1020,13 +1023,13 @@ export class StripePaymentProvider implements IPaymentProvider {
     if (error instanceof Stripe.errors.StripeError) {
       const stripeError = error;
 
-      logger.error(`[StripeProvider] ${operation} failed`, {
+      logger.error({
         type: stripeError.type,
         code: stripeError.code,
         message: stripeError.message,
         statusCode: stripeError.statusCode,
         requestId: stripeError.requestId,
-      });
+      }, `[StripeProvider] ${operation} failed`);
 
       // Map to validation error if applicable
       if (stripeError.type === 'StripeInvalidRequestError') {
@@ -1048,7 +1051,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     }
 
     // Unknown error
-    logger.error(`[StripeProvider] ${operation} failed with unknown error`, { error });
+    logger.error({ error: serializeError(error) }, `[StripeProvider] ${operation} failed with unknown error`);
     throw new StripeProviderError(
       error instanceof Error ? error.message : 'Unknown error',
       'unknown_error'
@@ -1084,11 +1087,11 @@ export class StripePaymentProvider implements IPaymentProvider {
       type: this.mapPaymentMethodType(pm.type),
       card: pm.card
         ? {
-            brand: pm.card.brand,
-            last4: pm.card.last4,
-            expMonth: pm.card.exp_month,
-            expYear: pm.card.exp_year,
-          }
+          brand: pm.card.brand,
+          last4: pm.card.last4,
+          expMonth: pm.card.exp_month,
+          expYear: pm.card.exp_year,
+        }
         : undefined,
       isDefault,
     };
@@ -1107,9 +1110,9 @@ export class StripePaymentProvider implements IPaymentProvider {
       metadata: intent.metadata,
       error: intent.last_payment_error
         ? {
-            code: intent.last_payment_error.code || 'unknown',
-            message: intent.last_payment_error.message || 'Unknown error',
-          }
+          code: intent.last_payment_error.code || 'unknown',
+          message: intent.last_payment_error.message || 'Unknown error',
+        }
         : undefined,
     };
   }
@@ -1123,8 +1126,8 @@ export class StripePaymentProvider implements IPaymentProvider {
       customerId: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
       priceId: sub.items.data[0].price.id,
       status: this.mapSubscriptionStatus(sub.status),
-      currentPeriodStart: new Date(sub.current_period_start * 1000),
-      currentPeriodEnd: new Date(sub.current_period_end * 1000),
+      currentPeriodStart: new Date((sub as any).current_period_start * 1000),
+      currentPeriodEnd: new Date((sub as any).current_period_end * 1000),
       cancelAtPeriodEnd: sub.cancel_at_period_end,
       trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : undefined,
       trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : undefined,
@@ -1175,7 +1178,7 @@ export class StripePaymentProvider implements IPaymentProvider {
       description: line.description || '',
       amount: line.amount,
       quantity: line.quantity || 1,
-      priceId: typeof line.price === 'object' ? line.price?.id : undefined,
+      priceId: typeof (line as any).price === 'object' ? (line as any).price?.id : undefined,
     };
   }
 

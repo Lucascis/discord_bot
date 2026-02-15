@@ -1,31 +1,38 @@
 const points = [
   {
-    title: 'Plan Engine 100% DB',
-    description: 'Programá campañas relámpago, precios regionales y pruebas A/B sin redeploy.'
+    title: 'Studio Quality Audio',
+    description: 'Experience music as it was meant to be heard. 320kbps audio with zero compression artifacts.'
   },
   {
-    title: 'Studio Mode',
-    description: 'Editor visual para que cada guild premium personalice su UI dentro de Discord.'
+    title: 'Web Dashboard',
+    description: 'Control the party from your browser. Manage queues, skip tracks, and adjust volume in real-time.'
   },
   {
-    title: 'Pagos híbridos',
-    description: 'Stripe + MercadoPago listos para LATAM. Detectamos país y elegimos gateway.'
+    title: 'Smart Autoplay',
+    description: 'The music never stops. Our AI predicts what you want to hear next based on your listening history.'
   },
   {
-    title: 'Insights accionables',
-    description: 'Alertas proactivas cuando una comunidad se acerca a su límite o pierde engagement.'
+    title: 'Synced Lyrics',
+    description: 'Sing along with real-time synchronized lyrics for millions of songs. Karaoke night, sorted.'
   }
 ];
 
-export function Differentiators() {
+interface Props {
+  id?: string;
+}
+
+export function Differentiators({ id }: Props) {
   return (
-    <section className="space-y-6">
-      <h2 className="text-3xl font-semibold">¿Por qué somos diferentes?</h2>
-      <div className="grid gap-4 md:grid-cols-2">
+    <section id={id} className="space-y-8">
+      <div className="text-center max-w-2xl mx-auto">
+        <h2 className="text-3xl font-bold font-display">Everything you need</h2>
+        <p className="text-white/60 mt-2">Built for music lovers, by music lovers.</p>
+      </div>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {points.map((point) => (
-          <div key={point.title} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-xl font-semibold text-brand-200">{point.title}</h3>
-            <p className="mt-2 text-white/70">{point.description}</p>
+          <div key={point.title} className="glass-card rounded-2xl p-6 hover:border-brand-500/30 transition-colors">
+            <h3 className="text-xl font-bold text-brand-200 mb-3">{point.title}</h3>
+            <p className="text-sm text-white/70 leading-relaxed">{point.description}</p>
           </div>
         ))}
       </div>

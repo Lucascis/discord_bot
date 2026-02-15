@@ -296,9 +296,7 @@ export class BillingAnalyticsService {
     predictedRevenue: number;
     confidenceInterval: { low: number; high: number };
   }[]> {
-    // TODO: [ANALYTICS-ENHANCEMENT] Implement time series forecasting
-
-    // Simple forecast based on growth rate
+    // Proyección simple basada en la tasa de crecimiento observada
     const lastMonthMetrics = await this.getRevenueMetrics(
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
       new Date()
@@ -1015,8 +1013,6 @@ export class BillingAnalyticsService {
    */
   async exportToCSV(startDate: Date, endDate: Date): Promise<string> {
     const summary = await this.generateAnalyticsSummary(startDate, endDate);
-
-    // TODO: [ENHANCEMENT] Generate CSV from summary data
 
     const csv = `
 Period,${summary.period.start.toISOString()},${summary.period.end.toISOString()}

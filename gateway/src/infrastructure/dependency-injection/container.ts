@@ -4,7 +4,7 @@
  */
 
 import { Client, GatewayIntentBits, Collection } from 'discord.js';
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
@@ -17,6 +17,8 @@ import { SubscriptionManagementUseCase } from '../../application/use-cases/subsc
 import { RedisEventBus } from '../messaging/redis-event-bus.js';
 import { DatabaseMusicRepository } from '../persistence/database-music-repository.js';
 import { DatabaseSubscriptionRepository } from '../persistence/database-subscription-repository.js';
+import { RedisMusicSessionRepository } from '../redis/redis-music-session-repository.js';
+import { MusicSessionRepository } from '../../domain/repositories/music-session-repository.js';
 
 // Presentation
 import { MusicController } from '../../presentation/controllers/music-controller.js';
@@ -26,6 +28,7 @@ import { InteractionResponseHandler } from '../../presentation/ui/interaction-re
 // Services
 import { SettingsService } from '../../services/settings-service.js';
 import { DiscordPermissionService } from '../discord/discord-permission-service.js';
+import { AudioCommandService } from '../../services/audio-command-service.js';
 
 export interface DIContainer {
   // Infrastructure
@@ -36,11 +39,13 @@ export interface DIContainer {
 
   // Repositories
   musicRepository: DatabaseMusicRepository;
+  musicSessionRepository: MusicSessionRepository;
   subscriptionRepository: DatabaseSubscriptionRepository;
 
   // Services
   settingsService: SettingsService;
   permissionService: DiscordPermissionService;
+  audioCommandService: AudioCommandService;
 
   // Use Cases (optional - will be simplified)
   playMusicUseCase?: PlayMusicUseCase;
@@ -101,6 +106,7 @@ export class EnterpriseContainer {
 
   private initializeRepositories(): void {
     this.container.musicRepository = new DatabaseMusicRepository(prisma);
+    this.container.musicSessionRepository = new RedisMusicSessionRepository(this.container.redisClient);
     this.container.subscriptionRepository = new DatabaseSubscriptionRepository(prisma);
 
     logger.info('✅ Repository layer initialized');
@@ -109,6 +115,7 @@ export class EnterpriseContainer {
   private initializeServices(): void {
     this.container.settingsService = new SettingsService(prisma);
     this.container.permissionService = new DiscordPermissionService(this.container.discordClient!);
+    this.container.audioCommandService = new AudioCommandService();
 
     logger.info('✅ Services layer initialized');
   }
@@ -131,7 +138,9 @@ export class EnterpriseContainer {
       this.container.uiBuilder!,
       this.container.responseHandler!,
       this.container.settingsService!,
-      this.container.permissionService!
+      this.container.permissionService!,
+      this.container.musicSessionRepository!,
+      this.container.audioCommandService!
     );
 
     logger.info('✅ Presentation layer initialized with commercial music controller');
@@ -176,26 +185,24 @@ export class EnterpriseContainer {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async createRedisClient(): Promise<any> {
-    const redisConfig = {
-      url: process.env.REDIS_URL || 'redis://localhost:6379',
+    const redisUrl = new URL(process.env.REDIS_URL || 'redis://localhost:6379');
 
-      // Enterprise Redis configuration
-      retry_unfulfilled_commands: true,
-      retryDelayOnFailover: 100,
+    const redisConfig = {
+      host: redisUrl.hostname || 'localhost',
+      port: parseInt(redisUrl.port, 10) || 6379,
+      password: redisUrl.password || undefined,
       enableReadyCheck: true,
       maxLoadingTimeout: 30000,
       lazyConnect: true,
-
-      // Connection pooling
       family: 4,
       connectTimeout: 60000,
       commandTimeout: 5000,
-
-      // Pub/Sub optimizations
       maxRetriesPerRequest: null,
+      retryStrategy: (times: number) => Math.min(times * 100, 2000),
+      keepAlive: 5000
     };
 
-    const client = createClient(redisConfig);
+    const client = new Redis(redisConfig);
 
     client.on('error', (err: Error) => {
       logger.error({ err }, 'Redis connection error');
@@ -209,7 +216,10 @@ export class EnterpriseContainer {
       logger.info('Redis client ready for operations');
     });
 
-    await client.connect();
+    const status = client.status as string;
+    if (status !== 'ready' && status !== 'connecting') {
+      await client.connect();
+    }
     return client;
   }
 

@@ -8,7 +8,7 @@
 
 ## 📋 Executive Summary
 
-This document provides a comprehensive guide to the Discord Music Bot's enterprise billing system. The system is designed to support monetization through multiple payment providers (Stripe, MercadoPago, PayPal) with a fully modular, pluggable architecture.
+This document provides a comprehensive guide to the Discord Music Bot's enterprise-grade billing system. The system powers our public plans (Free, Plus, Pro) and optionally proyectos custom de nivel enterprise. It is not a specification for un cuarto plan comercial, sino la base técnica sobre la que se construyen los planes existentes. The system is designed to support monetization through multiple payment providers (Stripe, MercadoPago, PayPal) with a fully modular, pluggable architecture.
 
 ### Key Features
 
@@ -105,7 +105,7 @@ discord_bot/
 
 1. **Customer** - Customer records with Discord integration
 2. **PaymentMethod** - Stored payment methods (cards, bank accounts)
-3. **SubscriptionPlan** - Plan definitions (Premium, Pro, Enterprise)
+3. **SubscriptionPlan** - Plan definitions (Free, Plus, Pro; extensible a proyectos custom de nivel enterprise)
 4. **SubscriptionPrice** - Multi-currency pricing
 5. **Subscription** - Active subscriptions
 6. **Invoice** - Billing invoices
@@ -140,38 +140,7 @@ The billing schema needs to be integrated into the main Prisma schema:
 
 #### 1.2 Seed Subscription Plans
 
-Create initial subscription plans:
-
-```typescript
-// packages/database/prisma/seed.ts
-
-const plans = [
-  {
-    name: 'premium',
-    displayName: 'Premium',
-    description: 'For personal use with premium features',
-    features: ['ad_free', 'high_quality', 'unlimited_queue'],
-    limits: { maxGuilds: 5, maxQueueSize: 100 },
-    active: true,
-  },
-  {
-    name: 'pro',
-    displayName: 'Professional',
-    description: 'For power users and small teams',
-    features: ['ad_free', 'high_quality', 'unlimited_queue', 'priority_support', 'analytics'],
-    limits: { maxGuilds: 20, maxQueueSize: 500 },
-    active: true,
-  },
-  {
-    name: 'enterprise',
-    displayName: 'Enterprise',
-    description: 'For large servers and organizations',
-    features: ['ad_free', 'high_quality', 'unlimited_queue', 'priority_support', 'analytics', 'custom_integration', 'sla'],
-    limits: { maxGuilds: -1, maxQueueSize: -1 }, // Unlimited
-    active: true,
-  },
-];
-```
+Create initial subscription plans using the same tier model que utiliza el runtime (`FREE`, `BASIC`, `PREMIUM`) que se muestran comercialmente como Free, Plus y Pro. Para proyectos custom podés extender estos planes con capacidades adicionales en lugar de definir un cuarto plan empaquetado.
 
 ### Phase 2: Stripe Integration (Priority 1)
 

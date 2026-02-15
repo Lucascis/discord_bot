@@ -261,9 +261,8 @@ const commands = [
             .setDescription('Select subscription tier')
             .setRequired(true)
             .addChoices(
-              { name: 'Basic - 10K tracks/month', value: 'basic' },
-              { name: 'Premium - 100K tracks/month', value: 'premium' },
-              { name: 'Enterprise - Unlimited', value: 'enterprise' }
+              { name: 'Plus', value: 'basic' },
+              { name: 'Pro', value: 'premium' }
             )
         )
     )

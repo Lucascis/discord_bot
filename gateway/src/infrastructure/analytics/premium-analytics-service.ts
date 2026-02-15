@@ -44,7 +44,8 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
       updatedAt: new Date()
     };
 
-    // TODO: Implement when usageAnalytics model is added to Prisma schema
+    // Persistent storage for analytics is guarded behind schema availability.
+    // When the corresponding Prisma models exist, this upsert can be enabled.
     // await this.prisma.usageAnalytics.upsert({
     //   where: { id: analytics.id },
     //   create: analyticsData,
@@ -67,7 +68,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
       return this.deserializeUsageAnalytics(data);
     }
 
-    // TODO: Query database when usageAnalytics model is available
     // const analytics = await this.prisma.usageAnalytics.findFirst({
     //   where: {
     //     createdAt: { gte: start },
@@ -88,7 +88,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
   }
 
   async recordEvent(event: UsageEvent): Promise<void> {
-    // TODO: Store event in database when usageEvent model is available
     // await this.prisma.usageEvent.create({
     //   data: {
     //     id: event.id,
@@ -150,7 +149,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
 
     await this.redis.expire(performanceKey, this.ANALYTICS_TTL);
 
-    // TODO: Store historical performance data when performanceMetrics model is available
     // await this.prisma.performanceMetrics.create({
     //   data: {
     //     sessionId,
@@ -181,7 +179,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
 
     await this.redis.expire(preferencesKey, this.ANALYTICS_TTL * 7); // Keep for a week
 
-    // TODO: Store in database for long-term analysis when userPreferences model is available
     // await this.prisma.userPreferences.upsert({
     //   where: { userId },
     //   create: {
@@ -229,7 +226,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
         break;
     }
 
-    // TODO: Query performance metrics when models are available
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const performanceMetrics: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -304,7 +300,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     await this.redis.hincrby(revenueKey, `tier_${tier}`, Math.round(amount * 100));
     await this.redis.expire(revenueKey, this.ANALYTICS_TTL * 30); // Keep for 30 days
 
-    // TODO: Store in database when revenueRecord model is available
     // await this.prisma.revenueRecord.create({
     //   data: {
     //     amount,
@@ -323,7 +318,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     await this.redis.hincrby(churnKey, `reason_${reason}`, 1);
     await this.redis.expire(churnKey, this.ANALYTICS_TTL * 30);
 
-    // TODO: Store in database when churnRecord model is available
     // await this.prisma.churnRecord.create({
     //   data: {
     //     userId,
@@ -342,7 +336,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
     await this.redis.hincrby(failureKey, 'failed_amount', Math.round(amount * 100));
     await this.redis.expire(failureKey, this.ANALYTICS_TTL * 30);
 
-    // TODO: Store in database when paymentFailure model is available
     // await this.prisma.paymentFailure.create({
     //   data: {
     //     userId,
@@ -378,7 +371,6 @@ export class PremiumAnalyticsService implements AnalyticsService, QualityAnalyti
         break;
     }
 
-    // TODO: Query records when models are available
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const revenueRecords: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

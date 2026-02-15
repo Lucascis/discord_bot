@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@discord-bot/logger';
 
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
+
 /**
  * Base Command Interface
  * All commands must extend this interface
@@ -81,10 +84,10 @@ export class CommandBus implements ICommandBus {
     }
 
     this.handlers.set(handler.commandType, handler);
-    logger.info('Command handler registered', {
+    logger.info({
       commandType: handler.commandType,
       handlerName: handler.constructor.name
-    });
+    }, 'Command handler registered');
   }
 
   async send<TCommand extends ICommand, TResult>(
@@ -96,10 +99,10 @@ export class CommandBus implements ICommandBus {
       const handler = this.handlers.get(command.commandType);
       if (!handler) {
         const error = `No handler registered for command type: ${command.commandType}`;
-        logger.error('Command handler not found', {
+        logger.error({
           commandType: command.commandType,
           commandId: command.commandId
-        });
+        }, 'Command handler not found');
 
         return {
           success: false,
@@ -107,24 +110,24 @@ export class CommandBus implements ICommandBus {
         };
       }
 
-      logger.debug('Executing command', {
+      logger.debug({
         commandType: command.commandType,
         commandId: command.commandId,
         userId: command.metadata.userId,
         guildId: command.metadata.guildId
-      });
+      }, 'Executing command');
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await handler.handle(command as any);
 
       const executionTime = Date.now() - startTime;
-      logger.info('Command executed successfully', {
+      logger.info({
         commandType: command.commandType,
         commandId: command.commandId,
         executionTimeMs: executionTime,
         userId: command.metadata.userId,
         guildId: command.metadata.guildId
-      });
+      }, 'Command executed successfully');
 
       return {
         success: true,
@@ -139,14 +142,14 @@ export class CommandBus implements ICommandBus {
       const executionTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      logger.error('Command execution failed', {
+      logger.error({
         commandType: command.commandType,
         commandId: command.commandId,
-        error: errorMessage,
+        error: serializeError(error),
         executionTimeMs: executionTime,
         userId: command.metadata.userId,
         guildId: command.metadata.guildId
-      });
+      }, 'Command execution failed');
 
       return {
         success: false,
@@ -165,10 +168,10 @@ export class CommandBus implements ICommandBus {
       return [];
     }
 
-    logger.info('Executing command batch', {
+    logger.info({
       batchSize: commands.length,
       commandTypes: [...new Set(commands.map(c => c.commandType))]
-    });
+    }, 'Executing command batch');
 
     const results = await Promise.allSettled(
       commands.map(command => this.send(command))

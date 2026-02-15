@@ -88,6 +88,91 @@ model FeatureFlag {
 }
 
 // ============================================================================
+// RUNTIME CONFIGURATION & ADMIN RBAC
+// ============================================================================
+
+model AdminUser {
+  id            String    @id @default(cuid())
+  discordUserId String    @unique
+  role          AdminRole @default(READ_ONLY)
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([discordUserId, active])
+  @@index([role])
+}
+
+model RuntimeConfigDefinition {
+  id               String                   @id @default(cuid())
+  key              String                   @unique
+  scope            RuntimeConfigScope
+  valueType        RuntimeConfigValueType
+  sensitivity      RuntimeConfigSensitivity @default(PUBLIC)
+  planMinTier      RuntimePlanTier          @default(FREE)
+  mutable          Boolean                  @default(true)
+  hotReload        Boolean                  @default(false)
+  description      String?
+  validationSchema Json?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  values         RuntimeConfigValue[]
+  guildOverrides GuildRuntimeConfigOverride[]
+
+  @@index([scope])
+  @@index([mutable])
+  @@index([hotReload])
+}
+
+model RuntimeConfigValue {
+  id            String   @id @default(cuid())
+  definitionKey String
+  value         Json
+  version       Int      @default(1)
+  updatedBy     String?
+  updatedAt     DateTime @updatedAt
+
+  definition RuntimeConfigDefinition @relation(fields: [definitionKey], references: [key], onDelete: Cascade)
+
+  @@unique([definitionKey])
+  @@index([updatedAt])
+}
+
+model GuildRuntimeConfigOverride {
+  id            String   @id @default(cuid())
+  guildId       String
+  definitionKey String
+  value         Json
+  updatedBy     String?
+  updatedAt     DateTime @updatedAt
+
+  definition RuntimeConfigDefinition @relation(fields: [definitionKey], references: [key], onDelete: Cascade)
+
+  @@unique([guildId, definitionKey])
+  @@index([guildId])
+  @@index([definitionKey])
+  @@index([updatedAt])
+}
+
+model ConfigAuditLog {
+  id                 String             @id @default(cuid())
+  actorDiscordUserId String?
+  actorRole          ConfigActorRole
+  scope              RuntimeConfigScope
+  guildId            String?
+  key                String
+  oldValueHash       String?
+  newValueHash       String?
+  reason             String?
+  createdAt          DateTime           @default(now())
+
+  @@index([key, createdAt])
+  @@index([guildId, createdAt])
+  @@index([actorDiscordUserId, createdAt])
+}
+
+// ============================================================================
 // SERVER CONFIGURATION & SETTINGS
 // ============================================================================
 
@@ -176,35 +261,7 @@ model ChannelConfiguration {
   @@index([channelId])
 }
 
-// NOTE: UserSubscription model is being phased out in favor of Customer + Subscription
-// Keep for backward compatibility during migration
-model UserSubscription {
-  id        String    @id @default(cuid())
-  userId    String    @unique
-  tier      String    @default("free") // free, basic, premium, enterprise
-  expiresAt DateTime?
-
-  // Payment information
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  paymentMethod        String? // stripe, paypal, crypto
-
-  // Usage tracking
-  monthlyPlayTime Int @default(0) // minutes
-  monthlyRequests Int @default(0)
-
-  // Premium features granted
-  premiumServers   Int     @default(0) // number of servers they can upgrade
-  customBotEnabled Boolean @default(false)
-  prioritySupport  Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([userId])
-  @@index([tier])
-  @@index([expiresAt])
-}
+// NOTE: UserSubscription model was removed in favor of the new implementation at the end of the file.
 
 // ============================================================================
 // MUSIC & PLAYBACK FEATURES
@@ -441,10 +498,8 @@ model SubscriptionEvent {
 // ENTERPRISE BILLING SYSTEM (NEW)
 // ============================================================================
 
-/**
- * Enterprise customer record with full billing details
- * Replaces UserSubscription for new billing implementation
- */
+/// Enterprise customer record with full billing details
+/// Replaces UserSubscription for new billing implementation
 model Customer {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -797,7 +852,8 @@ model Refund {
   payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   // Provider details
-  provider         String
+  provider String
+
   providerRefundId String @unique
 
   // Refund details
@@ -941,10 +997,8 @@ model CustomerLifetimeValue {
 // SAAS PLATFORM MODELS (Phase 1 - November 2025)
 // ============================================================================
 
-/**
- * Guild (Discord Server) record for platform management
- * Separates guild/server from user/customer for proper multi-tenancy
- */
+/// Guild (Discord Server) record for platform management
+/// Separates guild/server from user/customer for proper multi-tenancy
 model Guild {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -967,10 +1021,8 @@ model Guild {
   @@map("guilds")
 }
 
-/**
- * Guild-specific subscription (separates from user billing)
- * Each guild has its own subscription tier and limits
- */
+/// Guild-specific subscription (separates from user billing)
+/// Each guild has its own subscription tier and limits
 model GuildSubscription {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -1184,4 +1236,124 @@ enum BillingEventType {
   CREDIT_APPLIED
   DISPUTE_CREATED
   DISPUTE_RESOLVED
+}
+
+enum AdminRole {
+  SUPERADMIN
+  READ_ONLY
+}
+
+enum RuntimeConfigScope {
+  GLOBAL
+  GUILD
+  MIXED
+}
+
+enum RuntimeConfigValueType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+enum RuntimeConfigSensitivity {
+  PUBLIC
+  RESTRICTED
+  SECRET_REF
+}
+
+enum RuntimePlanTier {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum ConfigActorRole {
+  SUPERADMIN
+  GUILD_ADMIN
+  READ_ONLY
+  SYSTEM
+}
+
+// ============================================================================
+// COLLABORATIVE PLAYLISTS
+// ============================================================================
+
+model Playlist {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String // Discord User ID
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items         PlaylistItem[]
+  collaborators PlaylistCollaborator[]
+
+  @@index([ownerId])
+}
+
+model PlaylistItem {
+  id         String   @id @default(cuid())
+  playlistId String
+  title      String
+  uri        String
+  position   Int
+  addedBy    String // Discord User ID
+  createdAt  DateTime @default(now())
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@index([playlistId])
+}
+
+model PlaylistCollaborator {
+  id         String   @id @default(cuid())
+  playlistId String
+  userId     String // Discord User ID
+  permission String   @default("view") // view, edit
+  createdAt  DateTime @default(now())
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// USER SUBSCRIPTIONS & REFERRALS
+// ============================================================================
+
+model UserSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @unique // Discord User ID
+  tier      String // 'GOLD', 'DIAMOND'
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Referral {
+  id         String   @id @default(cuid())
+  referrerId String // User ID of the person who invited
+  referredId String   @unique // User ID of the person invited
+  status     String   @default("PENDING") // 'PENDING', 'COMPLETED'
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([referrerId])
+}
+
+model PromoCode {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  tier         String // 'GOLD', 'DIAMOND'
+  durationDays Int
+  maxUses      Int
+  usedCount    Int       @default(0)
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
 }

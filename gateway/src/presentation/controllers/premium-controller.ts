@@ -15,13 +15,20 @@ import {
   PermissionsBitField,
   GuildMember,
 } from 'discord.js';
-import { SubscriptionService,
+import {
+  SubscriptionService,
   getPlanByTier,
   formatPrice,
   getAllPlans,
-  needsUpgrade } from '@discord-bot/subscription';
-import { prisma, SubscriptionTier, BillingInterval } from '@discord-bot/database';
+  needsUpgrade,
+  SubscriptionTier,
+  BillingInterval,
+} from '@discord-bot/subscription';
+import { prisma } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
+
+const serializeError = (error: unknown) =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : error;
 
 type PremiumControllerOptions = {
   testGuildIds?: string[];
@@ -37,14 +44,18 @@ const PLAN_ORDER: SubscriptionTier[] = [
   SubscriptionTier.FREE,
   SubscriptionTier.BASIC,
   SubscriptionTier.PREMIUM,
-  SubscriptionTier.ENTERPRISE,
 ];
 
-const TIER_EMOJIS: Record<SubscriptionTier, string> = {
+const TIER_EMOJIS = {
   [SubscriptionTier.FREE]: '🪙',
   [SubscriptionTier.BASIC]: '💠',
   [SubscriptionTier.PREMIUM]: '💎',
-  [SubscriptionTier.ENTERPRISE]: '🏢',
+  [SubscriptionTier.ENTERPRISE]: '🏢', // internal / legacy only
+} as const;
+
+const getTierEmoji = (tier: SubscriptionTier) => {
+  const tierKey = tier as unknown as keyof typeof TIER_EMOJIS;
+  return TIER_EMOJIS[tierKey] ?? '💎';
 };
 
 export class PremiumController {
@@ -80,9 +91,8 @@ export class PremiumController {
               .setDescription('Subscription tier to upgrade to')
               .setRequired(true)
               .addChoices(
-                { name: 'Basic - $4.99/month', value: 'BASIC' },
-                { name: 'Premium - $9.99/month', value: 'PREMIUM' },
-                { name: 'Enterprise - Contact Sales', value: 'ENTERPRISE' },
+                { name: 'Plus - $4.99/month', value: 'BASIC' },
+                { name: 'Pro - $10.00/month', value: 'PREMIUM' },
               ),
           ),
       )
@@ -156,14 +166,14 @@ export class PremiumController {
   }
 
   /**
-   * Initializes demo guilds with ENTERPRISE tier on startup.
+   * Initializes demo guilds with PREMIUM tier on startup.
    */
   public async initializeTestGuilds(): Promise<void> {
     if (this.testGuildIds.size === 0) return;
 
     for (const guildId of this.testGuildIds) {
       try {
-        await this.ensureGuildTier(guildId, SubscriptionTier.ENTERPRISE);
+        await this.ensureGuildTier(guildId, SubscriptionTier.PREMIUM);
       } catch (error) {
         logger.warn({ error, guildId }, 'Failed to bootstrap premium test guild');
       }
@@ -259,7 +269,10 @@ export class PremiumController {
           components: [],
         });
       } catch (error) {
-        logger.error('Failed to cancel subscription', { error, guildId });
+        logger.error({
+          error: serializeError(error),
+          guildId
+        }, 'Failed to cancel subscription');
         await interaction.update({
           content: '❌ Failed to cancel subscription. Please try again later or contact support.',
           embeds: [],
@@ -436,7 +449,7 @@ export class PremiumController {
 
     if (targetTier === SubscriptionTier.ENTERPRISE) {
       embed.setDescription(
-        'Enterprise plan requires custom pricing. Please contact our sales team.',
+        'Los despliegues de nivel enterprise se cotizan como proyecto custom. Contactá a nuestro equipo comercial para una propuesta a medida.',
       );
       const button = new ButtonBuilder()
         .setLabel('Contact Sales')
@@ -673,7 +686,7 @@ export class PremiumController {
       ];
 
       embed.addFields({
-        name: `${isCurrent ? '⭐ ' : ''}${TIER_EMOJIS[plan.tier]} ${plan.displayName} — ${price}`,
+        name: `${isCurrent ? '⭐ ' : ''}${getTierEmoji(plan.tier)} ${plan.displayName} — ${price}`,
         value: bulletPoints.join('\n'),
         inline: false,
       });
@@ -709,7 +722,7 @@ export class PremiumController {
         .setCustomId(`premium_plan:${tier}`)
         .setLabel(`${plan.displayName}`)
         .setStyle(isCurrent ? ButtonStyle.Success : ButtonStyle.Secondary)
-        .setEmoji(TIER_EMOJIS[tier])
+        .setEmoji(getTierEmoji(tier))
         .setDisabled(isCurrent);
     });
 

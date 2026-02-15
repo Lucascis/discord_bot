@@ -175,23 +175,29 @@ function handleUnhandledRejection(reason: unknown, _promise: Promise<unknown>): 
   process.exit(1);
 }
 
-type ProcessEvent = NodeJS.Signals | 'uncaughtException' | 'unhandledRejection' | 'exit';
-type ProcessListener = (...args: unknown[]) => void;
+type ProcessSignalEvent = NodeJS.Signals;
+type ProcessGenericEvent = 'uncaughtException' | 'unhandledRejection' | 'exit';
+type ProcessEvent = ProcessSignalEvent | ProcessGenericEvent;
+type SignalHandler = () => void;
+type ExitHandler = (code: number) => void;
+type UncaughtHandler = (error: Error) => void;
+type UnhandledHandler = (reason: unknown, promise: Promise<unknown>) => void;
+type ProcessListener = SignalHandler | ExitHandler | UncaughtHandler | UnhandledHandler;
 type HandlerRegistration = { event: ProcessEvent; handler: ProcessListener };
 
 const registeredHandlers: HandlerRegistration[] = [];
 let handlersInstalled = false;
 
 function attachProcessHandler(event: ProcessEvent, handler: HandlerRegistration['handler']): void {
-  process.addListener(event, handler as ProcessListener);
+  process.on(event as ProcessGenericEvent, handler as ProcessListener);
   registeredHandlers.push({ event, handler });
 }
 
 function detachProcessHandler(event: ProcessEvent, handler: HandlerRegistration['handler']): void {
   if (typeof process.off === 'function') {
-    process.off(event, handler as ProcessListener);
+    process.off(event as ProcessGenericEvent, handler as ProcessListener);
   } else {
-    process.removeListener(event, handler as ProcessListener);
+    process.removeListener(event as ProcessGenericEvent, handler as ProcessListener);
   }
 }
 

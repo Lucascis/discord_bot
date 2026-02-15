@@ -18,6 +18,7 @@ export class AudioEffectsEngine extends EventEmitter {
   private guildStates = new Map<string, AudioEffectsState>();
   private crossfadeTimers = new Map<string, NodeJS.Timeout>();
   private processingQueue = new Map<string, Promise<void>>();
+  private readonly queueTimeoutMs = 10000;
 
   constructor() {
     super();
@@ -174,24 +175,25 @@ export class AudioEffectsEngine extends EventEmitter {
       return;
     }
 
-    try {
-      // Convert equalizer bands to Lavalink filter format
-      const filters = settings.bands.map((band, index) => ({
-        band: index,
-        gain: Math.max(-0.25, Math.min(1.0, band.gain / 12)) // Convert dB to Lavalink range
-      }));
+    await this.enqueueProcessing(guildId, 'equalizer', async () => {
+      try {
+        const filters = settings.bands.map((band, index) => ({
+          band: index,
+          gain: Math.max(-0.25, Math.min(1.0, band.gain / 12))
+        }));
 
-      this.emit('equalizerUpdate', {
-        guildId,
-        filters,
-        timestamp: Date.now()
-      });
+        this.emit('equalizerUpdate', {
+          guildId,
+          filters,
+          timestamp: Date.now()
+        });
 
-      logger.info({ guildId, bandsCount: filters.length }, 'Equalizer applied');
-
-    } catch (error) {
-      logger.error({ error, guildId }, 'Failed to apply equalizer');
-    }
+        logger.info({ guildId, bandsCount: filters.length }, 'Equalizer applied');
+      } catch (error) {
+        logger.error({ error, guildId }, 'Failed to apply equalizer');
+        throw error;
+      }
+    });
   }
 
   /**
@@ -201,41 +203,40 @@ export class AudioEffectsEngine extends EventEmitter {
     const state = this.guildStates.get(guildId);
     if (!state) return;
 
-    const { nightcore, daycore, eightD } = state.effects;
-    const filters: Record<string, unknown> = {};
+    await this.enqueueProcessing(guildId, 'creativeEffects', async () => {
+      const { nightcore, daycore, eightD } = state.effects;
+      const filters: Record<string, unknown> = {};
 
-    // Nightcore effect
-    if (nightcore.enabled) {
-      filters.timescale = {
-        speed: nightcore.speed,
-        pitch: Math.pow(2, nightcore.pitch / 12),
-        rate: 1.0
-      };
-    }
+      if (nightcore.enabled) {
+        filters.timescale = {
+          speed: nightcore.speed,
+          pitch: Math.pow(2, nightcore.pitch / 12),
+          rate: 1.0
+        };
+      }
 
-    // Daycore effect
-    if (daycore.enabled) {
-      filters.timescale = {
-        speed: daycore.speed,
-        pitch: Math.pow(2, daycore.pitch / 12),
-        rate: 1.0
-      };
-    }
+      if (daycore.enabled) {
+        filters.timescale = {
+          speed: daycore.speed,
+          pitch: Math.pow(2, daycore.pitch / 12),
+          rate: 1.0
+        };
+      }
 
-    // 8D Audio effect
-    if (eightD.enabled) {
-      filters.rotation = {
-        rotationHz: eightD.speed * eightD.intensity
-      };
-    }
+      if (eightD.enabled) {
+        filters.rotation = {
+          rotationHz: eightD.speed * eightD.intensity
+        };
+      }
 
-    if (Object.keys(filters).length > 0) {
-      this.emit('creativeEffectsUpdate', {
-        guildId,
-        filters,
-        timestamp: Date.now()
-      });
-    }
+      if (Object.keys(filters).length > 0) {
+        this.emit('creativeEffectsUpdate', {
+          guildId,
+          filters,
+          timestamp: Date.now()
+        });
+      }
+    });
   }
 
   /**
@@ -245,34 +246,31 @@ export class AudioEffectsEngine extends EventEmitter {
     const state = this.guildStates.get(guildId);
     if (!state) return;
 
-    const filters: Record<string, unknown> = {};
+    await this.enqueueProcessing(guildId, 'dynamics', async () => {
+      const filters: Record<string, unknown> = {};
 
-    // Volume control
-    if (state.effects.volume !== 1.0) {
-      filters.volume = Math.max(0.0, Math.min(5.0, state.effects.volume));
-    }
+      if (state.effects.volume !== 1.0) {
+        filters.volume = Math.max(0.0, Math.min(5.0, state.effects.volume));
+      }
 
-    // Bass boost
-    if (state.effects.bassBoost > 0) {
-      filters.lowPass = {
-        smoothing: 20.0
-      };
-    }
+      if (state.effects.bassBoost > 0) {
+        filters.lowPass = {
+          smoothing: 20.0
+        };
+      }
 
-    // Compressor
-    if (state.effects.compressor.enabled) {
-      // Note: Lavalink doesn't have built-in compressor,
-      // this would require custom plugin
-      filters.compressor = state.effects.compressor;
-    }
+      if (state.effects.compressor.enabled) {
+        filters.compressor = state.effects.compressor;
+      }
 
-    if (Object.keys(filters).length > 0) {
-      this.emit('dynamicsUpdate', {
-        guildId,
-        filters,
-        timestamp: Date.now()
-      });
-    }
+      if (Object.keys(filters).length > 0) {
+        this.emit('dynamicsUpdate', {
+          guildId,
+          filters,
+          timestamp: Date.now()
+        });
+      }
+    });
   }
 
   /**
@@ -300,6 +298,47 @@ export class AudioEffectsEngine extends EventEmitter {
 
     this.emit('effectsUpdated', guildId, state.effects);
     logger.info({ guildId }, 'Audio effects updated');
+  }
+
+  private enqueueProcessing(
+    guildId: string,
+    operation: string,
+    task: () => Promise<void>
+  ): Promise<void> {
+    const previous = this.processingQueue.get(guildId) ?? Promise.resolve();
+    let timeout: NodeJS.Timeout | undefined;
+
+    const pending = previous
+      .catch((error) => {
+        logger.warn({ error, guildId }, 'Previous processing task failed');
+      })
+      .then(async () => {
+        timeout = setTimeout(() => {
+          logger.warn({ guildId, operation }, 'Processing task is taking longer than expected');
+        }, this.queueTimeoutMs);
+
+        try {
+          await task();
+        } finally {
+          if (timeout) {
+            clearTimeout(timeout);
+          }
+        }
+      });
+
+    const finalize = pending
+      .catch((error) => {
+        logger.error({ guildId, operation, error }, 'Audio processing operation failed');
+        throw error;
+      })
+      .finally(() => {
+        if (this.processingQueue.get(guildId) === finalize) {
+          this.processingQueue.delete(guildId);
+        }
+      }) as Promise<void>;
+
+    this.processingQueue.set(guildId, finalize);
+    return finalize;
   }
 
   /**

@@ -1,10 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockedFunction } from 'vitest';
 import {
   MemoryManager,
   PerformanceTracker,
   SearchThrottler,
   batchQueueSaver
 } from '../src/performance.js';
+
+type QueueRecord = {
+  id: string;
+  guildId: string;
+  createdAt: Date;
+  voiceChannelId: string | null;
+  textChannelId: string | null;
+};
+
+const createQueueRecord = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
+  id: 'queue-id',
+  guildId: 'guild-id',
+  createdAt: new Date(),
+  voiceChannelId: null,
+  textChannelId: null,
+  ...overrides
+});
 
 // Mock dependencies
 vi.mock('@discord-bot/logger', () => ({
@@ -76,14 +94,13 @@ describe('Performance Module', () => {
 
     it('should detect high memory usage', () => {
       const manager = MemoryManager.getInstance();
-      
-      // Mock high memory usage
-      const originalMemoryUsage = process.memoryUsage;
-      process.memoryUsage = vi.fn().mockReturnValue({
+
+      const memorySpy = vi.spyOn(process, 'memoryUsage').mockReturnValue({
         heapUsed: 2 * 1024 * 1024 * 1024, // 2GB
         heapTotal: 2.5 * 1024 * 1024 * 1024,
         external: 100 * 1024 * 1024,
-        rss: 3 * 1024 * 1024 * 1024
+        rss: 3 * 1024 * 1024 * 1024,
+        arrayBuffers: 0
       });
       
       manager.startMonitoring(100);
@@ -92,9 +109,8 @@ describe('Performance Module', () => {
       vi.advanceTimersByTime(150);
       
       manager.stopMonitoring();
-      
-      // Restore original function
-      process.memoryUsage = originalMemoryUsage;
+
+      memorySpy.mockRestore();
     });
   });
 
@@ -250,10 +266,14 @@ describe('Performance Module', () => {
       const { prisma } = await import('@discord-bot/database');
 
       // Mock database responses
-      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue({ id: 'queue-123' });
-      (prisma.queue.update as vi.MockedFunction<typeof prisma.queue.update>).mockResolvedValue({ id: 'queue-123' });
-      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 0 });
-      (prisma.queueItem.createMany as vi.MockedFunction<typeof prisma.queueItem.createMany>).mockResolvedValue({ count: 2 });
+      (prisma.queue.findFirst as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord | null>>)
+        .mockResolvedValue(createQueueRecord({ id: 'queue-123', guildId: 'guild1' }));
+      (prisma.queue.update as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord>>)
+        .mockResolvedValue(createQueueRecord({ id: 'queue-123', guildId: 'guild1' }));
+      (prisma.queueItem.deleteMany as unknown as MockedFunction<(args: unknown) => Promise<{ count: number }>>)
+        .mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as unknown as MockedFunction<(args: unknown) => Promise<{ count: number }>>)
+        .mockResolvedValue({ count: 2 });
 
       // Use real timers for this test to avoid timeout issues
       vi.useRealTimers();
@@ -269,9 +289,9 @@ describe('Performance Module', () => {
       // Should have processed the batched updates
       // Verify that at least one of the database operations was called
       expect(
-        (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mock.calls.length +
-        (prisma.queue.update as vi.MockedFunction<typeof prisma.queue.update>).mock.calls.length +
-        (prisma.queueItem.createMany as vi.MockedFunction<typeof prisma.queueItem.createMany>).mock.calls.length
+        (prisma.queue.findFirst as unknown as MockedFunction<(args: unknown) => unknown>).mock.calls.length +
+        (prisma.queue.update as unknown as MockedFunction<(args: unknown) => unknown>).mock.calls.length +
+        (prisma.queueItem.createMany as unknown as MockedFunction<(args: unknown) => unknown>).mock.calls.length
       ).toBeGreaterThan(0);
 
       // Restore fake timers
@@ -284,7 +304,8 @@ describe('Performance Module', () => {
       const { prisma } = await import('@discord-bot/database');
 
       // Mock database error
-      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockRejectedValue(new Error('Database error'));
+      (prisma.queue.findFirst as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord | null>>)
+        .mockRejectedValue(new Error('Database error'));
 
       // Use real timers
       vi.useRealTimers();
@@ -306,10 +327,13 @@ describe('Performance Module', () => {
       // This test is flaky due to async timing with flush and real timers
       const { prisma } = await import('@discord-bot/database');
 
-      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue(null);
-      (prisma.queue.create as vi.MockedFunction<typeof prisma.queue.create>).mockResolvedValue({ id: 'new-queue-123' });
-      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 0 });
-      (prisma.queueItem.createMany as vi.MockedFunction<typeof prisma.queueItem.createMany>).mockResolvedValue({ count: 1 });
+      (prisma.queue.findFirst as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord | null>>).mockResolvedValue(null);
+      (prisma.queue.create as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord>>)
+        .mockResolvedValue(createQueueRecord({ id: 'new-queue-123', guildId: 'guild1' }));
+      (prisma.queueItem.deleteMany as unknown as MockedFunction<(args: unknown) => Promise<{ count: number }>>)
+        .mockResolvedValue({ count: 0 });
+      (prisma.queueItem.createMany as unknown as MockedFunction<(args: unknown) => Promise<{ count: number }>>)
+        .mockResolvedValue({ count: 1 });
 
       // Use real timers
       vi.useRealTimers();
@@ -344,9 +368,12 @@ describe('Performance Module', () => {
         queue: { current: null, tracks: [] }
       };
 
-      (prisma.queue.findFirst as vi.MockedFunction<typeof prisma.queue.findFirst>).mockResolvedValue({ id: 'queue-456' });
-      (prisma.queue.update as vi.MockedFunction<typeof prisma.queue.update>).mockResolvedValue({ id: 'queue-456' });
-      (prisma.queueItem.deleteMany as vi.MockedFunction<typeof prisma.queueItem.deleteMany>).mockResolvedValue({ count: 5 });
+      (prisma.queue.findFirst as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord | null>>)
+        .mockResolvedValue(createQueueRecord({ id: 'queue-456', guildId: 'empty-guild' }));
+      (prisma.queue.update as unknown as MockedFunction<(args: unknown) => Promise<QueueRecord>>)
+        .mockResolvedValue(createQueueRecord({ id: 'queue-456', guildId: 'empty-guild' }));
+      (prisma.queueItem.deleteMany as unknown as MockedFunction<(args: unknown) => Promise<{ count: number }>>)
+        .mockResolvedValue({ count: 5 });
 
       // Use real timers
       vi.useRealTimers();

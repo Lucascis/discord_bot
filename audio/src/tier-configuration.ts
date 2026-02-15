@@ -9,6 +9,7 @@ export interface TierAudioConfiguration {
   supportedSources: string[];
   audioEffectsEnabled: boolean;
   priorityProcessing: boolean;
+  maxListeners: number;
 }
 
 /**
@@ -25,6 +26,7 @@ export const TIER_AUDIO_CONFIG: Record<SubscriptionTier, TierAudioConfiguration>
     supportedSources: ['youtube'],
     audioEffectsEnabled: false,
     priorityProcessing: false,
+    maxListeners: 10,
   },
 
   basic: {
@@ -36,6 +38,7 @@ export const TIER_AUDIO_CONFIG: Record<SubscriptionTier, TierAudioConfiguration>
     supportedSources: ['youtube', 'spotify'],
     audioEffectsEnabled: false,
     priorityProcessing: false,
+    maxListeners: 50,
   },
 
   premium: {
@@ -47,6 +50,7 @@ export const TIER_AUDIO_CONFIG: Record<SubscriptionTier, TierAudioConfiguration>
     supportedSources: ['youtube', 'spotify', 'soundcloud', 'applemusic', 'deezer'],
     audioEffectsEnabled: true,
     priorityProcessing: true,
+    maxListeners: 1000, // Effectively unlimited
   },
 
   enterprise: {
@@ -58,6 +62,7 @@ export const TIER_AUDIO_CONFIG: Record<SubscriptionTier, TierAudioConfiguration>
     supportedSources: ['youtube', 'spotify', 'soundcloud', 'applemusic', 'deezer'],
     audioEffectsEnabled: true,
     priorityProcessing: true,
+    maxListeners: 10000,
   },
 };
 
@@ -106,4 +111,12 @@ export function getQueueLimitForTier(tier: SubscriptionTier): number {
 export function isPriorityProcessingEnabledForTier(tier: SubscriptionTier): boolean {
   const config = getAudioConfigForTier(tier);
   return config.priorityProcessing;
+}
+
+/**
+ * Get max listeners for a tier
+ */
+export function getMaxListenersForTier(tier: SubscriptionTier): number {
+  const config = getAudioConfigForTier(tier);
+  return config.maxListeners;
 }

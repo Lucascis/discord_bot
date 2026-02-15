@@ -1,4 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+export * from './client.js';
+import { PrismaClient } from './client.js';
+import type { Prisma, PrismaClient as PrismaClientType } from '@prisma/client';
+
 import { getLogger } from './logger-interface.js';
 
 // Enhanced Prisma Client with optimized connection pooling
@@ -31,7 +34,10 @@ const datasourceUrl = process.env.DATABASE_URL
   ? buildOptimizedDatabaseUrl(process.env.DATABASE_URL)
   : process.env.DATABASE_URL;
 
-export const prisma = new PrismaClient({
+export const prisma: PrismaClientType<
+  Prisma.PrismaClientOptions,
+  'query' | 'info' | 'warn' | 'error'
+> = new PrismaClient({
   datasources: {
     db: {
       url: datasourceUrl
@@ -52,7 +58,7 @@ let totalQueryTime = 0;
 
 // Only set up event listeners if $on method exists (not in testing mocks)
 if (typeof prisma.$on === 'function') {
-  prisma.$on('query', (e) => {
+  prisma.$on('query', (e: Prisma.QueryEvent) => {
     queryCount++;
     totalQueryTime += e.duration;
 
@@ -79,15 +85,15 @@ if (typeof prisma.$on === 'function') {
     }
   });
 
-  prisma.$on('info', (e) => {
+  prisma.$on('info', (e: Prisma.LogEvent) => {
     getLogger().info({ message: e.message, target: e.target }, 'Database info');
   });
 
-  prisma.$on('warn', (e) => {
+  prisma.$on('warn', (e: Prisma.LogEvent) => {
     getLogger().warn({ message: e.message, target: e.target }, 'Database warning');
   });
 
-  prisma.$on('error', (e) => {
+  prisma.$on('error', (e: Prisma.LogEvent) => {
     getLogger().error({ message: e.message, target: e.target }, 'Database error');
   });
 }
@@ -168,9 +174,6 @@ export function resetDatabaseMetrics(): void {
   totalQueryTime = 0;
 }
 
-export { PrismaClient, SubscriptionTier, BillingInterval } from '@prisma/client';
-export type { Prisma } from '@prisma/client';
-
 // Logger dependency injection
 export { injectLogger, type DatabaseLogger } from './logger-interface.js';
 
@@ -183,4 +186,18 @@ export {
   type TransactionMetrics
 } from './transaction-manager.js';
 
-// Metrics exports disabled (module not available)
+import { SubscriptionService } from './subscription-service.js';
+import { PlaylistService } from './playlist-service.js';
+import { PaymentService } from './payment-service.js';
+import { ReferralService } from './referral-service.js';
+
+
+export const playlistService = new PlaylistService(prisma);
+export const subscriptionService = new SubscriptionService(prisma);
+export const paymentService = new PaymentService(prisma, subscriptionService);
+export const referralService = new ReferralService(prisma, subscriptionService);
+
+export * from './playlist-service.js';
+export * from './subscription-service.js';
+export * from './payment-service.js';
+export * from './referral-service.js';

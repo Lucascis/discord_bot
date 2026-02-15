@@ -54,29 +54,26 @@ export class PerformanceMonitor extends EventEmitter {
 
       // Log warnings for high resource usage
       if (metrics.memory.heapUtilization > 0.9) {
-        logger.warn('High memory usage detected', {
+        logger.warn({
           heapUtilization: metrics.memory.heapUtilization,
           heapUsed: Math.round(metrics.memory.heapUsed / 1024 / 1024) + 'MB'
-        });
+        }, 'High memory usage detected');
       }
 
       if (metrics.eventLoop.lag > 100) {
-        logger.warn('High event loop lag detected', {
+        logger.warn({
           lag: metrics.eventLoop.lag + 'ms'
-        });
+        }, 'High event loop lag detected');
       }
 
-      // Force GC if memory usage is critically high
-      if (metrics.memory.heapUtilization > 0.95 && global.gc) {
-        logger.warn('Forcing garbage collection due to high memory usage');
-        global.gc();
-      }
+      // Do not force GC from this generic monitor.
+      // Manual GC in hot paths can introduce long pauses and audible glitches.
 
     }, this.monitoringInterval);
 
-    logger.info('Performance monitoring started', {
+    logger.info({
       interval: this.monitoringInterval + 'ms'
-    });
+    }, 'Performance monitoring started');
   }
 
   stop(): void {
@@ -124,7 +121,7 @@ export class PerformanceMonitor extends EventEmitter {
 
   private setupGCMonitoring(): void {
     if (!global.gc) {
-      logger.warn('GC monitoring unavailable - run with --expose-gc flag');
+      logger.debug('GC monitoring unavailable - run with --expose-gc flag');
       return;
     }
 
@@ -139,17 +136,17 @@ export class PerformanceMonitor extends EventEmitter {
             this.gcStats.totalDuration += entry.duration;
 
             if (entry.duration > 100) {
-              logger.warn('Long GC pause detected', {
-                duration: Math.round(entry.duration) + 'ms',
-                kind: entry.detail?.kind || 'unknown'
-              });
+            logger.warn({
+              duration: Math.round(entry.duration) + 'ms',
+              kind: entry.detail?.kind || 'unknown'
+            }, 'Long GC pause detected');
             }
           }
         }
       });
       obs.observe({ entryTypes: ['gc'] });
     } catch (error) {
-      logger.warn('Could not setup GC performance observer', { error });
+      logger.debug({ error }, 'Could not setup GC performance observer');
     }
   }
 
@@ -170,11 +167,11 @@ export class PerformanceMonitor extends EventEmitter {
         const currentUsage = samples[samples.length - 1];
 
         if (trend > 5 && currentUsage > thresholdMB) {
-          logger.error('Potential memory leak detected', {
+          logger.error({
             currentUsage: Math.round(currentUsage) + 'MB',
             trend: `+${Math.round(trend)}MB over ${samplesCount} samples`,
             threshold: thresholdMB + 'MB'
-          });
+          }, 'Potential memory leak detected');
 
           this.emit('memoryLeak', {
             currentUsage,
@@ -204,12 +201,12 @@ export class PerformanceMonitor extends EventEmitter {
       const stats = getPoolStats();
 
       if (stats.waitingClients > 5) {
-        logger.warn(`Connection pool bottleneck detected: ${poolName}`, {
+        logger.warn({
           pool: poolName,
           waiting: stats.waitingClients,
           active: stats.activeClients,
           idle: stats.idleClients
-        });
+        }, `Connection pool bottleneck detected: ${poolName}`);
       }
     }, 30000);
   }

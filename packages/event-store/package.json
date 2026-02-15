@@ -5,19 +5,18 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.json --force",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
   "dependencies": {
     "@discord-bot/database": "workspace:*",
     "@discord-bot/logger": "workspace:*",
-    "@prisma/client": "^6.16.2",
-    "uuid": "^9.0.1"
+    "@prisma/client": "5.22.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/uuid": "^9.0.7",
-    "typescript": "^5.8.4",
-    "vitest": "^3.2.4"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.13"
   }
 }

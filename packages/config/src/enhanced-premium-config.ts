@@ -92,7 +92,8 @@ export const ENHANCED_PREMIUM_FEATURES = {
       concurrentSessions: 1,
       apiCallsPerDay: 100,
       searchesPerDay: 50,
-      playlistsMax: 5
+      playlistsMax: 5,
+      maxListeners: 10
     },
     restrictions: {
       volumeLimit: 100,
@@ -114,17 +115,18 @@ export const ENHANCED_PREMIUM_FEATURES = {
     ] as FeatureName[],
     maxAudioQuality: 'high' as AudioQualityLevel,
     quotas: {
-      queueSize: 100,
-      trackDuration: 3600, // 1 hour
+      queueSize: 1000,
+      trackDuration: 7200, // 2 hours
       monthlyPlaytime: 108000, // 30 hours
-      concurrentSessions: 2,
+      concurrentSessions: 1,
       apiCallsPerDay: 500,
       searchesPerDay: 200,
-      playlistsMax: 20
+      playlistsMax: 20,
+      maxListeners: 50
     },
     restrictions: {
       volumeLimit: 150,
-      premiumServers: 3,
+      premiumServers: 1,
       skipLimit: 20,
       canSkipSponsorBlocks: true,
       canUseNightcore: false,
@@ -153,17 +155,18 @@ export const ENHANCED_PREMIUM_FEATURES = {
     ] as FeatureName[],
     maxAudioQuality: 'lossless' as AudioQualityLevel,
     quotas: {
-      queueSize: 500,
-      trackDuration: 7200, // 2 hours
+      queueSize: 5000,
+      trackDuration: 14400, // 4 hours
       monthlyPlaytime: 432000, // 120 hours
-      concurrentSessions: 5,
+      concurrentSessions: 3,
       apiCallsPerDay: 2000,
       searchesPerDay: 1000,
-      playlistsMax: 100
+      playlistsMax: 100,
+      maxListeners: 1000 // Effectively unlimited
     },
     restrictions: {
       volumeLimit: 200,
-      premiumServers: 10,
+      premiumServers: 3,
       skipLimit: 100,
       canSkipSponsorBlocks: true,
       canUseNightcore: true,
@@ -205,14 +208,16 @@ export const ENHANCED_PREMIUM_FEATURES = {
     ] as FeatureName[],
     maxAudioQuality: 'spatial' as AudioQualityLevel,
     quotas: {
-      queueSize: 1000,
-      trackDuration: 14400, // 4 hours
+      queueSize: -1, // unlimited
+      trackDuration: -1, // unlimited
       monthlyPlaytime: -1, // unlimited
       concurrentSessions: -1, // unlimited
       apiCallsPerDay: -1, // unlimited
       searchesPerDay: -1, // unlimited
-      playlistsMax: -1 // unlimited
+      playlistsMax: -1, // unlimited
+      maxListeners: -1 // unlimited
     },
+
     restrictions: {
       volumeLimit: 200,
       premiumServers: -1, // unlimited

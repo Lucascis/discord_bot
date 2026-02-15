@@ -1,4 +1,4 @@
-import { Redis } from 'ioredis';
+import type Redis from 'ioredis';
 import { MusicSession } from '../../domain/entities/music-session.js';
 import { MusicSessionRepository } from '../../domain/repositories/music-session-repository.js';
 import { GuildId } from '../../domain/value-objects/guild-id.js';
@@ -11,7 +11,7 @@ export class RedisMusicSessionRepository implements MusicSessionRepository {
   private readonly keyPrefix = 'music_session:';
   private readonly sessionTTL = 3600; // 1 hour TTL
 
-  constructor(private readonly redis: Redis) {}
+  constructor(private readonly redis: Redis) { }
 
   async findByGuildId(guildId: GuildId): Promise<MusicSession | null> {
     try {
@@ -41,7 +41,7 @@ export class RedisMusicSessionRepository implements MusicSessionRepository {
       const key = this.getKey(session.guildId.value);
       const data = JSON.stringify(session.toData());
 
-      await this.redis.setex(key, this.sessionTTL, data);
+      await this.redis.set(key, data, 'EX', this.sessionTTL);
 
     } catch (error) {
       throw new Error(`Failed to save music session: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -67,17 +67,21 @@ export class RedisMusicSessionRepository implements MusicSessionRepository {
         return [];
       }
 
-      const pipeline = this.redis.pipeline();
-      keys.forEach(key => pipeline.get(key));
-      const results = await pipeline.exec();
+      const multi = this.redis.multi();
+      keys.forEach(key => multi.get(key));
+      const results = await multi.exec();
 
       const sessions: MusicSession[] = [];
 
       if (results) {
         for (const result of results) {
-          if (result && result[1]) {
+          const [error, value] = result;
+          if (error) {
+            continue;
+          }
+          if (value) {
             try {
-              const sessionData = JSON.parse(result[1] as string);
+              const sessionData = JSON.parse(value as string);
 
               // Convert ISO strings back to Dates
               if (sessionData.lastUpdated) {

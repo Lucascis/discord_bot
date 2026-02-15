@@ -1,0 +1,37 @@
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pkg = require('@prisma/client');
+
+export const PrismaClient = pkg.PrismaClient;
+export const SubscriptionTier = pkg.SubscriptionTier;
+export const BillingInterval = pkg.BillingInterval;
+export const SubscriptionStatus = pkg.SubscriptionStatus;
+export const InvoiceStatus = pkg.InvoiceStatus;
+export const FeatureCategory = pkg.FeatureCategory;
+export const ResetPeriod = pkg.ResetPeriod;
+export const SubscriptionEventType = pkg.SubscriptionEventType;
+export const FeatureType = pkg.FeatureType;
+export const AdminRole = pkg.AdminRole;
+export const RuntimeConfigScope = pkg.RuntimeConfigScope;
+export const RuntimeConfigValueType = pkg.RuntimeConfigValueType;
+export const RuntimeConfigSensitivity = pkg.RuntimeConfigSensitivity;
+export const RuntimePlanTier = pkg.RuntimePlanTier;
+export const ConfigActorRole = pkg.ConfigActorRole;
+
+export type PrismaClient = import('@prisma/client').PrismaClient;
+export type SubscriptionTier = import('@prisma/client').SubscriptionTier;
+export type BillingInterval = import('@prisma/client').BillingInterval;
+export type SubscriptionStatus = import('@prisma/client').SubscriptionStatus;
+export type InvoiceStatus = import('@prisma/client').InvoiceStatus;
+export type FeatureCategory = import('@prisma/client').FeatureCategory;
+export type ResetPeriod = import('@prisma/client').ResetPeriod;
+export type SubscriptionEventType = import('@prisma/client').SubscriptionEventType;
+export type FeatureType = import('@prisma/client').FeatureType;
+export type AdminRole = import('@prisma/client').AdminRole;
+export type RuntimeConfigScope = import('@prisma/client').RuntimeConfigScope;
+export type RuntimeConfigValueType = import('@prisma/client').RuntimeConfigValueType;
+export type RuntimeConfigSensitivity = import('@prisma/client').RuntimeConfigSensitivity;
+export type RuntimePlanTier = import('@prisma/client').RuntimePlanTier;
+export type ConfigActorRole = import('@prisma/client').ConfigActorRole;
+export type ServerConfiguration = import('@prisma/client').ServerConfiguration;
+export type { Prisma } from '@prisma/client';

@@ -502,9 +502,9 @@ export class SearchCache extends MultiLayerCache<unknown> {
   constructor(redisCache: RedisCircuitBreaker) {
     super('search', redisCache, {
       memory: {
-        maxSize: 1000, // Doubled from 500 for much better hit rates
-        defaultTTL: 600000, // 10 minutes - increased from 3 minutes
-        cleanupInterval: 90000 // Less aggressive cleanup
+        maxSize: 250, // keep bounded to avoid heap spikes under heavy search traffic
+        defaultTTL: 300000, // 5 minutes balances hit rate with memory pressure
+        cleanupInterval: 60000
       },
       redis: {
         defaultTTL: 3600, // 1 hour - doubled from 30 minutes

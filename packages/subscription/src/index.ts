@@ -104,4 +104,4 @@ export {
   FeatureType,
   ResetPeriod,
   SubscriptionEventType,
-} from '@prisma/client';
+} from '@discord-bot/database';

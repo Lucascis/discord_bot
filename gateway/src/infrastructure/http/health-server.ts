@@ -155,7 +155,7 @@ export class HealthServer {
     return metrics.join('\n') + '\n';
   }
 
-  async shutdown(): Promise<void> {
+  async stop(): Promise<void> {
     return new Promise((resolve) => {
       if (this.server) {
         this.server.close(() => {

@@ -4,7 +4,7 @@
  */
 
 import Stripe from 'stripe';
-import { PrismaClient, SubscriptionTier, SubscriptionStatus, BillingInterval, InvoiceStatus } from '@prisma/client';
+import { PrismaClient, SubscriptionTier, SubscriptionStatus, BillingInterval, InvoiceStatus } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { SubscriptionService } from './subscription-service.js';
 import type { StripeWebhookEvent } from './types.js';
@@ -18,9 +18,18 @@ export class StripeIntegration {
     apiKey: string
   ) {
     this.stripe = new Stripe(apiKey, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-11-17.clover',
     });
     this.subscriptionService = new SubscriptionService(prisma);
+  }
+
+  private getCurrentPeriodBounds(subscription: Stripe.Subscription): { start: number; end: number } {
+    const item = subscription.items?.data?.[0];
+    const legacyStart = (subscription as unknown as { current_period_start?: number }).current_period_start;
+    const legacyEnd = (subscription as unknown as { current_period_end?: number }).current_period_end;
+    const start = item?.current_period_start ?? legacyStart ?? subscription.start_date ?? Math.floor(Date.now() / 1000);
+    const end = item?.current_period_end ?? legacyEnd ?? start;
+    return { start, end };
   }
 
   /**
@@ -226,14 +235,16 @@ export class StripeIntegration {
       where: { providerSubscriptionId: stripeSubscription.id },
     });
 
+    const period = this.getCurrentPeriodBounds(stripeSubscription);
+
     if (existingSubscription) {
       // Update existing subscription
       await this.prisma.subscription.update({
         where: { providerSubscriptionId: stripeSubscription.id },
         data: {
           status: this.mapStripeStatus(stripeSubscription.status),
-          currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
-          currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+          currentPeriodStart: new Date(period.start * 1000),
+          currentPeriodEnd: new Date(period.end * 1000),
           trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
           trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
         },
@@ -248,8 +259,8 @@ export class StripeIntegration {
           provider: 'stripe',
           providerSubscriptionId: stripeSubscription.id,
           status: this.mapStripeStatus(stripeSubscription.status),
-          currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
-          currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+          currentPeriodStart: new Date(period.start * 1000),
+          currentPeriodEnd: new Date(period.end * 1000),
           trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
           trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
         },
@@ -311,6 +322,8 @@ export class StripeIntegration {
       }
     }
 
+    const period = this.getCurrentPeriodBounds(stripeSubscription);
+
     // Update subscription
     await this.prisma.subscription.update({
       where: { providerSubscriptionId: stripeSubscription.id },
@@ -318,8 +331,8 @@ export class StripeIntegration {
         planId,
         priceId,
         status: this.mapStripeStatus(stripeSubscription.status),
-        currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
-        currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+        currentPeriodStart: new Date(period.start * 1000),
+        currentPeriodEnd: new Date(period.end * 1000),
         cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
         trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : null,
         trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
@@ -372,7 +385,11 @@ export class StripeIntegration {
 
   private async handleInvoicePaid(event: StripeWebhookEvent): Promise<void> {
     const invoice = event.data.object as Stripe.Invoice;
-    const stripeSubscriptionId = invoice.subscription as string | null;
+    const stripeSubscriptionId = (() => {
+      const sub = (invoice as unknown as { subscription?: string | Stripe.Subscription | null }).subscription;
+      if (!sub) return null;
+      return typeof sub === 'string' ? sub : sub.id;
+    })();
     const stripeCustomerId = invoice.customer as string;
 
     if (!stripeCustomerId) {
@@ -409,7 +426,12 @@ export class StripeIntegration {
         number: invoice.number || `INV-${invoice.id}`,
         status: InvoiceStatus.PAID,
         subtotal: invoice.subtotal || 0,
-        tax: invoice.tax || 0,
+        tax: (() => {
+          const legacyTax = (invoice as unknown as { tax?: number | null }).tax;
+          if (typeof legacyTax === 'number') return legacyTax;
+          const totalTaxAmounts = (invoice as unknown as { total_tax_amounts?: Array<{ amount?: number | null }> }).total_tax_amounts ?? [];
+          return totalTaxAmounts.reduce((sum: number, tax) => sum + (tax.amount ?? 0), 0);
+        })(),
         total: invoice.total || 0,
         amountPaid: invoice.amount_paid || 0,
         amountDue: invoice.amount_due || 0,
@@ -449,7 +471,11 @@ export class StripeIntegration {
 
   private async handleInvoicePaymentFailed(event: StripeWebhookEvent): Promise<void> {
     const invoice = event.data.object as Stripe.Invoice;
-    const stripeSubscriptionId = invoice.subscription as string | null;
+    const stripeSubscriptionId = (() => {
+      const sub = (invoice as unknown as { subscription?: string | Stripe.Subscription | null }).subscription;
+      if (!sub) return null;
+      return typeof sub === 'string' ? sub : sub.id;
+    })();
     const stripeCustomerId = invoice.customer as string;
 
     if (!stripeCustomerId) {

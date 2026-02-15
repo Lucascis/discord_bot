@@ -17,21 +17,22 @@ Production-ready Discord music bot with microservices architecture, enterprise-g
 ### Redis Pub/Sub Channels
 ```
 discord-bot:commands     → Gateway → Audio (command routing)
-discord-bot:to-audio     → Gateway → Audio (Discord events & raw voice events)
+discord-bot:to-audio     → Gateway → Audio (structured commands)
 discord-bot:to-discord   → Audio → Gateway (Lavalink events)
 discord-bot:ui:now       → Audio → Gateway (real-time UI updates)
+discord-bot:voice-events → Gateway → Audio (Raw voice events for Lavalink connection)
 ```
 
 ### Critical Raw Events Handler (Fixed September 24, 2025)
 ```typescript
 // Gateway Service: Forward raw Discord voice events to Audio service
 this.discordClient.on('raw', async (data: any) => {
-  await this.audioRedisClient.publish('discord-bot:to-audio', JSON.stringify(data));
+  await this.audioRedisClient.publish('discord-bot:voice-events', JSON.stringify(data));
 });
 
 // Audio Service: Process raw events for Lavalink voice connection
 audioRedisClient.on('message', (channel, message) => {
-  if (channel === 'discord-bot:to-audio') {
+  if (channel === 'discord-bot:voice-events') {
     const rawEvent = JSON.parse(message);
     // Forward to Lavalink for voice credential processing
     lavalinkManager.sendRawData(rawEvent);
@@ -138,7 +139,7 @@ Discord User → Gateway → Redis → Audio → Lavalink → Voice
 ```
 
 **Critical Voice Connection Fix:**
-- Gateway forwards raw Discord voice events via `discord-bot:to-audio` channel
+- Gateway forwards raw Discord voice events via `discord-bot:voice-events` channel
 - Audio service processes raw events and forwards to Lavalink
 - This enables `player.connected = true` and functional audio playback
 - Resolves race condition that prevented voice connection establishment

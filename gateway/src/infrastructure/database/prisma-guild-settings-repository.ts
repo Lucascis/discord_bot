@@ -75,7 +75,6 @@ export class PrismaGuildSettingsRepository implements GuildSettingsRepository {
           }
         });
 
-        // TODO: Add other settings fields when schema is extended
       });
 
     } catch (error) {

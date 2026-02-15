@@ -37,7 +37,7 @@ function clearMockRedisResponses(): void {
 
 // Shared Redis mock instance with pub/sub simulation
 class MockRedisClass {
-  private messageHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
+  private static sharedHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
   public status: string = 'ready';
 
   constructor(_url?: string) {}
@@ -81,7 +81,7 @@ class MockRedisClass {
 
         // Simulate async response via message event
         setImmediate(() => {
-          const handlers = this.messageHandlers.get('message') || [];
+          const handlers = MockRedisClass.sharedHandlers.get('message') || [];
           handlers.forEach(handler => {
             handler(responseChannel, JSON.stringify(mockResponse));
           });
@@ -105,17 +105,17 @@ class MockRedisClass {
 
   // Event Emitter
   on = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
-    if (!this.messageHandlers.has(event)) {
-      this.messageHandlers.set(event, []);
+    if (!MockRedisClass.sharedHandlers.has(event)) {
+      MockRedisClass.sharedHandlers.set(event, []);
     }
-    this.messageHandlers.get(event)!.push(handler);
+    MockRedisClass.sharedHandlers.get(event)!.push(handler);
     return this;
   });
 
   once = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
     const wrappedHandler = (...args: unknown[]) => {
       handler(...args);
-      const handlers = this.messageHandlers.get(event) || [];
+      const handlers = MockRedisClass.sharedHandlers.get(event) || [];
       const index = handlers.indexOf(wrappedHandler);
       if (index > -1) handlers.splice(index, 1);
     };
@@ -123,7 +123,7 @@ class MockRedisClass {
   });
 
   off = vi.fn().mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
-    const handlers = this.messageHandlers.get(event) || [];
+    const handlers = MockRedisClass.sharedHandlers.get(event) || [];
     const index = handlers.indexOf(handler);
     if (index > -1) handlers.splice(index, 1);
     return this;
@@ -131,9 +131,9 @@ class MockRedisClass {
 
   removeAllListeners = vi.fn().mockImplementation((event?: string) => {
     if (event) {
-      this.messageHandlers.delete(event);
+      MockRedisClass.sharedHandlers.delete(event);
     } else {
-      this.messageHandlers.clear();
+      MockRedisClass.sharedHandlers.clear();
     }
     return this;
   });
@@ -171,10 +171,20 @@ class MockRedisClass {
 // Create singleton mock instance
 const mockRedisInstance = new MockRedisClass();
 
-// Mock ioredis module
+// Mock ioredis module (all instances share the singleton)
 vi.mock('ioredis', () => ({
-  default: MockRedisClass,
-  Redis: MockRedisClass
+  default: class extends MockRedisClass {
+    constructor(..._args: unknown[]) {
+      super();
+      return mockRedisInstance as unknown as MockRedisClass;
+    }
+  },
+  Redis: class extends MockRedisClass {
+    constructor(..._args: unknown[]) {
+      super();
+      return mockRedisInstance as unknown as MockRedisClass;
+    }
+  }
 }));
 
 // Provide a controllable fetch implementation for tests that hit HTTP integrations
@@ -188,9 +198,15 @@ Object.defineProperty(globalThis, 'fetch', {
 // Mock @discord-bot/database with PROPER factory functions
 vi.mock('@discord-bot/database', () => {
   // Factory function that creates a NEW mock for each test
-  const createMockFn = () => vi.fn();
+  const createMockFn = () => vi.fn().mockResolvedValue(null);
 
   return {
+    SubscriptionTier: {
+      FREE: 'FREE',
+      GOLD: 'GOLD',
+      DIAMOND: 'DIAMOND',
+      ENTERPRISE: 'ENTERPRISE',
+    },
     prisma: {
       guildConfig: {
         findUnique: createMockFn(),
@@ -223,6 +239,7 @@ vi.mock('@discord-bot/database', () => {
       subscriptionPrice: {
         update: createMockFn(),
         create: createMockFn(),
+        findMany: createMockFn(),
       },
       webhookSubscription: {
         upsert: createMockFn(),
@@ -230,6 +247,13 @@ vi.mock('@discord-bot/database', () => {
       },
       subscription: {
         findUnique: createMockFn(),
+      },
+      customer: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      guild: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       $connect: vi.fn().mockResolvedValue(undefined),
       $disconnect: vi.fn().mockResolvedValue(undefined),

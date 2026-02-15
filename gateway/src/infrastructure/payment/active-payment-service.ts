@@ -1,7 +1,6 @@
 import { PaymentService } from '../../application/use-cases/subscription-management-use-case.js';
 import { PaymentProviderFactory, getPaymentFactory } from './payment-provider-factory.js';
-import { getPlanByTier } from '@discord-bot/subscription';
-import { SubscriptionTier } from '@prisma/client';
+import { getPlanByTier, SubscriptionTier } from '@discord-bot/subscription';
 
 const SUCCESS_STATUSES = new Set(['succeeded', 'requires_capture', 'processing']);
 

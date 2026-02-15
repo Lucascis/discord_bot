@@ -26,17 +26,16 @@ pnpm test --watch
 ## 📁 Test Structure
 
 ```
-tests/
-├── gateway/                    # Gateway service tests
-│   ├── domain/                # Domain layer tests
-│   ├── application/           # Use case tests
-│   └── infrastructure/        # Infrastructure tests
-├── audio/                     # Audio service tests
-├── packages/                  # Shared package tests
-│   └── config/
-│       └── test/
-│           └── enhanced-premium.test.ts
-└── integration/               # Integration tests
+tests/                         # Integration & E2E tests
+├── gateway/                   # Gateway integration tests
+├── audio-integration.test.ts  # Audio integration tests
+├── e2e/                       # End-to-End tests
+└── ...
+
+gateway/test/                  # Gateway unit tests
+audio/test/                    # Audio unit tests
+api/test/                      # API unit tests
+packages/*/test/               # Shared package tests
 ```
 
 ## 🧩 Test Categories
@@ -423,3 +422,36 @@ npx husky add .husky/pre-commit "pnpm test:quick"
 ---
 
 📊 **Testing is a critical part of maintaining code quality and ensuring the premium system works reliably in production.**
+# Main Stack Voice Validation (Docker-first)
+
+Use the primary stack for release validation:
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+Required env for real audio probe:
+
+```env
+DISCORD_PROBE_TOKEN=
+DISCORD_TEST_GUILD_ID=
+DISCORD_TEST_VOICE_CHANNEL_ID=
+DISCORD_TEST_TEXT_CHANNEL_ID=
+E2E_AUDIO_RMS_THRESHOLD=0.015
+E2E_AUDIO_CONSECUTIVE_WINDOWS=8
+```
+
+Run full voice gate on the main stack:
+
+```bash
+pnpm test:voice:diag:main
+pnpm test:e2e:audio:main
+pnpm test:voice:release:main
+```
+
+Tail logs during Discord manual validation:
+
+```bash
+docker compose logs -f gateway audio lavalink api worker
+```

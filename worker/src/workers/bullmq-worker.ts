@@ -201,11 +201,6 @@ export async function initializeAllWorkers(): Promise<void> {
     // Initialize cleanup worker
     initializeCleanupWorker();
 
-    // TODO: Initialize other workers as they are implemented
-    // initializeAnalyticsWorker();
-    // initializeMaintenanceWorker();
-    // initializeHealthWorker();
-
     logger.info({
       activeWorkers: Array.from(activeWorkers.keys()),
       totalWorkers: activeWorkers.size

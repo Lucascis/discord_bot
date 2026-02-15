@@ -29,6 +29,26 @@ export interface FilterPanelState {
  * Pure UI building logic for music-related Discord embeds and components
  */
 export class MusicUIBuilder {
+  private readonly defaultTheme = {
+    playingColor: 0x6A0DAD,
+    pausedColor: 0xFFAA00
+  };
+  private guildThemes = new Map<string, { playingColor: number; pausedColor: number }>();
+
+  setGuildTheme(guildId: string, theme: { playingColor?: number; pausedColor?: number }): void {
+    const existing = this.guildThemes.get(guildId) ?? this.defaultTheme;
+    this.guildThemes.set(guildId, {
+      playingColor: theme.playingColor ?? existing.playingColor,
+      pausedColor: theme.pausedColor ?? existing.pausedColor
+    });
+  }
+
+  resolveTheme(guildId?: string): { playingColor: number; pausedColor: number } {
+    if (guildId && this.guildThemes.has(guildId)) {
+      return this.guildThemes.get(guildId)!;
+    }
+    return this.defaultTheme;
+  }
 
   buildPlaySuccessEmbed(data: {
     trackTitle: string;
@@ -167,10 +187,13 @@ export class MusicUIBuilder {
       label: string;
       description?: string;
     };
+    guildId?: string;
+    theme?: { playingColor: number; pausedColor: number };
   }): EmbedBuilder {
     const statusIcon = data.isPaused ? '⏸️' : '✨';
     const statusText = data.isPaused ? 'Paused' : 'Now Playing';
-    const color = data.isPaused ? 0xFFAA00 : 0x6A0DAD; // Dark violet premium theme when playing
+    const theme = data.theme ?? this.resolveTheme(data.guildId);
+    const color = data.isPaused ? theme.pausedColor : theme.playingColor;
 
     const embed = new EmbedBuilder()
       .setColor(color)
@@ -399,10 +422,10 @@ export class MusicUIBuilder {
           .setCustomId('music_autoplay')
           .setLabel(
             autoplayMode === 'off' ? '▶️ Auto  ' :
-            autoplayMode === 'similar' ? '🎵 Similar' :
-            autoplayMode === 'artist' ? '👤 Artist' :
-            autoplayMode === 'genre' ? '🎸 Genre ' :
-            '🔀 Mixed '
+              autoplayMode === 'similar' ? '🎵 Similar' :
+                autoplayMode === 'artist' ? '👤 Artist' :
+                  autoplayMode === 'genre' ? '🎸 Genre ' :
+                    '🔀 Mixed '
           )
           .setStyle(autoplayMode === 'off' ? ButtonStyle.Secondary : ButtonStyle.Success)
           .setDisabled(!isPlaying && !isPaused) // Disabled if no track
@@ -630,6 +653,55 @@ export class MusicUIBuilder {
       default:
         return 'Unknown';
     }
+  }
+
+  buildMusicUI(data: {
+    trackTitle: string;
+    artist?: string;
+    duration?: number;
+    position?: number;
+    volume: number;
+    loopMode: 'off' | 'track' | 'queue';
+    queueLength: number;
+    isPaused: boolean;
+    artworkUrl?: string;
+    autoplayMode?: 'off' | 'similar' | 'artist' | 'genre' | 'mixed';
+    filter?: {
+      id: string;
+      label: string;
+      description?: string;
+    };
+    guildId?: string;
+    theme?: { playingColor: number; pausedColor: number };
+    // Additional state for buttons
+    isPlaying?: boolean;
+    hasQueue?: boolean;
+    canSkip?: boolean;
+    isMuted?: boolean;
+    activeFilterId?: string;
+    activeFilterLabel?: string;
+  }): { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder>[] } {
+    const embed = this.buildNowPlayingEmbed(data);
+
+    const components = this.buildMusicControlButtons({
+      isPlaying: !data.isPaused,
+      isPaused: data.isPaused,
+      hasQueue: data.queueLength > 0,
+      queueLength: data.queueLength,
+      volume: data.volume,
+      loopMode: data.loopMode,
+      autoplayMode: data.autoplayMode,
+      activeFilterId: data.filter?.id,
+      activeFilterLabel: data.filter?.label,
+      // Map other properties if needed
+      canSkip: data.canSkip,
+      isMuted: data.isMuted
+    });
+
+    return {
+      embeds: [embed],
+      components
+    };
   }
 
   private improveImageQuality(artworkUrl: string): string {

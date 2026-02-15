@@ -170,6 +170,7 @@ export class RedisStreamsMonitoring {
     try {
       const streams = [
         'discord-bot:audio-commands',
+        'discord-bot:audio-controls',
         'discord-bot:audio-responses',
         'discord-bot:gateway-commands',
         'discord-bot:gateway-responses'
@@ -207,7 +208,7 @@ export class RedisStreamsMonitoring {
    */
   private async collectConsumerGroupInfo(streamName: string): Promise<void> {
     try {
-      const consumerGroups = ['audio-processors', 'gateway-processors'];
+      const consumerGroups = ['audio-processors', 'audio-controls-processors', 'gateway-processors'];
 
       for (const groupName of consumerGroups) {
         try {

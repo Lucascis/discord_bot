@@ -18,14 +18,11 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - Automatic bitrate adjustment
 - Audio normalization
 
-**Supported Platforms:**
-- ✅ **YouTube** - All plans
-- ✅ **YouTube Music** - Premium+
-- ✅ **Spotify** - Basic+
-- ✅ **Apple Music** - Premium+
-- ✅ **Deezer** - Premium+
-- ✅ **SoundCloud** - Premium+
-- ✅ **Custom Sources** - Enterprise only
+**Supported Platforms (dependen del nodo Lavalink):**
+- ✅ **YouTube** - Todos los planes
+- ✅ **Spotify** - Plus+
+- ✅ **SoundCloud** - Plus+
+- ⚠️ Otras fuentes (Apple Music, Deezer, etc.) dependen de la configuración del servidor Lavalink y no se garantizan en todos los entornos
 
 **Playback Controls:**
 - Play, Pause, Resume, Stop
@@ -34,8 +31,8 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - Loop modes (off, track, queue)
 - Shuffle queue
 - Volume control (0-200%)
-- Crossfade between tracks (Premium+)
-- Audio effects and filters (Enterprise+)
+- Crossfade between tracks (Pro+)
+- Audio effects and filters (Pro avanzado / proyectos custom)
 
 ---
 
@@ -51,16 +48,14 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - Undo/redo support (Premium+)
 - Persistent queues across restarts
 
-**Queue Features by Plan:**
+**Queue Features by Plan (modelo actual):**
 
-| Feature | Free | Basic | Premium | Enterprise |
-|---------|------|-------|---------|------------|
-| Max Queue Size | 50 | 100 | 500 | Unlimited |
-| Queue History | Last 10 | Last 25 | Last 100 | Unlimited |
-| Save Playlists | 3 | 10 | 50 | Unlimited |
-| Playlist Size | 25 songs | 50 songs | 200 songs | Unlimited |
-| Import Playlists | ❌ | ✅ | ✅ | ✅ |
-| Export Playlists | ❌ | ✅ | ✅ | ✅ |
+| Feature         | Free | Plus | Pro  |
+|-----------------|------|------|------|
+| Max Queue Size  | 50   | 1,000| 5,000|
+| Playlist Size   | 25   | 100  | 500  |
+| Playlist Import | ❌   | ✅   | ✅    |
+| Queue History   | 10   | 50   | 200  |
 
 **Interactive Queue UI:**
 - Real-time now playing display
@@ -101,7 +96,7 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - Community-driven recommendations (Premium+)
 - Mood-based selection (Premium+)
 - Time-of-day awareness (Premium+)
-- Seasonal recommendations (Enterprise+)
+- Seasonal recommendations (Pro avanzado / proyectos custom)
 
 ---
 
@@ -115,19 +110,19 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - Stereo audio
 - Optimized for Discord voice
 
-**High Quality (Basic+)**
+**High Quality (Plus+)**
 - 320 kbps Opus codec
 - 44.1 kHz sample rate
 - Stereo audio
 - Enhanced clarity
 
-**Lossless Quality (Premium+)**
+**Lossless Quality (Pro+)**
 - 1411 kbps FLAC
 - 44.1 kHz sample rate
 - Lossless compression
 - Studio-quality audio
 
-**Spatial Audio (Enterprise)**
+**Spatial Audio (advanced/custom deployments)**
 - Variable bitrate
 - 48 kHz sample rate
 - Multi-channel audio
@@ -140,11 +135,11 @@ Discord Music Bot is a professional-grade music playback solution for Discord co
 - SponsorBlock integration (auto-skip sponsors in videos)
 - Audio normalization (maintain consistent volume)
 - Bass boost presets
-- Equalizer (8-band, 31-band on Premium+)
-- Nightcore/Vaporwave effects (Premium+)
-- Pitch shifting (Premium+)
-- Tempo adjustment (Premium+)
-- Karaoke mode (Enterprise+)
+- Equalizer (8-band, 31-band on Pro+)
+- Nightcore/Vaporwave effects (Pro+)
+- Pitch shifting (Pro+)
+- Tempo adjustment (Pro+)
+- Karaoke mode (Pro avanzado / proyectos custom)
 
 ---
 
@@ -207,7 +202,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 - `/lyrics` - Display song lyrics (Basic+)
 - `/settings` - Server configuration
 
-**Playlists (Basic+):**
+**Playlists (Plus+):**
 - `/playlist create <name>` - Create playlist
 - `/playlist add <name> <song>` - Add to playlist
 - `/playlist play <name>` - Play playlist
@@ -224,7 +219,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 
 ## 📊 Analytics & Insights
 
-### Available Analytics (Premium+)
+### Available Analytics (Pro+)
 
 **Listening Statistics:**
 - Total playtime per user/server
@@ -247,7 +242,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 - Response times
 - Uptime statistics
 
-### Analytics Dashboard (Enterprise)
+### Analytics Dashboard (Pro avanzado / proyectos custom)
 
 **Advanced Reporting:**
 - Custom date ranges
@@ -285,7 +280,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 - Command restrictions
 - Volume limits per role
 
-**Premium Customization:**
+**Pro Customization:**
 - Custom command prefixes
 - Custom embed colors
 - Custom now playing format
@@ -297,7 +292,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 
 ## 🔗 Integrations & API
 
-### Webhook Support (Enterprise)
+### Webhook Support (Pro avanzado / proyectos custom)
 
 **Available Webhooks:**
 - Now playing updates
@@ -313,7 +308,7 @@ Row 3: 🔀 Shuffle | 🗒️ Queue | 🧹 Clear | ▶️ Autoplay
 - Analytics platforms
 - Custom dashboards
 
-### REST API (Enterprise)
+### REST API (Pro avanzado / proyectos custom)
 
 **API Endpoints:**
 - Music control (play, pause, skip)
@@ -387,7 +382,7 @@ GET /api/v1/analytics/guilds/{guildId}
 - CDN delivery
 
 **Reliability:**
-- 99.9% uptime (Enterprise)
+- 99.9% uptime (Pro avanzado / proyectos custom)
 - Automatic failover
 - Redundant infrastructure
 - Health monitoring
@@ -451,24 +446,24 @@ GET /api/v1/analytics/guilds/{guildId}
 
 ### Quick Reference
 
-| Feature Category | Free | Basic | Premium | Enterprise |
-|-----------------|------|-------|---------|------------|
-| Music Playback | ✅ | ✅ | ✅ | ✅ |
-| YouTube Support | ✅ | ✅ | ✅ | ✅ |
-| Spotify Integration | ❌ | ✅ | ✅ | ✅ |
-| Apple Music | ❌ | ❌ | ✅ | ✅ |
-| High Quality Audio | ❌ | ✅ | ✅ | ✅ |
-| Lossless Audio | ❌ | ❌ | ✅ | ✅ |
-| Spatial Audio | ❌ | ❌ | ❌ | ✅ |
-| Lyrics Display | ❌ | ✅ | ✅ | ✅ |
-| Advanced Autoplay | ❌ | ✅ | ✅ | ✅ |
-| Playlist Import | ❌ | ✅ | ✅ | ✅ |
-| Audio Effects | ❌ | ❌ | ✅ | ✅ |
-| Analytics | ❌ | ❌ | ✅ | ✅ |
-| API Access | ❌ | ❌ | ❌ | ✅ |
-| Webhooks | ❌ | ❌ | ❌ | ✅ |
-| White-Label | ❌ | ❌ | ❌ | ✅ |
-| Custom Features | ❌ | ❌ | ❌ | ✅ |
+| Feature Category    | Free | Plus | Pro  |
+|---------------------|------|------|------|
+| Music Playback      | ✅   | ✅   | ✅   |
+| YouTube Support     | ✅   | ✅   | ✅   |
+| Spotify Integration | ❌   | ✅   | ✅   |
+| Apple Music         | ❌   | ❌   | ✅   |
+| High Quality Audio  | ❌   | ✅   | ✅   |
+| Lossless Audio      | ❌   | ❌   | ✅   |
+| Spatial Audio       | ❌   | ❌   | ❌   |
+| Lyrics Display      | ❌   | ✅   | ✅   |
+| Advanced Autoplay   | ❌   | ✅   | ✅   |
+| Playlist Import     | ❌   | ✅   | ✅   |
+| Audio Effects       | ❌   | ❌   | ✅   |
+| Analytics           | ❌   | ❌   | ✅   |
+| API Access          | ❌   | ❌   | ❌   |
+| Webhooks            | ❌   | ❌   | ❌   |
+| White-Label         | ❌   | ❌   | ❌   |
+| Custom Features     | ❌   | ❌   | ❌   |
 
 ---
 
@@ -477,9 +472,9 @@ GET /api/v1/analytics/guilds/{guildId}
 Ready to experience these features?
 
 1. **[Invite Bot](https://discord.com/oauth2/authorize?client_id=YOUR_ID)** - Start with Free plan
-2. **[Start Trial](/premium/trial)** - 14 days of Premium features
+2. **[Start Trial](/premium/trial)** - 14 days of Pro features
 3. **[View Pricing](./PRICING.md)** - Compare plans
-4. **[Contact Sales](mailto:sales@discordmusicbot.com)** - Enterprise inquiries
+4. **[Contact Sales](mailto:sales@discordmusicbot.com)** - Consultas por proyectos custom / despliegues enterprise
 
 ---
 
@@ -494,4 +489,4 @@ Ready to experience these features?
 
 **Last Updated:** October 31, 2025
 
-*Features and availability subject to change. Some features may be in beta. Enterprise features require custom contract.*
+*Features and availability subject to change. Some features may be in beta. Las funcionalidades avanzadas de nivel enterprise sólo se ofrecen como proyectos custom con contrato a medida (no como un plan adicional).*

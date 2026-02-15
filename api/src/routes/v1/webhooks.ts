@@ -38,11 +38,10 @@ const redis = new Redis(env.REDIS_URL);
 const verifyWebhookSignature: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
   const signatureHeader = req.headers['x-webhook-signature'];
   const timestampHeader = req.headers['x-webhook-timestamp'];
-  const webhookSecret = process.env.WEBHOOK_SECRET || 'default-webhook-secret';
+  const webhookSecret = env.WEBHOOK_SECRET;
 
   if (!webhookSecret) {
-    logger.warn('WEBHOOK_SECRET not configured - webhook security disabled');
-    return next();
+    return next(new InternalServerError('WEBHOOK_SECRET is not configured'));
   }
 
   if (!signatureHeader || !timestampHeader) {

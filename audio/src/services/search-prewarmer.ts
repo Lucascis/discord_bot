@@ -16,6 +16,7 @@ export class SearchPrewarmer {
   private manager: LavalinkManager | null = null;
   private warmingInterval: NodeJS.Timeout | null = null;
   private isWarming = false;
+  private readonly autoPrewarmEnabled = false;
   private warmingStats = {
     totalWarmed: 0,
     successRate: 0,
@@ -24,10 +25,8 @@ export class SearchPrewarmer {
   };
 
   constructor() {
-    // Start pre-warming after audio service is ready
-    setTimeout(() => {
-      this.startPrewarming();
-    }, 30000); // Wait 30 seconds after startup
+    // Disabled by default: background warmups were triggering high startup memory pressure.
+    // It can still be enabled manually via configureSchedule()/forceWarmingSession().
   }
 
   /**
@@ -35,7 +34,12 @@ export class SearchPrewarmer {
    */
   initialize(manager: LavalinkManager): void {
     this.manager = manager;
-    logger.info('Search pre-warmer initialized');
+    if (this.autoPrewarmEnabled) {
+      setTimeout(() => this.startPrewarming(), 30000);
+      logger.info('Search pre-warmer initialized with automatic schedule');
+      return;
+    }
+    logger.info('Search pre-warmer initialized (automatic warmup disabled)');
   }
 
   /**
@@ -58,6 +62,14 @@ export class SearchPrewarmer {
    */
   private async runWarmingSession(): Promise<void> {
     if (this.isWarming || !this.manager) return;
+
+    const hasActivePlayback = Array.from(this.manager.players.values()).some((player) =>
+      player.playing || player.paused || !!player.queue.current
+    );
+    if (hasActivePlayback) {
+      logger.debug('Skipping search cache warming because playback-critical mode is active');
+      return;
+    }
 
     const currentHour = new Date().getHours();
 

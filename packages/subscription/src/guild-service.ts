@@ -6,7 +6,8 @@
  * @module subscription/guild-service
  */
 
-import { PrismaClient, SubscriptionTier, SubscriptionStatus } from '@prisma/client';
+import { SubscriptionTier, SubscriptionStatus } from '@discord-bot/database';
+import type { PrismaClient } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 
 export interface GuildInfo {
@@ -40,7 +41,7 @@ export class GuildService {
 
   /**
    * Get guild subscription tier
-   * Automatically provisions test guilds with ENTERPRISE tier
+   * Automatically provisions test guilds with PREMIUM tier
    *
    * @param discordGuildId - Discord guild ID
    * @returns Promise<SubscriptionTier>
@@ -51,7 +52,7 @@ export class GuildService {
       if (this.testGuildIds.has(discordGuildId)) {
         // Auto-provision test guild if it doesn't exist
         await this.ensureTestGuild(discordGuildId);
-        return SubscriptionTier.ENTERPRISE;
+        return SubscriptionTier.PREMIUM;
       }
 
       // Get or create guild
@@ -72,7 +73,7 @@ export class GuildService {
   }
 
   /**
-   * Ensure test guild exists with ENTERPRISE tier
+   * Ensure test guild exists with PREMIUM tier
    * Creates guild and subscription if they don't exist
    *
    * @param discordGuildId - Discord guild ID
@@ -88,28 +89,28 @@ export class GuildService {
       });
 
       if (existingSubscription) {
-        // Update to ENTERPRISE if not already
-        if (existingSubscription.tier !== SubscriptionTier.ENTERPRISE) {
+        // Update to PREMIUM if not already
+        if (existingSubscription.tier !== SubscriptionTier.PREMIUM) {
           await this.prisma.guildSubscription.update({
             where: { guildId: guild.id },
             data: {
-              tier: SubscriptionTier.ENTERPRISE,
+              tier: SubscriptionTier.PREMIUM,
               status: SubscriptionStatus.ACTIVE,
             },
           });
-          logger.info({ discordGuildId }, 'Updated test guild to ENTERPRISE tier');
+          logger.info({ discordGuildId }, 'Updated test guild to PREMIUM tier');
         }
         return;
       }
 
-      // Create ENTERPRISE subscription for test guild
+      // Create PREMIUM subscription for test guild
       const now = new Date();
       const farFuture = new Date(now.getFullYear() + 100, now.getMonth(), now.getDate());
 
       await this.prisma.guildSubscription.create({
         data: {
           guildId: guild.id,
-          tier: SubscriptionTier.ENTERPRISE,
+          tier: SubscriptionTier.PREMIUM,
           status: SubscriptionStatus.ACTIVE,
           currentPeriodStart: now,
           currentPeriodEnd: farFuture,
@@ -117,7 +118,7 @@ export class GuildService {
         },
       });
 
-      logger.info({ discordGuildId }, 'Created ENTERPRISE subscription for test guild');
+      logger.info({ discordGuildId }, 'Created PREMIUM subscription for test guild');
     } catch (error) {
       logger.error({ error, discordGuildId }, 'Error ensuring test guild');
       throw error;

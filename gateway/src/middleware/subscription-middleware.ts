@@ -8,10 +8,18 @@
  */
 
 import { CommandInteraction, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, Colors } from 'discord.js';
-import { SubscriptionService, GuildService, getNextTier, getPlanByTier, formatPrice } from '@discord-bot/subscription';
-import { prisma, SubscriptionTier } from '@discord-bot/database';
+import { SubscriptionService, GuildService, getNextTier, getPlanByTier, formatPrice, SubscriptionTier } from '@discord-bot/subscription';
+import { prisma } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
+
+const normalizeTierValue = (tier: SubscriptionTier | string): SubscriptionTier => {
+  if (typeof tier === 'string') {
+    const normalized = tier.toUpperCase();
+    return (SubscriptionTier as Record<string, SubscriptionTier>)[normalized] ?? SubscriptionTier.FREE;
+  }
+  return tier;
+};
 
 export interface SubscriptionCheckOptions {
   /** Feature key to check access for */
@@ -56,7 +64,8 @@ export class SubscriptionMiddleware {
    * @returns Promise<SubscriptionTier>
    */
   async getGuildTier(guildId: string): Promise<SubscriptionTier> {
-    return this.guildService.getGuildTier(guildId);
+    const tier = await this.guildService.getGuildTier(guildId);
+    return normalizeTierValue(tier);
   }
 
   /**
@@ -83,6 +92,7 @@ export class SubscriptionMiddleware {
 
     try {
       const subscription = await this.subscriptionService.getSubscription(guildId);
+      const currentTier = normalizeTierValue(subscription.tier);
       const featureAccess = await this.subscriptionService.checkFeatureAccess(guildId, featureKey);
 
       if (!subscription.isActive) {
@@ -90,32 +100,32 @@ export class SubscriptionMiddleware {
         return {
           allowed: false,
           errorMessage: 'Subscription is not active',
-          tier: subscription.tier,
+          tier: currentTier,
           isActive: false,
         };
       }
 
       if (!featureAccess.hasAccess) {
         if (options.showUpgradePrompt !== false) {
-          await this.sendFeatureAccessDenied(interaction, featureKey, subscription.tier);
+          await this.sendFeatureAccessDenied(interaction, featureKey, currentTier);
         }
 
         logger.info(
-          { guildId, featureKey, tier: subscription.tier },
+          { guildId, featureKey, tier: currentTier },
           'Feature access denied'
         );
 
         return {
           allowed: false,
           errorMessage: featureAccess.upgradeMessage || 'Feature not available in your plan',
-          tier: subscription.tier,
+          tier: currentTier,
           isActive: true,
         };
       }
 
       return {
         allowed: true,
-        tier: subscription.tier,
+        tier: currentTier,
         isActive: true,
       };
     } catch (error) {
@@ -157,11 +167,12 @@ export class SubscriptionMiddleware {
 
     try {
       const subscription = await this.subscriptionService.getSubscription(guildId);
+      const currentTier = normalizeTierValue(subscription.tier);
       const limitCheck = await this.subscriptionService.checkUsageLimit(guildId, limitType);
 
       if (!limitCheck.withinLimit) {
         if (options.showUpgradePrompt !== false) {
-          await this.sendUsageLimitReached(interaction, limitType, limitCheck, subscription.tier);
+          await this.sendUsageLimitReached(interaction, limitType, limitCheck, currentTier);
         }
 
         logger.info(
@@ -172,7 +183,7 @@ export class SubscriptionMiddleware {
         return {
           allowed: false,
           errorMessage: limitCheck.upgradeMessage || 'Usage limit reached',
-          tier: subscription.tier,
+          tier: currentTier,
           isActive: subscription.isActive,
         };
       }
@@ -184,7 +195,7 @@ export class SubscriptionMiddleware {
 
       return {
         allowed: true,
-        tier: subscription.tier,
+        tier: currentTier,
         isActive: subscription.isActive,
       };
     } catch (error) {

@@ -249,12 +249,6 @@ export class MemoryManager {
         rss: `${rssMB.toFixed(2)}MB`,
         external: `${(usage.external / 1024 / 1024).toFixed(2)}MB`
       }, 'High memory usage detected');
-      
-      // Trigger garbage collection if available
-      if (global.gc) {
-        global.gc();
-        logger.info('Forced garbage collection');
-      }
     }
   }
   
