@@ -30,7 +30,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "ioredis": "^5.8.2",
-    "lavalink-client": "^2.7.0",
+    "lavalink-client": "^2.9.1",
     "prom-client": "^15.1.3",
     "stripe": "^20.0.0"
   },
