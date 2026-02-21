@@ -14,6 +14,9 @@ compose_main up -d postgres redis lavalink
 echo "[deploy] Running database migrations in worker container context..."
 compose_main run --rm --no-deps worker pnpm --filter @discord-bot/database prisma:deploy
 
+echo "[deploy] Verifying critical database schema..."
+bash "${ROOT_DIR}/scripts/verify-db-schema.sh"
+
 echo "[deploy] Starting full docker compose stack..."
 compose_main up -d --build --remove-orphans
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Production-ready Discord music bot with microservices architecture, enterprise-grade features, and comprehensive observability.
+Production-ready Discord music bot with microservices architecture, características operativas, and comprehensive observability.
 
 ## 🎯 Architecture Pattern
 
@@ -14,239 +14,161 @@ Production-ready Discord music bot with microservices architecture, enterprise-g
 
 ## 🔗 Inter-Service Communication
 
-### Redis Pub/Sub Channels
-```
-discord-bot:commands     → Gateway → Audio (command routing)
-discord-bot:to-audio     → Gateway → Audio (structured commands)
-discord-bot:to-discord   → Audio → Gateway (Lavalink events)
-discord-bot:ui:now       → Audio → Gateway (real-time UI updates)
-discord-bot:voice-events → Gateway → Audio (Raw voice events for Lavalink connection)
-```
+### Redis: Dual Transport (Streams + Pub/Sub)
 
-### Critical Raw Events Handler (Fixed September 24, 2025)
+#### Redis Streams (canal principal para comandos)
+At-least-once delivery, consumer groups, respuestas síncronas.
+
+| Stream | Dirección | Propósito |
+|--------|-----------|-----------|
+| `discord-bot:audio-commands` | Gateway → Audio | play, queue, shuffle, clear, remove, move, seek, stop, autoplay |
+| `discord-bot:audio-controls` | Gateway → Audio | toggle, pause, resume, skip, volume, loop, mute, filters (prioridad alta) |
+| `discord-bot:audio-responses` | Audio → Gateway | Respuestas síncronas (ej. queue paginado) |
+
+#### Redis Pub/Sub (eventos y voz)
+| Canal | Dirección | Propósito |
+|-------|-----------|-----------|
+| `discord-bot:voice-events` | Gateway → Audio | Raw VOICE_STATE_UPDATE, VOICE_SERVER_UPDATE para Lavalink |
+| `discord-bot:to-audio` | Gateway → Audio | VOICE_CREDENTIALS estructurados, search, play (DiscordAudioService) |
+| `discord-bot:to-discord` | Audio → Gateway | Eventos Lavalink (track_queued, trackStart, queueEnd) |
+| `discord-bot:ui:now` | Audio → Gateway | Actualizaciones UI en tiempo real |
+| `discord-bot:panel-commands` | Panel/API → Gateway | summon, open_filters |
+
+### Raw Voice Events (crítico para Lavalink)
+
 ```typescript
-// Gateway Service: Forward raw Discord voice events to Audio service
-this.discordClient.on('raw', async (data: any) => {
-  await this.audioRedisClient.publish('discord-bot:voice-events', JSON.stringify(data));
+// Gateway: Events.Raw (discord.js v14)
+client.on(Events.Raw, (d) => {
+  const packet = d;
+  if (!['VOICE_STATE_UPDATE', 'VOICE_SERVER_UPDATE'].includes(packet.t)) return;
+  await redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet));
 });
 
-// Audio Service: Process raw events for Lavalink voice connection
-audioRedisClient.on('message', (channel, message) => {
-  if (channel === 'discord-bot:voice-events') {
-    const rawEvent = JSON.parse(message);
-    // Forward to Lavalink for voice credential processing
-    lavalinkManager.sendRawData(rawEvent);
-  }
+// Audio: reenvío a Lavalink
+await redisManager.subscribe('discord-bot:voice-events', async (message) => {
+  const packet = JSON.parse(message);
+  await manager.sendRawData(packet);
+});
+```
+
+### guildMutex: Concurrencia por Guild
+
+Todas las mutaciones de queue/player en Audio deben ejecutarse bajo el mutex por guild:
+
+```typescript
+// audio/src/guildMutex.ts
+await guildMutex.run(guildId, async () => {
+  // Operaciones atómicas sobre player/queue
 });
 ```
 
 ### Shared Database
-- **PostgreSQL** with Prisma ORM
-- Persistent storage for queues, settings, feature flags
-- ACID transactions for critical operations
+
+- **PostgreSQL** con Prisma ORM
+- Almacenamiento persistente: queues, settings, feature flags
+- Transacciones ACID para operaciones críticas
 
 ## 📦 Package Architecture
 
-### Services (`/services`)
+### Services
 
-#### Gateway Service (`gateway/`)
-- **Discord.js v14** interface
-- Slash commands & button interactions
-- Voice connection management
-- UI message orchestration
-- **Port**: <gateway_port>
-
-#### Audio Service (`audio/`)
-- **Lavalink v4** client integration
-- Music queue management
-- Search & autoplay algorithms
-- Performance optimization
-- **Port**: <audio_port>
-
-#### API Service (`api/`)
-- Express.js REST endpoints
-- Health checks & monitoring
-- External webhooks
-- **Port**: <api_port>
-
-#### Worker Service (`worker/`)
-- BullMQ job queues
-- Scheduled maintenance tasks
-- Background processing
-- **Port**: <worker_port>
+| Servicio | Puerto | Tecnología |
+|----------|--------|------------|
+| Gateway | 3001 | Discord.js v14, Clean Architecture |
+| Audio | 3002 | Lavalink client v2.7, guildMutex |
+| API | 3000 | Express.js |
+| Worker | 3003 | BullMQ |
 
 ### Shared Packages (`packages/`)
 
-#### @discord-bot/database
-```typescript
-// Prisma ORM with optimized schema
-models: GuildConfig, Queue, QueueItem, UserProfile, AuditLog, FeatureFlag
-features: Transactions, migrations, seeding
-database: PostgreSQL with connection pooling
-```
-
-#### @discord-bot/logger
-```typescript
-// Structured logging with health monitoring
-transport: Pino with Sentry integration
-features: Request correlation, performance metrics
-outputs: Console, file rotation, external aggregation
-```
-
-#### @discord-bot/config
-```typescript
-// Environment configuration with validation
-validation: Zod schemas for type safety
-features: Hot reloading, environment-specific configs
-sources: .env files, environment variables
-```
-
-#### @discord-bot/cache
-```typescript
-// Multi-level caching strategy
-layers: Memory (TTL) → Redis → PostgreSQL
-patterns: Cache-aside, write-through
-eviction: LRU with intelligent prefetching
-```
-
-#### @discord-bot/observability
-```typescript
-// Enterprise monitoring stack
-metrics: Prometheus with custom collectors
-tracing: OpenTelemetry distributed tracing
-alerts: Grafana dashboards with alerting
-```
+| Paquete | Responsabilidad |
+|---------|-----------------|
+| **@discord-bot/config** | Validación Zod de variables de entorno, fuente de verdad para tipos |
+| **@discord-bot/database** | Prisma ORM, migraciones, seeding |
+| **@discord-bot/logger** | Pino, Sentry, health checks |
+| **@discord-bot/cache** | Redis Streams, circuit breaker, SearchCache, QueueCache |
+| **@discord-bot/audio-control** | AudioCommandClient para envío de comandos vía Streams |
+| **@discord-bot/subscription** | Compatibilidad legacy para runtime templates (en remoción) |
 
 ## 🎵 Music System Architecture
 
-### Lavalink Integration
-```yaml
-Version: v4.1.1
-Plugins:
-  - YouTube Plugin v1.13.5 (MUSIC, ANDROID_VR, WEB)
-  - SponsorBlock (automatic sponsor skipping)
-  - LavaSrc v4.8.1 (multi-platform support)
-  - LavaSearch v1.0.0 (advanced search)
-```
+### Lavalink
 
-### Audio Processing Flow (Updated September 24, 2025)
+- **Cliente**: lavalink-client ^2.7.0
+- **Servidor**: Lavalink v4 (JAR en `lavalink/`)
+- **Plugins**: YouTube, LavaSrc, LavaSearch (config en `lavalink/application.yml`)
+
+### Flujo de Audio
+
 ```
-Discord User → Gateway → Redis → Audio → Lavalink → Voice
+Discord User → Gateway → Redis Streams → Audio (command-processor) → Lavalink → Voice
      ↑                                              ↓
-     ← UI Updates ← Redis ← Audio ← Events ← Voice Stream
+     ← UI Updates ← discord-bot:ui:now ← Audio ← Voice Stream
                  ↑
-         Raw Voice Events (VOICE_SERVER_UPDATE, VOICE_STATE_UPDATE)
+     Raw Voice Events (discord-bot:voice-events)
 ```
-
-**Critical Voice Connection Fix:**
-- Gateway forwards raw Discord voice events via `discord-bot:voice-events` channel
-- Audio service processes raw events and forwards to Lavalink
-- This enables `player.connected = true` and functional audio playback
-- Resolves race condition that prevented voice connection establishment
 
 ### Search & Discovery
-- **Multi-source search**: YouTube, Spotify, YouTube Music
-- **Intelligent autoplay**: Similar, Artist, Genre, Mixed modes
-- **Quality filtering**: Blacklist aggregators, prefer official
-- **Performance optimization**: 5-minute cache, search throttling
 
-## 🔧 Data Flow Architecture
+- **Multi-source**: YouTube, Spotify, YouTube Music
+- **Autoplay**: Similar, Artist, Genre, Mixed
+- **Cache**: 5 min TTL, throttling de búsquedas
 
-### Command Processing
+## 🔧 Data Flow
+
+### Comandos (ruta principal)
+
 ```
-1. Discord Interaction → Gateway Service
-2. Command Validation → Slash Command Handler
-3. Redis Publish → discord-bot:commands
-4. Audio Service → Command Processor
-5. Lavalink Operations → Music Playback
-6. UI Updates → Redis → Gateway → Discord
+1. Discord Interaction → MusicController
+2. AudioCommandService.sendCommand() → Redis Streams
+3. command-processor (Audio) → Handler registrado
+4. Lavalink operations → Playback
+5. discord-bot:ui:now → Gateway → Discord UI
 ```
 
 ### State Management
-```
-- Persistent State: PostgreSQL (queues, settings, history)
-- Session State: Redis (current playing, voice connections)
-- Cache Layer: Memory (frequent queries, search results)
-- Real-time: WebSocket-like via Redis pub/sub
-```
 
-## 🛡️ Security Architecture
+- **Persistente**: PostgreSQL (queues, settings, history)
+- **Sesión**: Redis (now playing, voice connections)
+- **Cache**: Memory + Redis (search, queue, settings)
 
-### Input Validation
-- **Zod schemas** for all environment variables
-- **Command sanitization** with XSS prevention
-- **Discord snowflake validation** for proper ID formats
-- **Rate limiting** with configurable thresholds
+## 🛡️ Security
 
-### Error Handling
-- **Circuit breaker pattern** with exponential backoff
-- **Graceful degradation** rather than complete failure
-- **Structured error logging** with correlation IDs
-- **Health checks** with dependency monitoring
+- **Zod**: Todas las variables en `packages/config`
+- **Validación**: Comandos con `safeValidateCommand`, `validateCommandMessage`
+- **Circuit breaker**: Redis con umbrales configurables
 
-## 📊 Monitoring & Observability
-
-### Metrics Collection
-```typescript
-// Custom Prometheus metrics
-- discord_commands_total{command, status}
-- audio_track_duration_seconds_total
-- redis_operations_total{operation, status}
-- lavalink_events_total{type, status}
-```
+## 📊 Monitoring
 
 ### Health Endpoints
+
 ```
-GET /health    - Service health status
-GET /ready     - Readiness probe for K8s
-GET /metrics   - Prometheus metrics endpoint
-GET /info      - Service information & dependencies
-```
-
-### Performance Monitoring
-- **Request tracing** with OpenTelemetry
-- **Database query analysis** with slow query logging
-- **Memory usage tracking** with garbage collection metrics
-- **Cache hit/miss ratios** with optimization recommendations
-
-## 🚀 Deployment Architecture
-
-### Container Strategy
-- **Multi-stage Docker builds** for optimization
-- **Health checks** with dependency validation
-- **Resource limits** with horizontal scaling
-- **Security hardening** with non-root users
-
-### Orchestration Options
-```yaml
-Development: docker-compose with hot reloading
-Production: Kubernetes with Istio service mesh
-Monitoring: Prometheus + Grafana stack
-Logging: ELK stack with log aggregation
+GET /health   - Estado del servicio
+GET /ready    - Readiness (K8s)
+GET /metrics  - Prometheus
 ```
 
-### Scaling Considerations
-- **Horizontal scaling**: Multiple gateway instances
-- **Database sharding**: By guild ID for large deployments
-- **Cache distribution**: Redis cluster for high availability
-- **Load balancing**: Service mesh with intelligent routing
+### Puertos por servicio
 
-## 🔄 Development Workflow
+- API: 3000
+- Gateway: 3001
+- Audio: 3002
+- Worker: 3003
 
-### Package Management
+## 🔄 Development
+
 ```bash
-pnpm workspaces  # Monorepo management
-pnpm dev:all     # Start all services in development
-pnpm -r build    # Build all packages
-pnpm test        # Run comprehensive test suite
+pnpm install
+pnpm --filter @discord-bot/database prisma:generate
+pnpm db:migrate
+pnpm dev:all
 ```
 
-### Service Dependencies
-```
-Gateway → @discord-bot/config, @discord-bot/logger, @discord-bot/database
-Audio → @discord-bot/config, @discord-bot/logger, @discord-bot/cache
-API → @discord-bot/config, @discord-bot/logger, @discord-bot/observability
-Worker → @discord-bot/config, @discord-bot/logger, @discord-bot/database
-```
+### Dependencias entre servicios
 
-This architecture ensures scalability, maintainability, and production reliability while providing enterprise-grade features for Discord music bot operations.
+```
+Gateway → @discord-bot/audio-control, @discord-bot/cache, @discord-bot/config, @discord-bot/database
+Audio   → @discord-bot/cache, @discord-bot/config, @discord-bot/database
+API     → @discord-bot/config, @discord-bot/database
+Worker  → @discord-bot/config, @discord-bot/database
+```

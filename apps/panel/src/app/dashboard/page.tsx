@@ -57,6 +57,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         initialSelectedGuildId={selectedGuild?.id}
         panelApiKey={panelApiKey}
         currentUserId={session.user.id}
+        noSidebar
       />
     </main>
   );

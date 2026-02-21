@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Allow longer execution - lrclib.net can be slow (get + search)
+export const maxDuration = 60;
+
 type LyricLine = {
   timeMs: number | null;
   text: string;
@@ -83,7 +86,7 @@ function buildLyricsResponse(payload: LrcLibPayload | null): LyricsResponse | nu
 
 async function fetchLrcLib(path: string, searchParams: URLSearchParams): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 7_000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${LRCLIB_BASE_URL}/${path}?${searchParams.toString()}`, {
       signal: controller.signal,
@@ -130,30 +133,38 @@ async function resolveLyrics(title: string, artist?: string, durationMs?: number
 }
 
 export async function GET(request: NextRequest) {
-  const title = request.nextUrl.searchParams.get('title')?.trim();
-  const artist = request.nextUrl.searchParams.get('artist')?.trim() || undefined;
-  const durationRaw = request.nextUrl.searchParams.get('durationMs');
-  const durationMs = durationRaw ? Number.parseInt(durationRaw, 10) : undefined;
+  try {
+    const title = request.nextUrl.searchParams.get('title')?.trim();
+    const artist = request.nextUrl.searchParams.get('artist')?.trim() || undefined;
+    const durationRaw = request.nextUrl.searchParams.get('durationMs');
+    const durationMs = durationRaw ? Number.parseInt(durationRaw, 10) : undefined;
 
-  if (!title) {
-    return NextResponse.json({ error: 'title is required' }, { status: 400 });
+    if (!title) {
+      return NextResponse.json({ error: 'title is required' }, { status: 400 });
+    }
+
+    const cacheKey = [title.toLowerCase(), artist?.toLowerCase() ?? '', durationMs ?? ''].join('|');
+    const cached = lyricsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return NextResponse.json(cached.value);
+    }
+
+    const resolved = await resolveLyrics(title, artist, durationMs);
+    if (!resolved || resolved.lines.length === 0) {
+      return NextResponse.json({ source: 'lrclib', synced: false, lines: [] satisfies LyricLine[] });
+    }
+
+    lyricsCache.set(cacheKey, {
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      value: resolved
+    });
+
+    return NextResponse.json(resolved);
+  } catch (err) {
+    console.error('[lyrics]', err);
+    return NextResponse.json(
+      { source: 'lrclib', synced: false, lines: [] satisfies LyricLine[], error: 'Lyrics temporarily unavailable' },
+      { status: 200 }
+    );
   }
-
-  const cacheKey = [title.toLowerCase(), artist?.toLowerCase() ?? '', durationMs ?? ''].join('|');
-  const cached = lyricsCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return NextResponse.json(cached.value);
-  }
-
-  const resolved = await resolveLyrics(title, artist, durationMs);
-  if (!resolved || resolved.lines.length === 0) {
-    return NextResponse.json({ source: 'lrclib', synced: false, lines: [] satisfies LyricLine[] });
-  }
-
-  lyricsCache.set(cacheKey, {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    value: resolved
-  });
-
-  return NextResponse.json(resolved);
 }

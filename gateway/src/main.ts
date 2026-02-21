@@ -3,16 +3,12 @@ import './env-loader.js';
 
 import {
   Events,
-  GatewayDispatchEvents,
-  ButtonInteraction,
-  StringSelectMenuInteraction,
   Guild
 } from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import { prisma, injectLogger } from '@discord-bot/database';
 import { logger } from '@discord-bot/logger';
 import { env } from '@discord-bot/config';
-import { loadPlansFromDatabase } from '@discord-bot/subscription';
 
 // Infrastructure Layer
 import { PrismaGuildSettingsRepository } from './infrastructure/database/prisma-guild-settings-repository.js';
@@ -27,15 +23,12 @@ import { RedisCircuitBreaker } from '@discord-bot/cache';
 import { SearchCache, UserCache, QueueCache, SettingsCache } from '@discord-bot/cache';
 // Message validation imports
 import {
-  safeValidateVoiceCredentialsMessage,
-  safeValidateVoiceCredentials,
-  safeValidateCommand,
-  safeValidateTrackQueued
+  redisStreams,
+  RedisStreamsManager
 } from '@discord-bot/cache';
 
 // Redis Streams services
 import { AudioCommandService } from './services/audio-command-service.js';
-import type { AudioCommand } from '@discord-bot/audio-control';
 
 // Domain Layer
 import { MusicSessionDomainService } from './domain/services/music-session-domain-service.js';
@@ -48,19 +41,10 @@ import { PlayMusicUseCase } from './application/use-cases/play-music-use-case.js
 import { MusicController } from './presentation/controllers/music-controller.js';
 import { MusicUIBuilder, FilterPanelState } from './presentation/ui/music-ui-builder.js';
 import { InteractionResponseHandler } from './presentation/ui/interaction-response-handler.js';
-import { PremiumController } from './presentation/controllers/premium-controller.js';
 
 // Settings Service
 import { SettingsService } from './services/settings-service.js';
 import { VoteSkipService } from './services/vote-skip-service.js';
-
-// Commercial Use Cases
-import { SubscriptionManagementUseCase } from './application/use-cases/subscription-management-use-case.js';
-
-// Commercial Infrastructure
-import { InMemoryCustomerRepository } from './infrastructure/repositories/in-memory-customer-repository.js';
-import { ActivePaymentService } from './infrastructure/payment/active-payment-service.js';
-import { StubNotificationService } from './infrastructure/notifications/stub-notification-service.js';
 
 // Enterprise Health Monitoring
 import { ApplicationHealthChecker } from './infrastructure/health/application-health-checker.js';
@@ -84,7 +68,6 @@ export class GatewayApplication {
   private uiBuilder!: MusicUIBuilder;
   private permissionService!: DiscordPermissionService;
   private voteSkipService!: VoteSkipService;
-  private premiumController!: PremiumController;
 
   // UI Message Tracking System (Rule 1: Only one UI PRINCIPAL per voice session)
   private activeInteractions: Map<string, {
@@ -202,6 +185,52 @@ export class GatewayApplication {
     this.pendingVoiceDisconnectStops.delete(guildId);
   }
 
+  // Publishes critical voice events to both Redis Streams (reliable) and Pub/Sub (compatibility path).
+  private async publishVoiceEvent(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    packet: any,
+    context: { source: string; requestId?: string; guildId?: string }
+  ): Promise<void> {
+    const guildId = context.guildId ?? packet?.d?.guild_id;
+    const publishedAt = Date.now();
+    const requestId = context.requestId ?? this.getVoiceRequestContext(guildId ?? '')?.requestId;
+    const shardBucket = guildId
+      ? Math.abs([...guildId].reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) | 0, 0)) % 32
+      : 0;
+
+    // Reliable path: Redis Streams (at-least-once via consumer groups)
+    try {
+      await redisStreams.addToStream(RedisStreamsManager.STREAMS.VOICE_EVENTS, {
+        payload: JSON.stringify(packet),
+        guildId: guildId ?? '',
+        eventType: String(packet?.t ?? ''),
+        publishedAt: String(publishedAt),
+        shardBucket: String(shardBucket),
+        source: context.source,
+        requestId: requestId ?? ''
+      });
+    } catch (error) {
+      logger.warn({
+        error: error instanceof Error ? error.message : String(error),
+        guildId,
+        eventType: packet?.t,
+        source: context.source
+      }, 'VOICE_CONNECT: Failed to publish voice event to Redis Streams');
+    }
+
+    // Compatibility path: existing Pub/Sub channel
+    await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify({
+      ...packet,
+      _meta: {
+        ...(packet?._meta ?? {}),
+        publishedAt,
+        shardBucket,
+        source: context.source,
+        requestId
+      }
+    }));
+  }
+
   private parseHexColorToInt(value?: string): number | undefined {
     if (!value || typeof value !== 'string') return undefined;
     const trimmed = value.trim();
@@ -243,9 +272,6 @@ export class GatewayApplication {
     // Inject logger dependency for database package
     injectLogger(logger);
 
-    // Load subscription plan overrides from database if available
-    await loadPlansFromDatabase(prisma);
-
     // Initialize external services
     this.redisManager = new RedisManager();
     await this.redisManager.connect();
@@ -261,9 +287,6 @@ export class GatewayApplication {
 
     // Initialize AudioCommandService for Redis Streams
     await this.audioCommandService.initialize();
-
-    // Ensure demo guilds start on premium tier for QA
-    await this.premiumController.initializeTestGuilds();
 
     // Setup Redis subscriptions for Audio service communication
     this.setupRedisSubscriptions();
@@ -377,11 +400,6 @@ export class GatewayApplication {
     // Initialize VoteSkipService
     this.voteSkipService = new VoteSkipService(this.permissionService, this.settingsService);
 
-    // Commercial Infrastructure
-    const customerRepository = new InMemoryCustomerRepository();
-    const paymentService = new ActivePaymentService();
-    const notificationService = new StubNotificationService();
-
     // Domain Layer (Business Logic)
     const musicSessionDomainService = new MusicSessionDomainService();
 
@@ -392,13 +410,6 @@ export class GatewayApplication {
       musicSessionDomainService,
       audioService,
       permissionService
-    );
-
-    // Commercial Use Cases
-    const _subscriptionManagementUseCase = new SubscriptionManagementUseCase(
-      customerRepository,
-      paymentService,
-      notificationService
     );
 
     // Presentation Layer (UI & Controllers)
@@ -482,7 +493,7 @@ export class GatewayApplication {
           endpoint: cached.endpoint
         }
       };
-      await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet));
+      await this.publishVoiceEvent(packet, { source: 'gateway_cached_voice_server_update', guildId });
     };
 
     const publishCachedVoiceStateUpdate = async (guildId: string, fallbackVoiceChannelId?: string): Promise<boolean> => {
@@ -512,7 +523,7 @@ export class GatewayApplication {
           }
         };
 
-        await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet));
+        await this.publishVoiceEvent(packet, { source: 'gateway_cached_voice_state_update', guildId });
         return true;
       } catch (error) {
         logger.warn({
@@ -541,11 +552,6 @@ export class GatewayApplication {
       publishCachedVoiceServerUpdate,
       this.registerVoiceRequestContext.bind(this)
     );
-
-    // Initialize Premium Controller
-    this.premiumController = new PremiumController({
-      testGuildIds: env.PREMIUM_TEST_GUILD_IDS_LIST,
-    });
 
     logger.info('Clean Architecture dependencies wired up successfully');
   }
@@ -756,6 +762,17 @@ export class GatewayApplication {
     } else if (data.payload?.op === 'queueEnd') {
       // Handle queue end
       logger.debug({ guildId: data.guildId }, 'Queue end event received');
+    } else if (data.payload?.op === 'leave_voice') {
+      // Audio requests leave (e.g. idle disconnect for non-persistent guilds)
+      const guildId = data.guildId;
+      if (guildId) {
+        const { getVoiceConnection } = await import('@discordjs/voice');
+        const connection = getVoiceConnection(guildId);
+        if (connection) {
+          connection.destroy();
+          logger.info({ guildId }, 'VOICE_CONNECT: Left voice channel (idle disconnect from Audio)');
+        }
+      }
     }
   }
 
@@ -967,7 +984,7 @@ export class GatewayApplication {
               self_deaf: me?.voice?.selfDeaf ?? true,
             }
           };
-          await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(voiceStatePacket));
+          await this.publishVoiceEvent(voiceStatePacket, { source: 'gateway_force_reconnect_voice_state', guildId });
         }
 
         if (voiceServer?.token && voiceServer?.endpoint) {
@@ -979,7 +996,7 @@ export class GatewayApplication {
               endpoint: voiceServer.endpoint
             }
           };
-          await this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(voiceServerPacket));
+          await this.publishVoiceEvent(voiceServerPacket, { source: 'gateway_force_reconnect_voice_server', guildId });
 
           if (sessionId) {
             await this.redisManager.getAudioClient().publish('discord-bot:to-audio', JSON.stringify({
@@ -1048,7 +1065,14 @@ export class GatewayApplication {
           { id: 'flat', label: 'Flat', description: 'No filter applied' },
           { id: 'bassboost', label: 'Bass Boost', description: 'Boost low frequencies' },
           { id: 'nightcore', label: 'Nightcore', description: 'Higher pitch and speed' },
-          { id: 'vaporwave', label: 'Vaporwave', description: 'Lower pitch and speed' }
+          { id: 'vaporwave', label: 'Vaporwave', description: 'Lower pitch and speed' },
+          { id: 'karaoke', label: 'Karaoke', description: 'Reduce lead vocals' },
+          { id: 'clarity', label: 'Studio Clarity', description: 'Enhance vocals and high detail' },
+          { id: 'tremolo', label: 'Tremolo', description: 'Rhythmic volume modulation' },
+          { id: 'vibrato', label: 'Vibrato', description: 'Musical pitch modulation' },
+          { id: 'surround', label: '8D Surround', description: 'Stereo rotation and immersive panning' },
+          { id: 'lowpass', label: 'Low Pass', description: 'Warm tone by reducing highs' },
+          { id: 'distortion', label: 'Tube Drive', description: 'Subtle analog-style saturation' }
         ],
         preset: { id: 'flat', label: 'Flat', description: 'No filter applied' }
       };
@@ -1206,11 +1230,7 @@ export class GatewayApplication {
             this.voiceManager.clearVoiceServerData(newState.guild.id);
             this.voiceManager.clearVoiceStateData(newState.guild.id);
 
-            await this.redisManager.publish('discord-bot:commands', {
-              guildId: newState.guild.id,
-              type: 'stop',
-              reason: 'voice_disconnect'
-            });
+            await this.audioCommandService.sendCommand('stop', newState.guild.id, { reason: 'voice_disconnect' });
 
             logger.warn({
               guildId: newState.guild.id,
@@ -1236,55 +1256,16 @@ export class GatewayApplication {
         }
       }
 
-      // Listener Limit Check
-      // Check if a user joined the channel where the bot is currently playing
+      // Listener monitoring in personal mode
       const botChannelId = newState.guild.members.me?.voice.channelId;
       if (botChannelId && newState.channelId === botChannelId && !newState.member?.user.bot) {
-        // A user joined the bot's channel
         const channel = newState.channel;
         if (channel && channel.isVoiceBased()) {
           const memberCount = channel.members.filter(m => !m.user.bot).size;
-
-          try {
-            // Get guild owner's tier (or guild subscription if implemented)
-            // For now, we check the guild owner's subscription
-            const { subscriptionService } = await import('@discord-bot/database');
-            const { getQuotaForTier } = await import('@discord-bot/config');
-
-            const dbTier = await subscriptionService.getUserTier(newState.guild.ownerId);
-
-            // Map database tier (uppercase) to config tier (lowercase)
-            // FREE -> free, GOLD -> basic, DIAMOND -> premium
-            let configTier: 'free' | 'basic' | 'premium' | 'enterprise' = 'free';
-            if (dbTier === 'GOLD') configTier = 'basic';
-            else if (dbTier === 'DIAMOND') configTier = 'premium';
-            else if (dbTier === 'ENTERPRISE') configTier = 'enterprise';
-
-            const maxListeners = getQuotaForTier(configTier, 'maxListeners');
-
-            if (maxListeners !== -1 && memberCount > maxListeners) {
-              logger.warn({
-                guildId: newState.guild.id,
-                memberCount,
-                maxListeners,
-                tier: configTier
-              }, 'Listener limit exceeded');
-
-              // Send warning to the last known UI channel
-              const textChannelId = this.lastUIChannel.get(this.getUIChannelMapKey(newState.guild.id, botChannelId));
-              if (textChannelId) {
-                const textChannel = await newState.guild.channels.fetch(textChannelId);
-                if (textChannel?.isTextBased() && 'send' in textChannel) {
-                  await textChannel.send({
-                    content: `⚠️ **Listener Limit Exceeded**\nYour current plan (**${dbTier}**) supports up to **${maxListeners}** listeners. There are currently **${memberCount}** users in the channel.\n\nPlease upgrade to **Premium** or **Enterprise** for unlimited listeners.`
-                  });
-                }
-              }
-            }
-
-          } catch (error) {
-            logger.error({ error }, 'Failed to check listener limits');
-          }
+          logger.debug({
+            guildId: newState.guild.id,
+            memberCount
+          }, 'Listener count observed (personal mode, limits disabled)');
         }
       }
     });
@@ -1327,7 +1308,11 @@ export class GatewayApplication {
         hasToken: packet.t === 'VOICE_SERVER_UPDATE' ? !!packet.d.token : undefined,
         sessionId: packet.t === 'VOICE_STATE_UPDATE' ? packet.d.session_id : undefined
       }, 'GATEWAY_RAW: Forwarding voice event to discord-bot:voice-events');
-      this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet))
+      this.publishVoiceEvent(packet, {
+        source: 'gateway_raw_event',
+        requestId: counter.requestId,
+        guildId
+      })
         .then(() => logger.debug({ type: packet.t, guildId }, 'GATEWAY_RAW: Successfully published voice event'))
         .catch(error => logger.error({ error }, 'Failed to forward voice event to Audio service'));
     });
@@ -1364,7 +1349,11 @@ export class GatewayApplication {
           endpoint: data.endpoint,
           hasToken: !!data.token
         }, 'GATEWAY_RAW: Forwarding voice event to discord-bot:voice-events (fallback)');
-        this.redisManager.getAudioClient().publish('discord-bot:voice-events', JSON.stringify(packet))
+        this.publishVoiceEvent(packet, {
+          source: 'gateway_raw_event_fallback',
+          requestId: counter.requestId,
+          guildId
+        })
           .then(() => logger.debug({ type: 'VOICE_SERVER_UPDATE', guildId }, 'GATEWAY_RAW: Successfully published voice event (fallback)'))
           .catch(error => logger.error({ error }, 'Failed to forward voice event to Audio service (fallback)'));
       } catch (error) {

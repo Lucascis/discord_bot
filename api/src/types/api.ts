@@ -82,6 +82,7 @@ export interface Track {
   uri: string;
   identifier: string;
   duration: number;
+  viewCount?: number;
   isSeekable: boolean;
   position?: number;
   thumbnail?: string;

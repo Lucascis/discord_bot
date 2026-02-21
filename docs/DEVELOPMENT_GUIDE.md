@@ -33,7 +33,7 @@ cp .env.example .env
 Edit `.env` with your Discord bot credentials:
 ```env
 # Discord Bot Configuration
-DISCORD_TOKEN=your_discord_bot_token_here
+DISCORD_TOKEN=your_discord_token_here
 DISCORD_APPLICATION_ID=your_discord_application_id_here
 DISCORD_GUILD_ID=your_test_guild_id_here  # Optional: for development
 
@@ -81,15 +81,15 @@ Los servicios principales viven en:
 
 - `gateway/` – interfaz Discord.js, slash commands, UI.
 - `audio/` – integración Lavalink, cola de reproducción, autoplay.
-- `api/` – API REST para planes, guilds, analíticas.
+- `api/` – API REST para niveles, guilds, analíticas.
 - `worker/` – jobs en background y tareas de mantenimiento con BullMQ.
 
 **Features**:
-- ✅ **Production ready** with enterprise optimizations
+- ✅ **Production ready** with optimizaciones operativas
 - ✅ **Distributed architecture** with Redis pub/sub communication
 - ✅ **Scalable design patterns** with independent service deployment
 - ✅ **Advanced caching** with predictive and adaptive strategies
-- ✅ **Background processing** with BullMQ enterprise job queues
+- ✅ **Background processing** with BullMQ job queues
 - ✅ **Comprehensive monitoring** with health checks and metrics
 
 ---
@@ -99,20 +99,17 @@ Los servicios principales viven en:
 ```
 discord_bot/
 ├── 🏗️ Microservices
-│   ├── gateway/                   # Discord.js interface
-│   ├── audio/                     # Lavalink client + lógica de audio
+│   ├── gateway/                   # Discord.js interface, slash commands
+│   ├── audio/                     # Lavalink client, cola, autoplay
 │   ├── api/                       # API REST
-│   └── worker/                    # Jobs y schedulers
-│   ├── audio/                    # Lavalink integration
-│   ├── api/                      # REST endpoints
-│   └── worker/                   # Background jobs
+│   └── worker/                    # BullMQ jobs y schedulers
 │
 ├── 📦 Shared Packages
 │   ├── packages/cache/           # Multi-layer caching
 │   ├── packages/config/          # Environment config
 │   ├── packages/database/        # Prisma ORM
 │   ├── packages/logger/          # Structured logging
-│   └── packages/subscription/    # Sistema de planes y billing
+│   └── packages/subscription/    # Compatibilidad legacy de runtime templates (en remoción)
 │
 ├── 🎵 External Services
 │   ├── lavalink/                 # Audio server config
@@ -191,8 +188,9 @@ pnpm exec tsc -p api/tsconfig.tests.json
 
 - `pnpm --filter @discord-bot/panel dev` levanta el panel en `http://localhost:3004`. Asegurate de definir `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_PANEL_API_KEY` y `INTERNAL_API_BASE_URL` en `.env`.
 - El reproductor utiliza **Server Sent Events** (`/api/v1/player/:guildId/events`). En desarrollo, verificá con `curl -N` que los eventos fluyan y que el dashboard consuma `getNowPlaying` antes de hidratar.
-- La funcionalidad **Invocar bot desde el panel** envía comandos premium al gateway. Para probarla sin Stripe, agrega tu guild a `PREMIUM_TEST_GUILD_IDS` y actualizá su `subscriptionTier` vía Prisma/psql.
-- Las invocaciones concurrentes están limitadas por plan. Si necesitás limpiar slots manualmente durante pruebas, ejecutá `redis-cli DEL discord-bot:active-instances:<guildId>`.
+- La funcionalidad **Invocar bot desde el panel** envía comandos operativos al gateway. Para pruebas, usa RuntimeConfig de guild y validá estado desde el panel.
+- **guildMutex**: En `audio/`, todas las mutaciones de queue/player deben ejecutarse bajo `guildMutex.run(guildId, async () => { ... })` para evitar condiciones de carrera.
+- Las invocaciones concurrentes se regulan por configuración runtime. Si necesitás limpiar slots manualmente durante pruebas, ejecutá `redis-cli DEL discord-bot:active-instances:<guildId>`.
 
 ## 🧪 **Testing Strategy**
 

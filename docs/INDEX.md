@@ -1,6 +1,6 @@
 # 📚 Discord Bot Documentation
 
-Comprehensive documentation for the enterprise Discord music bot with microservices architecture.
+Comprehensive documentation for the Discord music bot with microservices architecture.
 
 ## 🚀 Quick Start
 
@@ -26,7 +26,6 @@ Comprehensive documentation for the enterprise Discord music bot with microservi
 ### 🚀 **Operations**
 - [**Deployment Guide**](DEPLOYMENT_GUIDE.md) - 🐳 Docker, Kubernetes, production setup
 - [**Metrics**](METRICS.md) - 📊 Monitoring, observability, performance
-- [**Plan Configuration**](operations/PLAN_CONFIGURATION.md) - 💳 Runtime plan matrix, DB sync, tier audit
 - [**Lavalink Troubleshooting**](operations/LAVALINK_TROUBLESHOOTING.md) - 🔊 Voice/playback incident playbook
 - [**Troubleshooting**](guides/TROUBLESHOOTING.md) - 🔧 Common issues and solutions
 
@@ -35,7 +34,7 @@ Comprehensive documentation for the enterprise Discord music bot with microservi
 **✅ PRODUCTION-READY**
 - Microservices architecture stable
 - Distributed architecture with Redis pub/sub
-- Enterprise-grade audio processing with Lavalink
+- Audio processing operativo con Lavalink
 
 ## 🔗 Navigation
 

@@ -2041,7 +2041,7 @@ Use this checklist before deploying to production:
 
 #### 9. Operational Security
 - [ ] Backup and restore procedures tested
-- [ ] Incident response plan documented
+- [ ] Procedimiento de respuesta a incidentes documentado
 - [ ] Security contact information updated
 - [ ] SSH keys configured (no password auth)
 - [ ] Server OS updated and patched
@@ -2069,7 +2069,7 @@ Use this checklist before deploying to production:
 | Security training | Quarterly | All team | Manual |
 | Incident response drill | Annually | Security | Manual |
 
-### Incident Response Plan
+### Procedimiento de respuesta a incidentes
 
 #### Phase 1: Detection & Analysis (0-15 minutes)
 
@@ -2130,7 +2130,7 @@ docker-compose up -d
 1. **Document incident** - Write incident report
 2. **Root cause analysis** - Identify systemic issues
 3. **Implement fixes** - Prevent recurrence
-4. **Update procedures** - Improve response plan
+4. **Update procedures** - Mejorar procedimiento de respuesta
 5. **Team debrief** - Share learnings
 
 ### Vulnerability Disclosure Policy
@@ -2722,7 +2722,7 @@ These issues are **NOT** considered security vulnerabilities:
   - Installation: `brew install gitleaks`
   - Usage: `gitleaks detect --source . --verbose`
 
-- **HashiCorp Vault** - Enterprise secrets management
+- **HashiCorp Vault** - Gestión de secretos a escala
   - Website: https://www.vaultproject.io/
 
 #### Encryption

@@ -159,7 +159,7 @@ export function errorHandler(
 export function notFoundHandler(req: Request, res: Response): void {
   const error = new NotFoundError(`Route ${req.method} ${req.path}`);
 
-  logger.warn({
+  logger.info({
     request: {
       method: req.method,
       url: req.url,

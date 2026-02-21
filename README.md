@@ -1,4 +1,4 @@
-# 🎵 Discord Music Bot - Enterprise Edition
+# 🎵 Discord Music Bot
 
 [![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen)](https://github.com/your-org/discord-bot)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)](https://www.typescriptlang.org/)
@@ -6,7 +6,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen)](https://github.com/your-org/discord-bot)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Enterprise-grade Discord music bot** with premium subscriptions, multi-source playback, and advanced features. 100% production-ready with comprehensive testing and documentation.
+> **Discord music bot** con modo personal, reproducción multi-fuente y capacidades avanzadas. 100% operativo con testing y documentación completos.
 
 ---
 
@@ -26,19 +26,18 @@
 
 ### 👥 Community & Growth
 - **Referral System**: Invite friends and earn rewards.
-- **Promo Codes**: Redeem codes for premium access.
+- **Promo Codes**: Redeem codes for acceso avanzado.
 - **Collaborative Playlists**: Build playlists together with friends.
 - **Listener Limits**: Tier-based limits on voice channel listeners.
 
-### 💎 Billing & Plans
-- **Multi-Provider Support**: Stripe, MercadoPago, PayPal (pluggable architecture)
-- **Regional Routing**: Automatic provider selection by country
-- **3-Tier Plans**: FREE (1 instancia), PLUS (1 instancia, panel + audio dual) y PRO (3 instancias en distintos guilds, audio dual, 24/7)
-- **Feature Flags**: 15+ configurable tier-based features
-- **Customer Management**: Complete CRM with lifecycle tracking
+### 💎 Capacidades avanzadas
+- **Multi-Provider Support**: Stripe, MercadoPago, PayPal (arquitectura pluggable)
+- **Regional Routing**: Selección automática de proveedor por país
+- **Feature Flags**: 15+ características configurables por nivel
+- **Customer Management**: CRM completo con seguimiento de ciclo de vida
 - **Analytics & Metrics**: Revenue, churn, LTV, cohort analysis
-- **Audit Trail**: Complete billing history for compliance
-- **Implementation status**: The production build wires a stub payment provider by default. Stripe/MercadoPago connectors are available but require live credentials before premium plans can be sold.
+- **Audit Trail**: Historial completo para compliance
+- **Implementation status**: El build de producción usa un stub de pago por defecto. Conectores Stripe/MercadoPago disponibles requieren credenciales en vivo.
 
 ### 🏗️ Architecture
 - **Microservices**: Gateway, Audio, API, Worker services
@@ -52,7 +51,7 @@
 - **Resilient**: Circuit breakers, retry logic, graceful degradation
 - **Observable**: Prometheus metrics, Sentry error tracking
 
-### 🔒 Enterprise Grade
+### 🔒 Calidad operativa
 - **Comprehensive Testing**: 185+ tests, 88% coverage
 - **Type Safety**: Full TypeScript with strict mode
 - **Security**: Input validation, SQL injection prevention, rate limiting
@@ -84,7 +83,7 @@ cp .env.example .env
 
 **Minimum Required Variables**:
 ```env
-DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_TOKEN=your_bot_token_here
 DISCORD_APPLICATION_ID=your_app_id_here
 ```
 
@@ -115,9 +114,8 @@ curl http://localhost:3000/health
 |----------|-------------|
 | **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** | Production deployment instructions |
 | **[Project Structure](docs/PROJECT_STRUCTURE.md)** | Architecture and codebase structure |
-| **[Billing System](docs/ENTERPRISE_BILLING_SYSTEM.md)** | Payment integration and monetization |
 | **[Market Research](docs/MARKET_RESEARCH.md)** | Competitive landscape & positioning |
-| **Panel Web (apps/panel)** | Next.js dashboard/landing que consume los endpoints `/api/v1/plans` y muestra el control centralizado. |
+| **Panel Web (apps/panel)** | Next.js dashboard/landing con control centralizado. |
 
 ### Panel Web – ejecución y variables necesarias
 
@@ -146,18 +144,12 @@ PORT=3004 pnpm start
 Luego accede a `http://localhost:3004`:
 
 - Botón “Ingresar con Discord” → login OAuth.
-- Como administrador, usa una cuenta cuyo ID esté en `PANEL_STAFF_DISCORD_IDS` para ver `/admin/plans` (Plan Engine).
+- Como administrador, usa una cuenta cuyo ID esté en `PANEL_STAFF_DISCORD_IDS` para ver el panel operativo interno.
 
-Asegúrate de registrar la URL `http://localhost:3004/api/auth/callback/discord` (o el dominio correspondiente) en el Discord Developer Portal. Solo los IDs listados en `PANEL_STAFF_DISCORD_IDS` pueden acceder al Plan Engine (`/admin/plans`), donde se editan planes/precios en caliente.
+Asegúrate de registrar la URL `http://localhost:3004/api/auth/callback/discord` (o el dominio correspondiente) en el Discord Developer Portal. Solo los IDs listados en `PANEL_STAFF_DISCORD_IDS` pueden acceder al panel operativo interno.
 
-### Subscription Plans are Database-Driven
-Every tier (Free, Basic, Premium, Enterprise) is configured in PostgreSQL via the `subscription_plans` and `subscription_prices` tables. The services will refuse to boot until at least one active plan and its price records exist. See the deployment guide for seeding instructions.
-
-- `GET /api/v1/plans`: lista los planes/pricios almacenados en la base.
-- `GET /api/v1/plans/runtime`: muestra lo que cargaron Gateway/API en memoria.
-- `POST /api/v1/plans/reload`: fuerza nuevamente la carga desde DB sin reiniciar servicios.
-
-Estas rutas requieren `X-API-Key` y ahora se consumen desde `/admin/plans` (Plan Engine). Allí el staff puede editar metadata, experimentar con flags, crear precios y recargar el runtime sin reinicios.
+### Configuración en base de datos
+La configuracion operativa se gestiona desde PostgreSQL y RuntimeConfig. El panel interno y la API permiten ajustes de comportamiento sin reinicios en modo personal.
 
 ---
 
@@ -179,18 +171,6 @@ Estas rutas requieren `X-API-Key` y ahora se consumen desde `/admin/plans` (Plan
 /loop <mode>         - Set loop mode
 /nowplaying          - Show current track
 ```
-
-### Premium Commands
-```
-/premium status      - View subscription status
-/premium plans       - View available plans
-/premium upgrade     - Upgrade subscription
-/premium features    - View plan features
-/premium usage       - View usage statistics
-/premium cancel      - Cancel subscription
-```
-
----
 
 ## 🏗️ Architecture
 
@@ -304,7 +284,7 @@ discord_bot/
 │   ├── config/           # Configuration
 │   ├── database/         # Prisma ORM
 │   ├── logger/           # Logging system
-│   ├── subscription/     # Premium subscription system
+│   ├── subscription/     # Compatibilidad legacy (en remoción)
 │   └── ...
 ├── docs/                 # Documentation
 ├── scripts/              # Utility scripts
@@ -349,7 +329,7 @@ docker-compose up -d
 docker-compose -f docker-compose.production.yml up -d
 ```
 
-> Instancias: Discord solo permite 1 conexión de voz por bot y guild. Plus/Pro habilitan más instancias simultáneas en distintos servidores (hasta 3 en Pro); si re-invocás en el mismo guild, el bot se moverá al nuevo canal.
+> Instancias: Discord solo permite 1 conexión de voz por bot y guild. Los niveles avanzados habilitan más instancias simultáneas en distintos servidores; si re-invocás en el mismo guild, el bot se moverá al nuevo canal.
 
 ### Scaling
 
@@ -410,18 +390,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ✅ **Production Ready**: 100% complete
 - ✅ **Test Coverage**: 88%
 - ✅ **Documentation**: 98% complete
-- ✅ **Security**: Enterprise grade
+- ✅ **Security**: Calidad operativa
 - ✅ **Performance**: Optimized
 - ✅ **Scalability**: Multi-instance ready
 
 **Version**: 2.0.0
 **Last Updated**: November 5, 2025
-**Status**: ✅ Production Ready + Enterprise Billing
+**Status**: ✅ Production Ready
 
 ---
 
 <div align="center">
   <strong>Built with ❤️ using TypeScript, Discord.js, and Lavalink</strong>
   <br>
-  <sub>Enterprise-grade music bot for Discord communities</sub>
+  <sub>Music bot operativo para comunidades Discord</sub>
 </div>

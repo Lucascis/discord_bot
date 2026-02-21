@@ -9,7 +9,6 @@ import { prisma } from '@discord-bot/database';
 import { ValidationError, NotFoundError, InternalServerError } from '../../middleware/error-handler.js';
 import type { APIResponse, Guild, GuildSettings, UpdateGuildSettingsRequest } from '../../types/api.js';
 import { getGuildIconURL } from '../../utils/discord.js';
-import { resolveGuildTier } from '../../services/effective-guild-tier.js';
 import { getRuntimeAuthContext, requireGuildAdminOrSuperAdmin } from '../../middleware/runtime-config-auth.js';
 import { hasManageGuildPermission } from '../../services/discord-guild-permissions.js';
 
@@ -23,12 +22,7 @@ const DEFAULT_UI_THEME = {
   pausedColor: '#FFAA00'
 };
 
-const PLAN_INSTANCE_LIMITS: Record<string, number> = {
-  FREE: 0,
-  BASIC: 1,
-  PREMIUM: 3,
-  ENTERPRISE: 10
-};
+const PERSONAL_MODE_INSTANCE_LIMIT = 10;
 
 function getRequestId(headerValue: string | string[] | undefined): string | undefined {
   return Array.isArray(headerValue) ? headerValue[0] : headerValue;
@@ -43,7 +37,6 @@ type GuildMetadataLike = {
   discordGuildId: string;
   name: string;
   icon: string | null;
-  subscriptionTier?: string | null;
   ownerId?: string | null;
 };
 
@@ -68,11 +61,6 @@ function parseMeta(raw: string | null): Partial<GuildSettings> {
   } catch {
     return {};
   }
-}
-
-function getPlanInstanceLimit(tier: string): number {
-  const normalized = tier.toUpperCase();
-  return PLAN_INSTANCE_LIMITS[normalized] ?? 1;
 }
 
 async function fetchDiscordGuildSummary(guildId: string): Promise<DiscordGuildSummary | null> {
@@ -124,15 +112,9 @@ async function resetActiveInstances(guildId: string): Promise<void> {
 function buildGuildPayload(
   config: {
     guildId: string;
-    subscriptionTier?: string | null;
   },
   metadata?: GuildMetadataLike,
 ): Guild {
-  const tierResolution = resolveGuildTier({
-    guildId: config.guildId,
-    serverConfigTier: config.subscriptionTier,
-    guildSubscriptionTier: metadata?.subscriptionTier,
-  });
   const name = typeof metadata?.name === 'string' ? metadata.name.trim() : '';
   const icon = metadata?.icon?.startsWith('http')
     ? metadata.icon
@@ -142,9 +124,7 @@ function buildGuildPayload(
     name: name || `Servidor ${config.guildId.slice(-4)}`,
     icon: icon ?? undefined,
     memberCount: undefined,
-    available: true,
-    subscriptionTier: tierResolution.effectiveTier,
-    isPremium: tierResolution.effectiveTier === 'PREMIUM' || tierResolution.effectiveTier === 'ENTERPRISE'
+    available: true
   };
 }
 
@@ -160,12 +140,7 @@ router.get('/guilds', asyncHandler(async (req, res) => {
         discordGuildId: true,
         name: true,
         icon: true,
-        ownerId: true,
-        subscription: {
-          select: {
-            tier: true
-          }
-        }
+        ownerId: true
       }
     })
   ]);
@@ -177,13 +152,12 @@ router.get('/guilds', asyncHandler(async (req, res) => {
         discordGuildId: record.discordGuildId,
         name: record.name,
         icon: record.icon,
-        ownerId: record.ownerId,
-        subscriptionTier: record.subscription?.tier ?? null,
+        ownerId: record.ownerId
       }
     ])
   );
 
-  const configByGuildId = new Map<string, { guildId: string; subscriptionTier?: string | null }>(
+  const configByGuildId = new Map<string, { guildId: string }>(
     serverConfigs.map((config) => [config.guildId, config])
   );
 
@@ -194,7 +168,7 @@ router.get('/guilds', asyncHandler(async (req, res) => {
 
   const visibleGuilds: Guild[] = [];
   for (const guildId of candidateGuildIds) {
-    const config = configByGuildId.get(guildId) ?? { guildId, subscriptionTier: null };
+    const config = configByGuildId.get(guildId) ?? { guildId };
     if (auth.isSuperAdmin) {
       visibleGuilds.push(buildGuildPayload(config, metadataByGuildId.get(config.guildId)));
       continue;
@@ -229,8 +203,7 @@ router.get('/guilds', asyncHandler(async (req, res) => {
           discordGuildId: guild.id,
           name: summary?.name ?? metadata?.name ?? guild.name,
           icon: summary?.icon ?? metadata?.icon ?? null,
-          ownerId: metadata?.ownerId ?? null,
-          subscriptionTier: metadata?.subscriptionTier ?? null,
+          ownerId: metadata?.ownerId ?? null
         });
       }
     }
@@ -449,37 +422,15 @@ router.post('/guilds/:guildId/summon', validateGuildId, requireGuildAdminOrSuper
   const { guildId } = req.params;
   const payload = summonSchema.parse(req.body ?? {});
 
-  const [serverConfig, guildRecord] = await Promise.all([
-    prisma.serverConfiguration.findUnique({
-      where: { guildId }
-    }),
-    prisma.guild.findUnique({
-      where: { discordGuildId: guildId },
-      select: {
-        subscription: {
-          select: {
-            tier: true
-          }
-        }
-      }
-    })
-  ]);
+  const serverConfig = await prisma.serverConfiguration.findUnique({
+    where: { guildId }
+  });
 
   if (!serverConfig) {
     throw new NotFoundError('Guild');
   }
 
-  const tier = resolveGuildTier({
-    guildId,
-    serverConfigTier: serverConfig.subscriptionTier,
-    guildSubscriptionTier: guildRecord?.subscription?.tier ?? null
-  }).effectiveTier;
-
-  if (tier === 'FREE') {
-    throw new ValidationError('Necesitás un plan pago para invocar el bot desde el panel.');
-  }
-
-  const limit = getPlanInstanceLimit(tier);
+  const limit = PERSONAL_MODE_INSTANCE_LIMIT;
   const activeInstances = await readActiveInstances(guildId);
   const activeEntries = Object.entries(activeInstances);
   const isDuplicateInstance = activeEntries.some(([voice, text]) => voice === payload.voiceChannelId && text === payload.textChannelId);
@@ -488,7 +439,7 @@ router.post('/guilds/:guildId/summon', validateGuildId, requireGuildAdminOrSuper
     if (limit === 1) {
       await resetActiveInstances(guildId);
     } else {
-      throw new ValidationError(`Alcanzaste el máximo de instancias activas (${limit}) para tu plan.`);
+      throw new ValidationError(`Alcanzaste el máximo de instancias activas (${limit}) en modo personal.`);
     }
   }
 

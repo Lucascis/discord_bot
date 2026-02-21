@@ -199,10 +199,6 @@ router.use('/webhooks', webhookRoutes);
 import analyticsRoutes from './analytics.js';
 router.use('/analytics', analyticsRoutes);
 
-// Plan administration routes
-import planRoutes from './plans.js';
-router.use('/plans', planRoutes);
-
 // Player control routes
 import playerRoutes from './player.js';
 router.use('/player', playerRoutes);

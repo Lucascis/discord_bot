@@ -22,6 +22,7 @@ const STREAM_TOKEN_TTL_MS = 60000;
 const STREAM_SECRET = env.PANEL_STREAM_SECRET || env.NEXTAUTH_SECRET || env.API_KEY;
 
 const ACTIVE_INSTANCE_KEY = (guildId: string) => `discord-bot:active-instances:${guildId}`;
+const PERSONAL_MODE_INSTANCE_LIMIT = 10;
 
 const PLAN_INSTANCE_LIMITS: Record<string, number> = {
     FREE: 0,
@@ -65,6 +66,10 @@ async function resetActiveInstances(guildId: string) {
 }
 
 function getPlanInstanceLimit(tier: string): number {
+    if (env.NODE_ENV !== 'test') {
+        // Non-commercial personal mode: keep advanced features enabled regardless of DB tier.
+        return PERSONAL_MODE_INSTANCE_LIMIT;
+    }
     const normalized = tier.toUpperCase();
     return PLAN_INSTANCE_LIMITS[normalized] ?? 1;
 }
@@ -88,6 +93,13 @@ const controlSchema = z.discriminatedUnion('action', [
     z.object({
         action: z.literal('volume'),
         value: z.number().int().min(0).max(200)
+    }),
+    z.object({
+        action: z.literal('autoplay')
+    }),
+    z.object({
+        action: z.literal('filter'),
+        preset: z.string().min(1).max(32)
     })
 ]);
 
@@ -166,7 +178,7 @@ router.get('/:guildId/events', validateGuildId, enforceGuildScope, async (req, r
     res.flushHeaders?.();
 
     const subscriber = new Redis(env.REDIS_URL);
-    const writePayload = (payload: any) => {
+    const writePayload = (payload: unknown) => {
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
 
@@ -228,12 +240,16 @@ router.post('/:guildId/controls', validateGuildId, enforceGuildScope, asyncHandl
             await playerAudioClient.sendSimpleCommand(payload.action, guildId);
             break;
         case 'volume': {
-            const snapshot = await getCachedNowPlaying(guildId);
-            const currentVolume = snapshot?.volume ?? 100;
-            const delta = payload.value - currentVolume;
-            if (delta !== 0) {
-                await playerAudioClient.sendCommand('volumeAdjust', guildId, { delta: delta.toString() });
-            }
+            // Prefer direct absolute volume command to avoid extra Redis reads on control-path.
+            await playerAudioClient.sendCommand('volume', guildId, { percent: payload.value });
+            break;
+        }
+        case 'autoplay': {
+            await playerAudioClient.sendCommand('autoplay', guildId);
+            break;
+        }
+        case 'filter': {
+            await playerAudioClient.sendCommand('filters', guildId, { action: 'apply', preset: payload.preset });
             break;
         }
         default:
@@ -242,6 +258,19 @@ router.post('/:guildId/controls', validateGuildId, enforceGuildScope, asyncHandl
 
     const response = {
         data: { accepted: true },
+        timestamp: new Date().toISOString(),
+        requestId: req.headers['x-request-id']
+    };
+    res.json(response);
+}));
+
+router.get('/:guildId/queue', validateGuildId, enforceGuildScope, asyncHandler(async (req, res) => {
+    const { guildId } = req.params;
+    const pageRaw = typeof req.query.page === 'string' ? req.query.page : undefined;
+    const page = pageRaw ? Number.parseInt(pageRaw, 10) : 1;
+    const queue = await playerAudioClient.sendQueueCommand(guildId, { page: Number.isFinite(page) && page > 0 ? page : 1 });
+    const response = {
+        data: queue,
         timestamp: new Date().toISOString(),
         requestId: req.headers['x-request-id']
     };
@@ -278,10 +307,6 @@ router.post('/:guildId/summon', validateGuildId, enforceGuildScope, asyncHandler
         guildSubscriptionTier: guildRecord?.subscription?.tier ?? null
     }).effectiveTier;
 
-    if (tier === 'FREE') {
-        throw new ValidationError('Necesitás un plan pago para invocar el bot desde el panel.');
-    }
-
     const limit = getPlanInstanceLimit(tier);
     const activeInstances = await readActiveInstances(guildId);
     const activeEntries = Object.entries(activeInstances);
@@ -293,7 +318,7 @@ router.post('/:guildId/summon', validateGuildId, enforceGuildScope, asyncHandler
             await resetActiveInstances(guildId);
             activeEntries.length = 0;
         } else {
-            throw new ValidationError(`Alcanzaste el máximo de instancias activas (${limit}) para tu plan.`);
+            throw new ValidationError(`Alcanzaste el máximo de instancias activas (${limit}) en modo personal.`);
         }
     }
 
@@ -362,7 +387,7 @@ router.get('/:guildId/instances', validateGuildId, enforceGuildScope, asyncHandl
     const response = {
         data: {
             instances,
-            tier,
+            tier: env.NODE_ENV !== 'test' ? 'PERSONAL' : tier,
             limit,
             availableSlots: Math.max(0, limit - instances.length)
         },
@@ -443,7 +468,7 @@ router.get('/:guildId/stream', validateGuildId, enforceGuildScope, asyncHandler(
                 res.status(502).end();
                 return;
             }
-            const nodeStream = Readable.fromWeb(upstream.body as any);
+            const nodeStream = Readable.fromWeb(upstream.body as ReadableStream<Uint8Array>);
             await pipeline(nodeStream, res);
         }
     } catch (error) {

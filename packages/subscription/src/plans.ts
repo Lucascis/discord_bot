@@ -101,7 +101,7 @@ const DEFAULT_PLAN_TEMPLATES: Record<SubscriptionTier, PlanDefinition> = {
     },
     features: {
       concurrentPlaybacks: 3,
-      audioQuality: 'highest',
+      audioQuality: 'lossless',
       basicCommands: true,
       advancedCommands: true,
       premiumCommands: true,
@@ -445,7 +445,7 @@ export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void>
   });
 
   if (rows.length === 0) {
-    console.warn('[Subscription] No active plans found in DB, seeding defaults from templates');
+    console.warn('[RuntimeConfig] No active runtime plan rows found in DB, seeding defaults from templates');
     await seedDefaultPlans(prisma);
     rows = await prisma.subscriptionPlan.findMany({
       where: { active: true },
@@ -458,7 +458,7 @@ export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void>
   }
 
   if (rows.length === 0) {
-    throw new Error('No subscription plans found in the database after default seeding');
+    throw new Error('No runtime plan rows found in the database after default seeding');
   }
 
   const mapped: Partial<Record<SubscriptionTier, PlanDefinition>> = {};
@@ -470,11 +470,11 @@ export async function loadPlansFromDatabase(prisma: PrismaClient): Promise<void>
   }
 
   if (Object.keys(mapped).length === 0) {
-    throw new Error('Failed to map subscription plans from the database');
+    throw new Error('Failed to map runtime plan rows from the database');
   }
 
   planCache = mapped;
-  console.info(`[Subscription] Loaded ${Object.keys(mapped).length} subscription plan definitions from database`);
+  console.info(`[RuntimeConfig] Loaded ${Object.keys(mapped).length} runtime plan definitions from database`);
 }
 
 export function setPlanOverrides(overrides: Partial<Record<SubscriptionTier, PlanDefinition>> | null): void {

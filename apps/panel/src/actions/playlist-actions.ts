@@ -19,6 +19,20 @@ export async function createPlaylist(name: string, isPublic: boolean) {
     revalidatePath('/dashboard');
 }
 
+export async function updatePlaylist(playlistId: string, payload: { name?: string; isPublic?: boolean }) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    await playlistService.updatePlaylist(playlistId, user.id, payload);
+    revalidatePath('/dashboard/playlists');
+}
+
+export async function deletePlaylist(playlistId: string) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    await playlistService.deletePlaylist(playlistId, user.id);
+    revalidatePath('/dashboard/playlists');
+}
+
 export async function getUserPlaylists() {
     const user = await getCurrentUser();
     if (!user) return [];
@@ -27,6 +41,27 @@ export async function getUserPlaylists() {
 
 export async function getPlaylist(id: string) {
     return await playlistService.getPlaylist(id);
+}
+
+export async function addTrackToPlaylist(playlistId: string, track: { title: string; uri: string }) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    await playlistService.addTrack(playlistId, user.id, track);
+    revalidatePath('/dashboard/playlists');
+}
+
+export async function removeTrackFromPlaylist(playlistId: string, itemId: string) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    await playlistService.removeTrack(playlistId, user.id, itemId);
+    revalidatePath('/dashboard/playlists');
+}
+
+export async function reorderPlaylistTrack(playlistId: string, itemId: string, targetPosition: number) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Unauthorized');
+    await playlistService.reorderTrack(playlistId, user.id, itemId, targetPosition);
+    revalidatePath('/dashboard/playlists');
 }
 
 export async function addCollaborator(playlistId: string, collaboratorId: string) {

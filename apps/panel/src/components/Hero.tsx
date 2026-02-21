@@ -61,7 +61,7 @@ export function Hero() {
             </div>
             <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
               <span>Panel summon</span>
-              <span className="text-cyan-300">paid plans</span>
+              <span className="text-cyan-300">personal mode</span>
             </div>
           </div>
           <div className="mt-5 rounded-xl border border-brand-300/30 bg-brand-400/10 px-4 py-3 text-sm text-brand-100">

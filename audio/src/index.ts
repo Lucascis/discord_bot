@@ -17,10 +17,20 @@ import {
 import { env } from '@discord-bot/config';
 import { logger, HealthChecker, CommonHealthChecks, getAdvancedHealthMonitor, initializeSentry } from '@discord-bot/logger';
 import { prisma } from '@discord-bot/database';
-import { RedisCircuitBreaker, type RedisCircuitBreakerConfig, safeValidateVoiceCredentials, safeValidateVoiceCredentialsMessage, type VoiceCredentials, type StreamCommandData } from '@discord-bot/cache';
+import {
+  RedisCircuitBreaker,
+  type RedisCircuitBreakerConfig,
+  safeValidateVoiceCredentials,
+  safeValidateVoiceCredentialsMessage,
+  type VoiceCredentials,
+  type StreamCommandData,
+  redisStreams,
+  RedisStreamsManager,
+  type StreamMessage
+} from '@discord-bot/cache';
 import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Registry, collectDefaultMetrics, Histogram, Gauge } from 'prom-client';
 // import { NodeSDK } from '@opentelemetry/sdk-node';
 // import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 // import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -70,7 +80,18 @@ await redisManager.connect();
 const redisPub = redisManager.getPublisher();
 logger.info('VOICE_CONNECT: Redis subscriber connected and ready for discord-bot:to-audio messages');
 
-type FilterPresetId = 'flat' | 'bassboost' | 'nightcore' | 'vaporwave' | 'karaoke' | 'clarity';
+type FilterPresetId =
+  | 'flat'
+  | 'bassboost'
+  | 'nightcore'
+  | 'vaporwave'
+  | 'karaoke'
+  | 'clarity'
+  | 'tremolo'
+  | 'vibrato'
+  | 'surround'
+  | 'lowpass'
+  | 'distortion';
 
 interface FilterPresetDefinition {
   id: FilterPresetId;
@@ -79,7 +100,68 @@ interface FilterPresetDefinition {
   apply(player: Player): Promise<void>;
 }
 
+interface LavalinkFilterPayload {
+  volume?: number;
+  equalizer?: Array<{ band: number; gain: number }>;
+  karaoke?: {
+    level?: number;
+    monoLevel?: number;
+    filterBand?: number;
+    filterWidth?: number;
+  };
+  timescale?: {
+    speed?: number;
+    pitch?: number;
+    rate?: number;
+  };
+  tremolo?: {
+    frequency?: number;
+    depth?: number;
+  };
+  vibrato?: {
+    frequency?: number;
+    depth?: number;
+  };
+  rotation?: {
+    rotationHz?: number;
+  };
+  distortion?: {
+    sinOffset?: number;
+    sinScale?: number;
+    cosOffset?: number;
+    cosScale?: number;
+    tanOffset?: number;
+    tanScale?: number;
+    offset?: number;
+    scale?: number;
+  };
+  channelMix?: {
+    leftToLeft?: number;
+    leftToRight?: number;
+    rightToLeft?: number;
+    rightToRight?: number;
+  };
+  lowPass?: {
+    smoothing?: number;
+  };
+}
+
 const activeFilterPresets = new Map<string, FilterPresetId>();
+
+async function applyLavalinkFilters(player: Player, filters: LavalinkFilterPayload): Promise<void> {
+  const node = player.node as LavalinkNode | undefined;
+  if (!node?.sessionId) {
+    throw new Error('Lavalink node session is not ready for filter update');
+  }
+
+  await node.updatePlayer({
+    guildId: player.guildId,
+    playerOptions: {
+      // Lavalink v4 overrides previously applied filters when filters is provided.
+      filters,
+    },
+  });
+}
 
 const NOW_PLAYING_CACHE_PREFIX = 'discord-bot:now-playing:';
 const NOW_PLAYING_CACHE_TTL_SECONDS = 30;
@@ -188,7 +270,7 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Flat',
     description: 'Disable all enhancements and play the track as-is.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
+      await applyLavalinkFilters(player, {});
     },
   },
   bassboost: {
@@ -196,8 +278,9 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Bass Boost',
     description: 'Enhances low frequencies for a punchier mix.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
-      await player.filterManager.setEQ([...BASS_BOOST_BANDS]);
+      await applyLavalinkFilters(player, {
+        equalizer: [...BASS_BOOST_BANDS],
+      });
     },
   },
   nightcore: {
@@ -205,8 +288,9 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Nightcore',
     description: 'Raises tempo and pitch for energetic playback.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
-      await player.filterManager.toggleNightcore(1.25, 1.12, 1.0);
+      await applyLavalinkFilters(player, {
+        timescale: { speed: 1.25, pitch: 1.12, rate: 1.0 },
+      });
     },
   },
   vaporwave: {
@@ -214,8 +298,9 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Vaporwave',
     description: 'Slowed, detuned ambience for chill sessions.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
-      await player.filterManager.toggleVaporwave(0.85, 0.8, 1.0);
+      await applyLavalinkFilters(player, {
+        timescale: { speed: 0.85, pitch: 0.8, rate: 1.0 },
+      });
     },
   },
   karaoke: {
@@ -223,8 +308,9 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Karaoke',
     description: 'Suppresses lead vocals to highlight instrumentals.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
-      await player.filterManager.toggleKaraoke(1, 1, 220, 100);
+      await applyLavalinkFilters(player, {
+        karaoke: { level: 1, monoLevel: 1, filterBand: 220, filterWidth: 100 },
+      });
     },
   },
   clarity: {
@@ -232,8 +318,74 @@ const FILTER_PRESETS: Record<FilterPresetId, FilterPresetDefinition> = {
     label: 'Studio Clarity',
     description: 'Boosts vocals and highs for crisp detail.',
     apply: async (player) => {
-      await player.filterManager.resetFilters();
-      await player.filterManager.setEQ([...CLARITY_BANDS]);
+      await applyLavalinkFilters(player, {
+        equalizer: [...CLARITY_BANDS],
+      });
+    },
+  },
+  tremolo: {
+    id: 'tremolo',
+    label: 'Tremolo',
+    description: 'Adds rhythmic volume modulation for texture.',
+    apply: async (player) => {
+      await applyLavalinkFilters(player, {
+        tremolo: { frequency: 4.0, depth: 0.75 },
+      });
+    },
+  },
+  vibrato: {
+    id: 'vibrato',
+    label: 'Vibrato',
+    description: 'Adds controlled pitch modulation.',
+    apply: async (player) => {
+      await applyLavalinkFilters(player, {
+        vibrato: { frequency: 6.0, depth: 0.65 },
+      });
+    },
+  },
+  surround: {
+    id: 'surround',
+    label: '8D Surround',
+    description: 'Stereo rotation + channel mix for immersive movement.',
+    apply: async (player) => {
+      await applyLavalinkFilters(player, {
+        rotation: { rotationHz: 0.22 },
+        channelMix: {
+          leftToLeft: 0.5,
+          leftToRight: 0.5,
+          rightToLeft: 0.5,
+          rightToRight: 0.5,
+        },
+      });
+    },
+  },
+  lowpass: {
+    id: 'lowpass',
+    label: 'Low Pass',
+    description: 'Softens highs for a warm, smooth tone.',
+    apply: async (player) => {
+      await applyLavalinkFilters(player, {
+        lowPass: { smoothing: 20.0 },
+      });
+    },
+  },
+  distortion: {
+    id: 'distortion',
+    label: 'Tube Drive',
+    description: 'Subtle harmonic distortion for character.',
+    apply: async (player) => {
+      await applyLavalinkFilters(player, {
+        distortion: {
+          sinOffset: 0.0,
+          sinScale: 0.9,
+          cosOffset: 0.0,
+          cosScale: 0.95,
+          tanOffset: 0.0,
+          tanScale: 0.08,
+          offset: 0.0,
+          scale: 1.0,
+        },
+      });
     },
   },
 };
@@ -371,6 +523,18 @@ const previousTrackTimestamps = new Map<string, number>();
 // Store muted volumes for each guild
 const mutedVolumes = new Map<string, number>();
 
+// Track when guild became idle (queue empty, no current) for persistentConnection logic
+const idleSinceMs = new Map<string, number>();
+const IDLE_DISCONNECT_THRESHOLD_MS = 300_000; // 5 min
+const IDLE_CHECK_INTERVAL_MS = 120_000; // 2 min
+
+// Playback watchdog: detect orphaned players where trackEnd was never emitted
+const trackExpectedEndMs = new Map<string, number>();
+const watchdogPositionSnapshot = new Map<string, { lastPositionMs: number; stagnantChecks: number }>();
+const WATCHDOG_CHECK_INTERVAL_MS = 15_000; // check every 15s
+const WATCHDOG_GRACE_PERIOD_MS = 30_000;   // 30s grace after expected end
+const WATCHDOG_MIN_STAGNANT_CHECKS = 4;
+
 async function applyMuteToggle(
   player: import('lavalink-client').Player,
   guildId: string,
@@ -430,6 +594,7 @@ const lastVoiceSyncState = new Map<string, {
   signature: string;
   syncedAt: number;
 }>();
+const voiceSyncInFlight = new Set<string>();
 
 type GlitchIndicator = 'player_resync' | 'voice_reconnect_attempt' | 'track_interruption';
 const playbackGlitchIndicators = new Map<string, {
@@ -584,12 +749,16 @@ function isPlaybackCriticalMode(): boolean {
  */
 function cleanupGuildMaps(guildId: string): void {
   const deletedCount = {
+    idleSinceMs: idleSinceMs.delete(guildId) ? 1 : 0,
+    trackExpectedEndMs: trackExpectedEndMs.delete(guildId) ? 1 : 0,
+    watchdogPositionSnapshot: watchdogPositionSnapshot.delete(guildId) ? 1 : 0,
     previousTracks: previousTracks.delete(guildId) ? 1 : 0,
     previousTrackTimestamps: previousTrackTimestamps.delete(guildId) ? 1 : 0,
     mutedVolumes: mutedVolumes.delete(guildId) ? 1 : 0,
     activeFilterPresets: activeFilterPresets.delete(guildId) ? 1 : 0,
     pendingConnections: pendingPlayerConnections.delete(guildId) ? 1 : 0,
     voiceSyncState: lastVoiceSyncState.delete(guildId) ? 1 : 0,
+    voiceSyncInFlight: voiceSyncInFlight.delete(guildId) ? 1 : 0,
     playbackGuardStallCount: playbackGuardStallCount.delete(guildId) ? 1 : 0,
     playbackGuardRecoveryCooldown: playbackGuardLastRecoveryAt.delete(guildId) ? 1 : 0,
     playbackGlitchIndicators: playbackGlitchIndicators.delete(guildId) ? 1 : 0,
@@ -609,6 +778,7 @@ function cleanupGuildMaps(guildId: string): void {
         activeFilterPresets: activeFilterPresets.size,
         pendingConnections: pendingPlayerConnections.size,
         voiceSyncState: lastVoiceSyncState.size,
+        voiceSyncInFlight: voiceSyncInFlight.size,
         playbackGuardStallCount: playbackGuardStallCount.size,
         playbackGuardRecoveryCooldown: playbackGuardLastRecoveryAt.size,
         playbackGlitchIndicators: playbackGlitchIndicators.size,
@@ -721,10 +891,29 @@ async function syncVoiceToLavalink(
   voice: { sessionId: string; token: string; endpoint: string },
   source: 'pending' | 'existing' | 'guard'
 ): Promise<void> {
+  if (voiceSyncInFlight.has(player.guildId)) {
+    logger.debug({
+      guildId: player.guildId,
+      source,
+    }, 'VOICE_CONNECT: Skipping voice sync because another sync is already in-flight');
+    return;
+  }
+  voiceSyncInFlight.add(player.guildId);
+  try {
   const signature = `${voice.sessionId}:${voice.token}:${voice.endpoint}`;
   const previous = lastVoiceSyncState.get(player.guildId);
   const duplicateSignature = Boolean(previous && previous.signature === signature);
   const stablePlayback = player.playing && !player.paused && player.connected;
+  const recentlySynced = Boolean(previous && (Date.now() - previous.syncedAt) < EXISTING_SYNC_COOLDOWN_MS);
+  if (source === 'existing' && stablePlayback && recentlySynced) {
+    logger.debug({
+      guildId: player.guildId,
+      source,
+      syncedAt: previous?.syncedAt,
+      cooldownMs: EXISTING_SYNC_COOLDOWN_MS,
+    }, 'VOICE_CONNECT: Skipping existing-player voice sync during stable playback cooldown');
+    return;
+  }
   if (duplicateSignature && stablePlayback) {
     logger.debug({
       guildId: player.guildId,
@@ -772,6 +961,9 @@ async function syncVoiceToLavalink(
     signature,
     syncedAt: Date.now(),
   });
+  } finally {
+    voiceSyncInFlight.delete(player.guildId);
+  }
 }
 
 async function validatePlaybackOrRecover(
@@ -891,11 +1083,12 @@ async function validatePlaybackOrRecover(
   });
 }
 
-const PLAYBACK_GUARD_START_DELAY_MS = 7000;
-const PLAYBACK_GUARD_SAMPLE_WINDOW_MS = 3000;
-const PLAYBACK_GUARD_MIN_ADVANCE_MS = 1500;
-const PLAYBACK_GUARD_MIN_STALL_SAMPLES = 4;
+const PLAYBACK_GUARD_START_DELAY_MS = 10000;
+const PLAYBACK_GUARD_SAMPLE_WINDOW_MS = 5000;
+const PLAYBACK_GUARD_MIN_ADVANCE_MS = 2200;
+const PLAYBACK_GUARD_MIN_STALL_SAMPLES = 6;
 const PLAYBACK_GUARD_RECOVERY_COOLDOWN_MS = 60_000;
+const EXISTING_SYNC_COOLDOWN_MS = 90_000;
 const playbackGuardStallCount = new Map<string, number>();
 const playbackGuardLastRecoveryAt = new Map<string, number>();
 
@@ -1049,6 +1242,127 @@ await healthService.initialize();
 await lavalinkManager.initialize();
 youtubeTokenSyncService.start();
 
+// Idle disconnect for non-persistent guilds (24/7: persistentConnection=true skips)
+setInterval(async () => {
+  const now = Date.now();
+  for (const [guildId, idleAt] of idleSinceMs) {
+    if (now - idleAt < IDLE_DISCONNECT_THRESHOLD_MS) continue;
+    const player = manager.getPlayer(guildId);
+    if (!player || player.playing || player.queue.current || player.queue.tracks.length > 0) {
+      idleSinceMs.delete(guildId);
+      continue;
+    }
+    try {
+      const config = await prisma.serverConfiguration.findUnique({
+        where: { guildId },
+        select: { persistentConnection: true }
+      });
+      if (config?.persistentConnection) continue; // 24/7: do not disconnect
+      idleSinceMs.delete(guildId);
+      await redisPub.publish('discord-bot:to-discord', JSON.stringify({
+        guildId,
+        payload: { op: 'leave_voice' }
+      }));
+      await player.destroy();
+      logger.info({ guildId, idleMs: now - idleAt }, 'audio: idle disconnect (non-persistent)');
+    } catch (e) {
+      logger.warn({ guildId, error: e }, 'audio: idle disconnect check failed');
+    }
+  }
+}, IDLE_CHECK_INTERVAL_MS);
+logger.info('Idle disconnect checker started (persistentConnection guilds exempt)');
+
+// Playback watchdog: detect orphaned players where trackEnd was never received
+setInterval(async () => {
+  const now = Date.now();
+  for (const [guildId, expectedEnd] of trackExpectedEndMs) {
+    if (now < expectedEnd) continue;
+
+    const player = manager.getPlayer(guildId);
+    if (!player) {
+      trackExpectedEndMs.delete(guildId);
+      watchdogPositionSnapshot.delete(guildId);
+      continue;
+    }
+
+    // Double-check: is Lavalink actually still reporting this player as playing?
+    const position = player.position ?? 0;
+    const duration = player.queue.current
+      ? (extractTrackInfo(player.queue.current)?.duration ?? 0)
+      : 0;
+    if (!player.queue.current || duration <= 0) {
+      trackExpectedEndMs.delete(guildId);
+      watchdogPositionSnapshot.delete(guildId);
+      continue;
+    }
+
+    const snapshot = watchdogPositionSnapshot.get(guildId) ?? { lastPositionMs: 0, stagnantChecks: 0 };
+    const advancing = position > (snapshot.lastPositionMs + 750);
+    if (advancing || player.paused) {
+      watchdogPositionSnapshot.set(guildId, { lastPositionMs: position, stagnantChecks: 0 });
+      if (duration > 0 && position < duration - 5000) {
+        trackExpectedEndMs.set(guildId, now + (duration - position) + WATCHDOG_GRACE_PERIOD_MS);
+      } else {
+        trackExpectedEndMs.set(guildId, now + WATCHDOG_GRACE_PERIOD_MS);
+      }
+      continue;
+    }
+
+    const stagnantChecks = snapshot.stagnantChecks + 1;
+    watchdogPositionSnapshot.set(guildId, { lastPositionMs: position, stagnantChecks });
+    if (stagnantChecks < WATCHDOG_MIN_STAGNANT_CHECKS) {
+      trackExpectedEndMs.set(guildId, now + WATCHDOG_GRACE_PERIOD_MS);
+      continue;
+    }
+
+    trackExpectedEndMs.delete(guildId);
+    watchdogPositionSnapshot.delete(guildId);
+    const overdueMs = now - expectedEnd + WATCHDOG_GRACE_PERIOD_MS;
+    logger.warn({
+      guildId,
+      overdueMs,
+      position,
+      duration,
+      playerPlaying: player.playing,
+      hasCurrent: !!player.queue.current,
+      queueLen: player.queue.tracks.length,
+      stagnantChecks,
+    }, 'audio: watchdog detected orphaned player (trackEnd never received)');
+
+    try {
+      // If there are more tracks in the queue, try to skip to next
+      if (player.queue.tracks.length > 0) {
+        logger.info({ guildId, queueLen: player.queue.tracks.length }, 'audio: watchdog forcing skip to next track');
+        await player.skip();
+        await saveQueue(guildId, player);
+      } else {
+        // No tracks left - stop player and trigger autoplay if enabled
+        logger.info({ guildId }, 'audio: watchdog stopping orphaned player (empty queue)');
+        await player.stopPlaying(true, false);
+
+        // Mark as idle for persistentConnection logic
+        if (!idleSinceMs.has(guildId)) idleSinceMs.set(guildId, Date.now());
+
+        // Trigger autoplay if enabled
+        if (await autoplayService.isAutomixEnabledCached(guildId)) {
+          try {
+            const lastTrack = player.queue.previous?.[0] ?? null;
+            await autoplayService.enqueueAutomix(player, lastTrack as { info?: { title?: string; author?: string; uri?: string } });
+          } catch (e) {
+            logger.error({ e, guildId }, 'audio: watchdog autoplay recovery failed');
+          }
+        } else {
+          // Push idle UI state
+          void pushNowPlaying(player, true, { paused: false, positionMs: 0 }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      logger.error({ e, guildId }, 'audio: watchdog recovery action failed');
+    }
+  }
+}, WATCHDOG_CHECK_INTERVAL_MS);
+logger.info('Playback watchdog started (detects orphaned players without trackEnd)');
+
 // Ensure at least one node connect event (best-effort)
 await new Promise<void>((resolve) => {
   let settled = false;
@@ -1091,7 +1405,7 @@ async function forwardStreamPlayCommand(data: StreamPlayCommand) {
 try {
   (['play', 'playnow', 'playnext'] as const).forEach((playType) => {
     commandProcessor.registerHandler(playType, async (data) => {
-      logger.info({ guildId: data.guildId, type: playType, requestId: data.requestId }, 'audio: play command received via Redis Streams, forwarding to pub/sub pipeline');
+      logger.info({ guildId: data.guildId, type: playType, requestId: data.requestId }, 'audio: play command received via Redis Streams, forwarding to play pipeline');
       return forwardStreamPlayCommand(data as StreamPlayCommand);
     });
   });
@@ -1115,8 +1429,25 @@ try {
       return { title: info?.title ?? 'Unknown', uri: info?.uri };
     });
 
+    const history = (player?.queue.previous ?? [])
+      .slice(-10)
+      .reverse()
+      .map((t: { info?: { title?: string; uri?: string } }) => ({
+        title: t.info?.title ?? 'Unknown',
+        uri: t.info?.uri
+      }));
+
+    const current = player?.queue.current
+      ? {
+          title: player.queue.current.info?.title ?? 'Unknown',
+          uri: player.queue.current.info?.uri
+        }
+      : null;
+
     const response = {
       items,
+      history,
+      current,
       page,
       totalPages,
       totalTracks: allTracks.length
@@ -1258,6 +1589,7 @@ try {
     const shouldDestroy = data.reason === 'voice_disconnect';
 
     if (shouldDestroy) {
+      idleSinceMs.delete(data.guildId);
       await player.destroy();
       logger.info({ guildId: data.guildId }, 'Player destroyed due to voice disconnect');
     } else {
@@ -1352,6 +1684,11 @@ try {
     const newPosition = Math.max(0, currentPosition + deltaMs);
 
     await player.seek(newPosition);
+    const duration = extractTrackInfo(player.queue.current)?.duration ?? 0;
+    if (duration > 0) {
+      trackExpectedEndMs.set(data.guildId, Date.now() + Math.max(0, duration - newPosition) + WATCHDOG_GRACE_PERIOD_MS);
+      watchdogPositionSnapshot.set(data.guildId, { lastPositionMs: newPosition, stagnantChecks: 0 });
+    }
 
     // Trigger immediate UI update to reflect new position
     void pushNowPlaying(player, true, { positionMs: newPosition });
@@ -1549,9 +1886,20 @@ try {
       }
 
       try {
+        const currentPreset = activeFilterPresets.get(guildId);
+        if (currentPreset === preset.id) {
+          return buildFilterResponse(guildId, true, `${preset.label} is already active.`);
+        }
+
+        const startedAt = Date.now();
         await preset.apply(player);
         activeFilterPresets.set(guildId, preset.id);
         void pushNowPlaying(player, true, {}, 'control');
+        logger.info({
+          guildId,
+          preset: preset.id,
+          filter_apply_latency_ms: Date.now() - startedAt,
+        }, 'audio: filter preset applied');
         return buildFilterResponse(guildId, true, `${preset.label} enabled.`);
       } catch (error) {
         logger.error({ error, guildId, preset: preset.id }, 'Failed to apply audio filter preset');
@@ -2286,14 +2634,23 @@ await redisManager.subscribe('discord-bot:commands', withErrorHandling(async (me
               })();
             }
 
-            // REMOVED: Automatic playlist track addition
-            // Only autoplay should generate queue tracks automatically
-            if (isPlaylist && playlistTracks.length > 1) {
-              logger.info({
-                guildId: playData.guildId,
-                playlistSize: playlistTracks.length,
-                query: playData.query
-              }, 'PLAYLIST: Detected playlist but only playing first track (autoplay will handle queue generation)');
+            // Fallback queue seeding: when autoplay is OFF and we have search results,
+            // add a limited number of remaining tracks so the user gets a queue
+            if (!seedOnFirst && isPlaylist && playlistTracks.length > 1) {
+              const maxFallbackTracks = 5;
+              const fallbackTracks = playlistTracks.slice(1, 1 + maxFallbackTracks);
+              if (fallbackTracks.length > 0) {
+                for (const t of fallbackTracks) {
+                  await player.queue.add(t);
+                }
+                logger.info({
+                  guildId: playData.guildId,
+                  added: fallbackTracks.length,
+                  available: playlistTracks.length - 1,
+                  query: playData.query
+                }, 'PLAYLIST: Added search result tracks to queue (autoplay off fallback)');
+                batchQueueSaver.scheduleUpdate(playData.guildId, player, playData.voiceChannelId, playData.textChannelId);
+              }
             }
           } else {
             // PLAY/PLAYNEXT: Add to queue when music is already playing
@@ -2308,15 +2665,22 @@ await redisManager.subscribe('discord-bot:commands', withErrorHandling(async (me
 
             await player.queue.add(first, position);
 
-            // REMOVED: Automatic playlist track addition
-            // Only autoplay should generate queue tracks automatically
+            // Add remaining search results to queue when autoplay is off
             if (isPlaylist && playlistTracks.length > 1) {
-              logger.info({
-                guildId: playData.guildId,
-                playlistSize: playlistTracks.length,
-                query: playData.query,
-                commandType: data?.type
-              }, 'PLAYLIST: Detected playlist but only adding first track (autoplay will handle queue generation)');
+              const maxExtraTracks = 5;
+              const extraTracks = playlistTracks.slice(1, 1 + maxExtraTracks);
+              if (extraTracks.length > 0) {
+                const insertPos = isPlayNext ? 1 : undefined;
+                for (const t of extraTracks) {
+                  await player.queue.add(t, insertPos);
+                }
+                logger.info({
+                  guildId: playData.guildId,
+                  added: extraTracks.length,
+                  available: playlistTracks.length - 1,
+                  commandType: data?.type
+                }, 'PLAYLIST: Added remaining search results to queue');
+              }
             }
 
             // Calculate the actual position where the track was inserted
@@ -3032,6 +3396,16 @@ manager.on('trackStart', (player, track) => {
     metadata.trackStartTime = Date.now();
   }
 
+  // Playback watchdog: record expected end time so we can detect orphaned players
+  const duration = info?.duration ?? 0;
+  if (duration > 0) {
+    trackExpectedEndMs.set(player.guildId, Date.now() + duration + WATCHDOG_GRACE_PERIOD_MS);
+    watchdogPositionSnapshot.set(player.guildId, { lastPositionMs: 0, stagnantChecks: 0 });
+  } else {
+    trackExpectedEndMs.delete(player.guildId);
+    watchdogPositionSnapshot.delete(player.guildId);
+  }
+
   // Push immediate now-playing snapshot and reset timeline baseline at track start.
   void pushNowPlaying(player, true, { positionMs: 0, paused: false });
 });
@@ -3173,26 +3547,53 @@ manager.on('trackError', async (player, track, errorData: TrackExceptionEvent) =
   }
 });
 
-// Handle track stuck (e.g., problematic streams) similar to trackError
+// Handle track stuck (e.g., problematic streams, cipher failures) similar to trackError
 manager.on('trackStuck', async (player: Player, track: Track | null, payload: TrackStuckEvent) => {
   try {
+    const trackInfo = extractTrackInfo(track);
+    logger.warn({
+      guildId: player.guildId,
+      thresholdMs: payload.thresholdMs,
+      trackTitle: trackInfo?.title,
+      trackUri: trackInfo?.uri,
+      position: player.position,
+      duration: trackInfo?.duration,
+      playerPlaying: player.playing,
+      queueLen: player.queue.tracks.length,
+    }, 'audio: track stuck detected - attempting recovery');
+
+    // Clear watchdog for this guild since we're handling it here
+    trackExpectedEndMs.delete(player.guildId);
+    watchdogPositionSnapshot.delete(player.guildId);
+
     recordGlitchIndicator(player.guildId, 'track_interruption', {
       source: 'trackStuck',
       thresholdMs: payload.thresholdMs,
-      trackTitle: track?.info?.title,
+      trackTitle: trackInfo?.title,
     });
+
     if (player.queue.tracks.length > 0) {
+      logger.info({ guildId: player.guildId, queueLen: player.queue.tracks.length }, 'audio: trackStuck - skipping to next track');
       await player.skip();
       await saveQueue(player.guildId, player);
       return;
     }
     if ((player.repeatMode ?? 'off') === 'off' && !(player.playing || player.queue.current)) {
       if (await autoplayService.isAutomixEnabledCached(player.guildId)) {
-        try { await autoplayService.enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } }); } catch (e) { logger.error({ e }, 'automix after trackStuck failed'); }
+        try {
+          logger.info({ guildId: player.guildId }, 'audio: trackStuck - triggering autoplay recovery');
+          await autoplayService.enqueueAutomix(player, track as { info?: { title?: string; author?: string; uri?: string } });
+        } catch (e) { logger.error({ e }, 'automix after trackStuck failed'); }
+      } else {
+        // No autoplay, stop and push idle state
+        logger.info({ guildId: player.guildId }, 'audio: trackStuck - no autoplay, stopping player');
+        await player.stopPlaying(true, false);
+        if (!idleSinceMs.has(player.guildId)) idleSinceMs.set(player.guildId, Date.now());
+        void pushNowPlaying(player, true, { paused: false, positionMs: 0 }).catch(() => {});
       }
     }
   } catch (e) {
-    logger.error({ e }, 'trackStuck handler failed');
+    logger.error({ e, guildId: player.guildId }, 'trackStuck handler failed');
   }
 });
 
@@ -3298,8 +3699,18 @@ export async function getQueueCached(guildId: string) { return _getQueueCached(g
 
 manager.on('trackEnd', async (player, track, payload?: unknown) => {
   try {
+    // Clear watchdog - trackEnd arrived normally
+    trackExpectedEndMs.delete(player.guildId);
+    watchdogPositionSnapshot.delete(player.guildId);
+
     const reason = (payload as { reason?: string } | undefined)?.reason;
-    logger.info({ guildId: player.guildId, reason: reason ?? 'none' }, 'audio: track end');
+    const queueEmpty = !player.queue.current && player.queue.tracks.length === 0;
+    logger.info({
+      guildId: player.guildId,
+      reason: reason ?? 'none',
+      queueEmpty,
+      queueLen: player.queue.tracks.length,
+    }, 'audio: track end');
 
     // Track listening behavior for predictive caching
     const trackInfo = extractTrackInfo(track);
@@ -3321,6 +3732,13 @@ manager.on('trackEnd', async (player, track, payload?: unknown) => {
       ).catch(e => logger.debug({ e }, 'Predictive listening tracking failed'));
 
       metadata.trackStartTime = undefined;
+    }
+
+    // Track idle state for persistentConnection (24/7) logic
+    if (!player.queue.current && player.queue.tracks.length === 0) {
+      if (!idleSinceMs.has(player.guildId)) idleSinceMs.set(player.guildId, Date.now());
+    } else {
+      idleSinceMs.delete(player.guildId);
     }
 
     await autoplayService.handleTrackEnd(player, track, reason, pushIdleState);

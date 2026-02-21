@@ -42,6 +42,7 @@
     "prepare": "husky install",
     "db:migrate": "pnpm --filter @discord-bot/database prisma:migrate",
     "db:migrate:deploy": "pnpm --filter @discord-bot/database prisma:deploy",
+    "db:schema:verify": "bash ./scripts/verify-db-schema.sh",
     "db:seed": "tsx packages/database/prisma/seed.ts",
     "db:reset": "pnpm --filter @discord-bot/database prisma:migrate reset",
     "db:studio": "pnpm --filter @discord-bot/database prisma:studio",

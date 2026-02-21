@@ -307,7 +307,8 @@ async function initializeWorkerService(): Promise<void> {
     // 6. Start HTTP server
     const port = env.WORKER_HTTP_PORT || 3003;
     await new Promise<void>((resolve) => {
-      healthServer.listen(port, () => {
+      // Bind explicitly to IPv4 for reliable Docker host health checks.
+      healthServer.listen(port, '0.0.0.0', () => {
         logger.info(`Worker health server listening on port ${port}`);
         resolve();
       });

@@ -17,6 +17,16 @@ VOICE_ID="${DISCORD_TEST_VOICE_CHANNEL_ID:-$(grep '^DISCORD_TEST_VOICE_CHANNEL_I
 TEXT_ID="${DISCORD_TEST_TEXT_CHANNEL_ID:-$(grep '^DISCORD_TEST_TEXT_CHANNEL_ID=' .env | head -n1 | cut -d= -f2-)}"
 USER_ID="${DISCORD_TEST_USER_ID:-$(grep '^DISCORD_TEST_USER_ID=' .env | head -n1 | cut -d= -f2-)}"
 QUERY="${E2E_AUDIO_QUERY:-$(grep '^E2E_AUDIO_QUERY=' .env | head -n1 | cut -d= -f2- | sed 's/^\"//; s/\"$//')}"
+API_KEY="$(printf '%s' "${API_KEY}" | tr -d '\r')"
+GUILD_ID="$(printf '%s' "${GUILD_ID}" | tr -d '\r')"
+VOICE_ID="$(printf '%s' "${VOICE_ID}" | tr -d '\r')"
+TEXT_ID="$(printf '%s' "${TEXT_ID}" | tr -d '\r')"
+USER_ID="$(printf '%s' "${USER_ID}" | tr -d '\r')"
+QUERY="$(printf '%s' "${QUERY}" | tr -d '\r')"
+QUERY="$(printf '%s' "${QUERY}" | sed "s/^'//; s/'$//; s/^\"//; s/\"$//")"
+if [[ -z "${QUERY}" ]]; then
+  QUERY="https://www.youtube.com/watch?v=8DIGGjaE5gg"
+fi
 
 if [[ -z "${API_KEY}" || -z "${GUILD_ID}" || -z "${VOICE_ID}" || -z "${TEXT_ID}" || -z "${USER_ID}" ]]; then
   echo "[voice-panel-smoke] Missing required env variables (API_KEY / DISCORD_TEST_*)." >&2
@@ -39,8 +49,8 @@ curl -fsS -X POST "http://localhost:3000/api/v1/player/${GUILD_ID}/play" \
 
 for _ in {1..45}; do
   payload="$(curl -fsS -H "X-API-Key: ${API_KEY}" "http://localhost:3000/api/v1/player/${GUILD_ID}/now-playing")"
-  position="$(echo "${payload}" | jq -r '.data.positionMs // 0')"
-  title="$(echo "${payload}" | jq -r '.data.title // ""')"
+  position="$(printf '%s' "${payload}" | node -e "const fs=require('fs');const raw=fs.readFileSync(0,'utf8');try{const o=JSON.parse(raw);process.stdout.write(String(o?.data?.positionMs ?? 0));}catch{process.stdout.write('0');}")"
+  title="$(printf '%s' "${payload}" | node -e "const fs=require('fs');const raw=fs.readFileSync(0,'utf8');try{const o=JSON.parse(raw);process.stdout.write(String(o?.data?.title ?? ''));}catch{process.stdout.write('');}")"
 
   if [[ "${position}" != "0" && "${position}" != "null" ]]; then
     echo "[voice-panel-smoke] PASS positionMs=${position} title=${title}"

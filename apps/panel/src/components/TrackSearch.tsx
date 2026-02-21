@@ -11,6 +11,8 @@ type TrackSummary = {
   uri?: string;
   duration: number;
   source: string;
+  thumbnail?: string;
+  viewCount?: number;
 };
 
 interface Props {
@@ -38,6 +40,24 @@ export function TrackSearch({
   const [error, setError] = useState<string | null>(null);
 
   const canControl = Boolean(guildId && userId);
+
+  const formatDuration = useCallback((durationMs: number) => {
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }, []);
+
+  const formatViews = useCallback((viewCount?: number) => {
+    if (typeof viewCount !== 'number' || !Number.isFinite(viewCount)) {
+      return 'Visualizaciones no disponibles';
+    }
+    return `${new Intl.NumberFormat('es-AR').format(viewCount)} visualizaciones`;
+  }, []);
 
   const runSearch = useCallback(async (value: string) => {
     if (!value || value.length < 3) {
@@ -116,9 +136,24 @@ export function TrackSearch({
         {loading && <p className="text-sm text-white/60">Buscando…</p>}
         {!loading && results.map((track) => (
           <article key={`${track.identifier}-${track.uri}`} className="rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/80">
-            <div className="flex flex-col gap-1">
-              <p className="font-semibold">{track.title}</p>
-              <p className="text-xs text-white/60">{track.author ?? 'Autor desconocido'}</p>
+            <div className="flex gap-3">
+              <img
+                src={track.thumbnail ?? 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=320&q=80'}
+                alt={track.title}
+                className="h-16 w-28 rounded-lg object-cover"
+                loading="lazy"
+              />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <p className="truncate font-semibold">{track.title}</p>
+                <p className="truncate text-xs text-white/60">{track.author ?? 'Autor desconocido'}</p>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/50">
+                  <span>{formatDuration(track.duration)}</span>
+                  <span>•</span>
+                  <span className="uppercase">{track.source}</span>
+                  <span>•</span>
+                  <span>{formatViews(track.viewCount)}</span>
+                </div>
+              </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               <button

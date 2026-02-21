@@ -478,7 +478,7 @@ graph TB
 **Examples:**
 - Search fails → Use cached results
 - Lyrics unavailable → Show track info only
-- Premium features disabled → Fall back to free tier
+- Capacidades avanzadas deshabilitadas → Fall back to free tier
 
 ### 2. Silent Recovery
 **Principle:** Automatic recovery without user notification

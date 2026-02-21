@@ -35,6 +35,8 @@ export class RedisStreamsManager {
   public static readonly STREAMS = {
     AUDIO_COMMANDS: 'discord-bot:audio-commands',
     AUDIO_CONTROLS: 'discord-bot:audio-controls',
+    AUDIO_REALTIME_CONTROLS: 'discord-bot:audio-controls-realtime',
+    VOICE_EVENTS: 'discord-bot:voice-events-stream',
     AUDIO_RESPONSES: 'discord-bot:audio-responses',
     GATEWAY_COMMANDS: 'discord-bot:gateway-commands',
     GATEWAY_RESPONSES: 'discord-bot:gateway-responses'
@@ -44,6 +46,8 @@ export class RedisStreamsManager {
   public static readonly CONSUMER_GROUPS = {
     AUDIO_PROCESSORS: 'audio-processors',
     AUDIO_CONTROLS_PROCESSORS: 'audio-controls-processors',
+    AUDIO_REALTIME_CONTROLS_PROCESSORS: 'audio-realtime-controls-processors',
+    VOICE_EVENT_PROCESSORS: 'voice-event-processors',
     GATEWAY_PROCESSORS: 'gateway-processors',
     RESPONSE_HANDLERS: 'response-handlers'
   } as const;
@@ -212,8 +216,26 @@ export class RedisStreamsManager {
 
       return messages;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('NOGROUP') || message.includes('no such key')) {
+        logger.warn({ streamName, groupName, consumerName }, 'Consumer group missing during read; recreating group');
+        await this.ensureConsumerGroup(streamName, groupName);
+        return [];
+      }
       logger.error({ error, streamName, groupName, consumerName }, 'Failed to read from stream group');
       throw error;
+    }
+  }
+
+  private async ensureConsumerGroup(streamName: string, groupName: string): Promise<void> {
+    try {
+      await this.client.xgroup('CREATE', streamName, groupName, '0', 'MKSTREAM');
+      logger.info({ streamName, groupName }, 'Recreated missing consumer group');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('BUSYGROUP')) {
+        logger.error({ error, streamName, groupName }, 'Failed to recreate consumer group');
+      }
     }
   }
 

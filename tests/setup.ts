@@ -1,9 +1,22 @@
 import { vi, beforeAll, afterAll, beforeEach } from 'vitest';
-import { config } from 'dotenv';
 import { setPlanOverrides, PLAN_TEMPLATES } from '@discord-bot/subscription';
+import { existsSync, readFileSync } from 'node:fs';
 
-// Load test environment variables
-config({ path: '.env.test' });
+// Load test environment variables without depending on external dotenv package.
+if (existsSync('.env.test')) {
+  const envContent = readFileSync('.env.test', 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+}
 
 // Mock environment variables FIRST - before any other imports
 process.env.NODE_ENV = 'test';
@@ -206,6 +219,25 @@ vi.mock('@discord-bot/database', () => {
       GOLD: 'GOLD',
       DIAMOND: 'DIAMOND',
       ENTERPRISE: 'ENTERPRISE',
+    },
+    FeatureCategory: {
+      PLAYBACK: 'PLAYBACK',
+      QUALITY: 'QUALITY',
+      ANALYTICS: 'ANALYTICS',
+      AUTOMATION: 'AUTOMATION',
+      CUSTOMIZATION: 'CUSTOMIZATION',
+      SUPPORT: 'SUPPORT',
+      INTEGRATION: 'INTEGRATION',
+      STORAGE: 'STORAGE',
+      MONITORING: 'MONITORING',
+      ADVANCED: 'ADVANCED',
+    },
+    ResetPeriod: {
+      NEVER: 'NEVER',
+      DAILY: 'DAILY',
+      WEEKLY: 'WEEKLY',
+      MONTHLY: 'MONTHLY',
+      YEARLY: 'YEARLY',
     },
     prisma: {
       guildConfig: {

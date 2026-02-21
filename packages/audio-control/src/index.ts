@@ -39,12 +39,17 @@ interface AudioCommandClientOptions {
   };
 }
 
-const CONTROL_PRIORITY_COMMANDS = new Set<AudioCommand>([
+const REALTIME_CONTROL_COMMANDS = new Set<AudioCommand>([
   'toggle',
   'pause',
   'resume',
   'skip',
   'previous',
+  'stop',
+  'mute',
+]);
+
+const CONTROL_PRIORITY_COMMANDS = new Set<AudioCommand>([
   'loop',
   'mute',
   'filters',
@@ -56,6 +61,7 @@ export class AudioCommandClient {
   private readonly options: AudioCommandClientOptions;
   private readonly commandsStream = RedisStreamsManager.STREAMS.AUDIO_COMMANDS;
   private readonly controlsStream = RedisStreamsManager.STREAMS.AUDIO_CONTROLS;
+  private readonly realtimeControlsStream = RedisStreamsManager.STREAMS.AUDIO_REALTIME_CONTROLS;
   private readonly responseStream = RedisStreamsManager.STREAMS.AUDIO_RESPONSES;
   private readonly consumerName: string;
   private initialized = false;
@@ -79,7 +85,9 @@ export class AudioCommandClient {
   }
 
   private resolveTargetStream(type: AudioCommand): string {
-    return CONTROL_PRIORITY_COMMANDS.has(type) ? this.controlsStream : this.commandsStream;
+    if (REALTIME_CONTROL_COMMANDS.has(type)) return this.realtimeControlsStream;
+    if (CONTROL_PRIORITY_COMMANDS.has(type)) return this.controlsStream;
+    return this.commandsStream;
   }
 
   private async enqueue(command: CommandPayload): Promise<void> {
@@ -101,7 +109,9 @@ export class AudioCommandClient {
 
   async sendCommand(type: AudioCommand, guildId: string, payload: Record<string, unknown> = {}): Promise<string> {
     const requestId = (payload.requestId as string | undefined) ?? randomUUID();
-    const priority = CONTROL_PRIORITY_COMMANDS.has(type) ? 'control' : 'normal';
+    const priority = REALTIME_CONTROL_COMMANDS.has(type)
+      ? 'realtime'
+      : (CONTROL_PRIORITY_COMMANDS.has(type) ? 'control' : 'normal');
     await this.enqueue({
       type,
       guildId,

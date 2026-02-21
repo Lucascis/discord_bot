@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-discordbot_main}"
+COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
 EXPECTED_SERVICES=(postgres redis lavalink gateway api audio worker panel)
 
 log_docker_main() {

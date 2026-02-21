@@ -7,7 +7,9 @@ export class RedisManager {
     private publisher: RedisCircuitBreaker;
     private subscriber: Redis;
     private readonly channelHandlers = new Map<string, (message: string) => void>();
+    private readonly subscribedChannels = new Set<string>();
     private readonly redisUrl: string;
+    private lastResubscribeAt = 0;
 
     constructor() {
         this.redisUrl = env.REDIS_URL || 'redis://localhost:6379';
@@ -89,6 +91,34 @@ export class RedisManager {
     public async subscribe(channel: string, handler: (message: string) => void): Promise<void> {
         await this.subscriber.subscribe(channel);
         this.channelHandlers.set(channel, handler);
+        this.subscribedChannels.add(channel);
+    }
+
+    public getRedisSubscriptionState(): {
+        subscriberStatus: string;
+        subscribedChannels: string[];
+        handlersCount: number;
+        lastResubscribeAt?: number;
+    } {
+        return {
+            subscriberStatus: this.subscriber.status as string,
+            subscribedChannels: [...this.subscribedChannels.values()],
+            handlersCount: this.channelHandlers.size,
+            lastResubscribeAt: this.lastResubscribeAt || undefined
+        };
+    }
+
+    private async restoreSubscriptionsAfterReconnect(): Promise<void> {
+        const channels = [...this.subscribedChannels.values()];
+        if (channels.length === 0) return;
+
+        try {
+            await this.subscriber.subscribe(...channels);
+            this.lastResubscribeAt = Date.now();
+            logger.info({ channelsCount: channels.length, channels }, 'Redis subscriptions restored after reconnect');
+        } catch (error) {
+            logger.error({ error, channels }, 'Failed to restore Redis subscriptions after reconnect');
+        }
     }
 
     private setupReconnectionHandlers(): void {
@@ -102,6 +132,7 @@ export class RedisManager {
 
         this.subscriber.on('ready', () => {
             logger.info('Redis Subscriber ready');
+            void this.restoreSubscriptionsAfterReconnect();
         });
 
         this.subscriber.on('message', (channel: string, message: string) => {

@@ -24,6 +24,8 @@ interface Props {
   initialSelectedGuildId?: string;
   panelApiKey: string;
   currentUserId?: string;
+  /** When true, hide sidebar (used when inside DashboardShell) */
+  noSidebar?: boolean;
 }
 
 export function GuildDashboard({
@@ -33,38 +35,10 @@ export function GuildDashboard({
   initialNowPlaying,
   initialSelectedGuildId,
   panelApiKey,
-  currentUserId
+  currentUserId,
+  noSidebar = false,
 }: Props) {
   const router = useRouter();
-  const getTierExperience = (tier?: string) => {
-    const normalized = (tier ?? 'FREE').toUpperCase();
-    if (normalized === 'ENTERPRISE') {
-      return {
-        label: 'Enterprise Command Center',
-        accent: 'from-cyan-500/30 to-brand-500/20',
-        bullets: ['Control multi-instancia', 'Automatización de operaciones', 'Prioridad absoluta de soporte']
-      };
-    }
-    if (normalized === 'PREMIUM') {
-      return {
-        label: 'Premium Performance Profile',
-        accent: 'from-brand-500/30 to-fuchsia-500/20',
-        bullets: ['Invocación por panel', 'Playback extendido', 'Controles avanzados en tiempo real']
-      };
-    }
-    if (normalized === 'BASIC') {
-      return {
-        label: 'Basic Plus Profile',
-        accent: 'from-brand-500/25 to-amber-400/20',
-        bullets: ['Invocación por panel', 'Una instancia activa', 'Control rápido de playlist']
-      };
-    }
-    return {
-      label: 'Free Profile',
-      accent: 'from-white/10 to-white/5',
-      bullets: ['Comandos base habilitados', 'Upgrade para invocar desde panel', 'Upgrade para controles avanzados']
-    };
-  };
 
   const guilds = Array.isArray(initialGuilds) ? initialGuilds : [];
   const [selectedGuild, setSelectedGuild] = useState<GuildOverview | null>(
@@ -164,15 +138,15 @@ export function GuildDashboard({
     }
   }, [selectedGuild, panelApiKey]);
 
-  const tierExperience = getTierExperience(selectedGuild?.subscriptionTier);
-
   return (
-    <div className="flex flex-col lg:flex-row gap-8 min-h-[calc(100vh-140px)]">
-      <Sidebar
-        guilds={guilds}
-        selectedGuildId={selectedGuild?.id}
-        onSelect={handleSelect}
-      />
+    <div className={noSidebar ? '' : 'flex flex-col lg:flex-row gap-8 min-h-[calc(100vh-140px)]'}>
+      {!noSidebar && (
+        <Sidebar
+          guilds={guilds}
+          selectedGuildId={selectedGuild?.id}
+          onSelect={handleSelect}
+        />
+      )}
 
       <main className="flex-1 min-w-0 space-y-8">
         <AnimatePresence mode="wait">
@@ -261,20 +235,9 @@ export function GuildDashboard({
                   <SummonBotPanel
                     guildId={selectedGuild.id}
                     panelApiKey={panelApiKey}
-                    subscriptionTier={selectedGuild.subscriptionTier}
                     disabled={loading}
                     onSummonSuccess={(channels) => setChannelContext(channels)}
                   />
-
-                  <div className={`rounded-2xl border border-white/10 bg-gradient-to-br ${tierExperience.accent} p-4`}>
-                    <p className="text-[11px] uppercase tracking-[0.3em] text-white/50">Profile View</p>
-                    <h3 className="mt-2 text-lg font-semibold text-white">{tierExperience.label}</h3>
-                    <ul className="mt-3 space-y-1 text-sm text-white/75">
-                      {tierExperience.bullets.map((bullet) => (
-                        <li key={bullet}>• {bullet}</li>
-                      ))}
-                    </ul>
-                  </div>
 
                   <GuildAnalyticsCard analytics={analytics} />
                 </div>

@@ -1,11 +1,47 @@
-const services = [
-  { name: 'Streaming core', status: 'online', latency: '46ms' },
-  { name: 'Panel Studio', status: 'online', latency: '38ms' },
-  { name: 'Automations', status: 'online', latency: '62ms' },
-  { name: 'Billing API', status: 'online', latency: '54ms' }
-];
+import type { PlatformHealth } from '@/lib/health-client';
 
-export function MonitoringPanel() {
+interface Props {
+  health: PlatformHealth | null;
+}
+
+function normalizeStatus(value?: string): 'online' | 'degraded' | 'offline' {
+  if (value === 'healthy') return 'online';
+  if (value === 'degraded') return 'degraded';
+  if (value === 'unhealthy') return 'offline';
+  return 'degraded';
+}
+
+export function MonitoringPanel({ health }: Props) {
+  const services = health
+    ? [
+        {
+          name: 'API pública',
+          status: normalizeStatus(health.status),
+          latency: `${(health.metrics as { responseTime?: number } | undefined)?.responseTime ?? 0}ms`
+        },
+        {
+          name: 'Base de datos',
+          status: normalizeStatus(health.checks?.database?.status),
+          latency: `${health.checks?.database?.responseTime ?? 0}ms`
+        },
+        {
+          name: 'Redis',
+          status: normalizeStatus(health.checks?.redis?.status),
+          latency: `${health.checks?.redis?.responseTime ?? 0}ms`
+        },
+        {
+          name: 'Audio/Lavalink',
+          status: normalizeStatus(health.checks?.lavalink?.status),
+          latency: `${health.checks?.lavalink?.responseTime ?? 0}ms`
+        }
+      ]
+    : [
+        { name: 'Streaming core', status: 'degraded', latency: '—' },
+        { name: 'Panel Studio', status: 'degraded', latency: '—' },
+        { name: 'Automations', status: 'degraded', latency: '—' },
+        { name: 'Billing API', status: 'degraded', latency: '—' }
+      ];
+
   return (
     <section className="rounded-2xl border border-white/10 bg-black/40 p-6">
       <div className="flex items-center justify-between">
@@ -22,7 +58,12 @@ export function MonitoringPanel() {
               <p className="font-medium">{service.name}</p>
               <p className="text-xs text-white/50">Latencia {service.latency}</p>
             </div>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${service.status === 'online' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-200'}`}>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${service.status === 'online'
+              ? 'bg-emerald-500/20 text-emerald-300'
+              : service.status === 'offline'
+                ? 'bg-rose-500/20 text-rose-200'
+                : 'bg-amber-500/20 text-amber-200'
+            }`}>
               {service.status}
             </span>
           </div>

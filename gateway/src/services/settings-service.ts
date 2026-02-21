@@ -121,7 +121,7 @@ export class SettingsService {
           guildId,
           ephemeralMessages: enabled,
           // Include all required defaults for new server configurations
-          subscriptionTier: 'free',
+          subscriptionTier: 'enterprise',
           spotifyEnabled: false,
           appleMusicEnabled: false,
           deezerEnabled: false,
@@ -168,14 +168,6 @@ export class SettingsService {
         throw new Error(`Setting '${setting}' is not allowed to be updated`);
       }
 
-      // Premium validation for persistent connection
-      if (setting === 'persistentConnection' && value === true) {
-        const currentSettings = await this.fetchGuildSettingsFromDatabase(guildId);
-        if (currentSettings.subscriptionTier === 'free') {
-          throw new Error('Persistent voice connections are only available for premium subscribers. Upgrade your server to enable 24/7 connections.');
-        }
-      }
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updateData: any = {
         [setting]: value,
@@ -189,7 +181,7 @@ export class SettingsService {
           guildId,
           ...updateData,
           // Include defaults for required fields when creating new config
-          subscriptionTier: 'free',
+          subscriptionTier: 'enterprise',
           spotifyEnabled: false,
           appleMusicEnabled: false,
           deezerEnabled: false,
@@ -226,14 +218,6 @@ export class SettingsService {
 
   async setPersistentConnection(guildId: string, enabled: boolean): Promise<void> {
     try {
-      // First, check if guild has premium subscription when enabling persistent connection
-      if (enabled) {
-        const currentSettings = await this.fetchGuildSettingsFromDatabase(guildId);
-        if (currentSettings.subscriptionTier === 'free') {
-          throw new Error('Persistent voice connections are only available for premium subscribers. Upgrade your server to enable 24/7 connections.');
-        }
-      }
-
       await this.prisma.serverConfiguration.upsert({
         where: { guildId },
         update: {
@@ -244,7 +228,7 @@ export class SettingsService {
           guildId,
           persistentConnection: enabled,
           // Include all required defaults for new server configurations
-          subscriptionTier: 'free', // Will prevent enabling persistent connection for new free servers
+          subscriptionTier: 'enterprise',
           spotifyEnabled: false,
           appleMusicEnabled: false,
           deezerEnabled: false,
@@ -274,7 +258,7 @@ export class SettingsService {
       logger.info({ guildId, persistentConnection: enabled }, 'Updated persistent connection setting');
     } catch (error) {
       logger.error({ error, guildId, enabled }, 'Failed to update persistent connection setting');
-      throw error; // Re-throw to preserve the premium validation error message
+      throw error;
     }
   }
 
@@ -289,8 +273,8 @@ export class SettingsService {
       volumeLimit: 200,
       voteSkipEnabled: true,
       voteSkipThreshold: 0.5,
-      persistentConnection: false, // 24/7 connections require premium
-      subscriptionTier: 'free'
+      persistentConnection: false,
+      subscriptionTier: 'enterprise'
     };
   }
 }

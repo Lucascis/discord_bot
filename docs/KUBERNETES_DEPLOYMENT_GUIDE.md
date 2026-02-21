@@ -789,7 +789,7 @@ Before going to production, ensure:
 - [ ] NetworkPolicies are applied and tested
 - [ ] Monitoring is configured (Prometheus, Grafana)
 - [ ] Backup strategy is implemented for databases
-- [ ] Disaster recovery plan is documented
+- [ ] Procedimiento de disaster recovery is documented
 - [ ] Logs are aggregated (ELK, Loki, CloudWatch)
 - [ ] Alerts are configured for critical metrics
 - [ ] Cluster autoscaling is enabled (if on cloud)

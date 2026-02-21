@@ -43,11 +43,27 @@ export type PlayerActionPayload =
   | { action: 'clear' }
   | { action: 'previous' }
   | { action: 'mute' }
-  | { action: 'volume'; value: number };
+  | { action: 'volume'; value: number }
+  | { action: 'autoplay' }
+  | { action: 'filter'; preset: string };
 
 export type ActiveInstance = {
   voiceChannelId: string;
   textChannelId: string;
+};
+
+export type QueueEntry = {
+  title: string;
+  uri?: string;
+};
+
+export type QueueSnapshot = {
+  items: QueueEntry[];
+  history: QueueEntry[];
+  current: QueueEntry | null;
+  page: number;
+  totalPages: number;
+  totalTracks: number;
 };
 
 export async function getNowPlaying(guildId: string, apiKey?: string): Promise<NowPlayingState | null> {
@@ -77,6 +93,29 @@ export async function sendPlayerCommand(
     body: JSON.stringify(payload),
     apiKey
   });
+}
+
+export async function getQueueSnapshot(
+  guildId: string,
+  options: { page?: number } = {},
+  apiKey?: string
+): Promise<QueueSnapshot> {
+  if (!guildId) {
+    return {
+      items: [],
+      history: [],
+      current: null,
+      page: 1,
+      totalPages: 0,
+      totalTracks: 0
+    };
+  }
+  const params = new URLSearchParams();
+  if (typeof options.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
+    params.set('page', String(Math.floor(options.page)));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return await apiFetch<QueueSnapshot>(`/api/v1/player/${guildId}/queue${suffix}`, { apiKey });
 }
 
 export function subscribeToPlayerEvents(

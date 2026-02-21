@@ -77,12 +77,12 @@ Rate limiting is applied to all API endpoints to prevent abuse. Limits are confi
 
 ### Default Rate Limits
 
-| Subscription Tier | Window | Max Requests | Notes |
-|-------------------|--------|--------------|-------|
+| Tier | Window | Max Requests | Notes |
+|------|--------|--------------|-------|
 | **FREE**          | 15 minutes | 10 requests | Standard endpoints |
 | **BASIC**         | 15 minutes | 30 requests | Standard endpoints |
-| **PREMIUM**       | 15 minutes | 100 requests | Standard endpoints |
-| **ENTERPRISE**    | 15 minutes | Unlimited | Standard endpoints |
+| **Avanzado**      | 15 minutes | 100 requests | Standard endpoints |
+| **Escala alta**   | 15 minutes | Unlimited | Standard endpoints |
 | **Strict Routes** | 15 minutes | 20 requests | Clamped for metrics & security |
 
 ### Configuration
@@ -90,7 +90,7 @@ Rate limiting is applied to all API endpoints to prevent abuse. Limits are confi
 ```bash
 # Rate limit window in milliseconds (default: 900000 = 15 minutes)
 RATE_LIMIT_WINDOW_MS=900000
-# Subscription tiers define standard limits (FREE 10, BASIC 30, PREMIUM 100, ENTERPRISE unlimited)
+# Tiers definen límites estándar (FREE 10, BASIC 30, avanzado 100, escala alta unlimited)
 
 # Strict endpoints window (default: 900000 = 15 minutes)
 RATE_LIMIT_STRICT_WINDOW_MS=900000

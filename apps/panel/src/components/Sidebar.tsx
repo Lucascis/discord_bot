@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import type { GuildOverview } from '@/lib/guild-client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { SlidersHorizontal, ListMusic, CreditCard } from 'lucide-react';
+import { SlidersHorizontal, ListMusic } from 'lucide-react';
 import { useState } from 'react';
 
 interface Props {
@@ -25,7 +25,6 @@ export function Sidebar({ guilds, selectedGuildId, onSelect }: Props) {
     const navItems = [
         { icon: SlidersHorizontal, label: 'Control Room', href: '/dashboard' },
         { icon: ListMusic, label: 'My Playlists', href: '/dashboard/playlists' },
-        { icon: CreditCard, label: 'Subscription', href: '/dashboard/subscription' },
     ];
 
     return (

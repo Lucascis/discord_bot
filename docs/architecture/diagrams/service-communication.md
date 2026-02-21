@@ -1,7 +1,7 @@
 # Service Communication Architecture
 
 ## Overview
-This diagram illustrates the Redis pub/sub communication channels between the Discord bot's microservices. The system uses asynchronous messaging for scalability and fault tolerance.
+This diagram illustrates the Redis communication (Streams + Pub/Sub) between the Discord bot's microservices. Commands use Redis Streams; voice events and UI updates use Pub/Sub.
 
 ## Communication Flow Diagram
 
@@ -37,12 +37,13 @@ graph TB
         WORKER_STATS[Stats Aggregation]
     end
 
-    subgraph "Redis Pub/Sub Channels"
+    subgraph "Redis"
         REDIS[(Redis :6379)]
-        CH_CMD[discord-bot:commands<br/>Gateway → Audio]
-        CH_TO_AUDIO[discord-bot:to-audio<br/>Voice Events & Discord Events]
-        CH_TO_DISCORD[discord-bot:to-discord<br/>Lavalink Events]
-        CH_UI_NOW[discord-bot:ui:now<br/>Real-time UI Updates]
+        STREAMS[Streams: audio-commands<br/>audio-controls]
+        CH_VOICE[voice-events<br/>Raw voice]
+        CH_TO_AUDIO[to-audio<br/>Credentials]
+        CH_TO_DISCORD[to-discord<br/>Lavalink Events]
+        CH_UI_NOW[ui:now<br/>UI Updates]
     end
 
     subgraph "External Services"
@@ -53,14 +54,15 @@ graph TB
     %% Discord connections
     Discord <-->|WebSocket Gateway| GW
 
-    %% Gateway to Redis channels
-    GW_CMD -->|Publish Commands| CH_CMD
-    GW_VOICE -->|Publish Voice State<br/>VOICE_SERVER_UPDATE<br/>VOICE_STATE_UPDATE| CH_TO_AUDIO
+    %% Gateway to Redis
+    GW_CMD -->|Streams| STREAMS
+    GW_VOICE -->|Raw voice| CH_VOICE
     CH_TO_DISCORD -->|Subscribe| GW_UI
     CH_UI_NOW -->|Subscribe| GW_UI
 
-    %% Audio to Redis channels
-    CH_CMD -->|Subscribe| AUDIO_CMD
+    %% Audio to Redis
+    STREAMS -->|Consume| AUDIO_CMD
+    CH_VOICE -->|Subscribe| AUDIO_PLAY
     CH_TO_AUDIO -->|Subscribe| AUDIO_PLAY
     AUDIO_PLAY -->|Publish Lavalink Events| CH_TO_DISCORD
     AUDIO_AUTO -->|Publish UI Updates| CH_UI_NOW
@@ -83,7 +85,8 @@ graph TB
     API_HEALTH -.->|Check Services| LAVALINK
 
     style REDIS fill:#ff6b6b,stroke:#c92a2a,color:#fff
-    style CH_CMD fill:#51cf66,stroke:#2f9e44,color:#000
+    style STREAMS fill:#51cf66,stroke:#2f9e44,color:#000
+    style CH_VOICE fill:#51cf66,stroke:#2f9e44,color:#000
     style CH_TO_AUDIO fill:#51cf66,stroke:#2f9e44,color:#000
     style CH_TO_DISCORD fill:#51cf66,stroke:#2f9e44,color:#000
     style CH_UI_NOW fill:#51cf66,stroke:#2f9e44,color:#000
@@ -96,44 +99,22 @@ graph TB
     style Discord fill:#7950f2,stroke:#5f3dc4,color:#fff
 ```
 
-## Redis Pub/Sub Channels
+## Redis Channels
 
-### 1. discord-bot:commands
+### Redis Streams (canal principal)
+- **discord-bot:audio-commands** — play, queue, shuffle, clear, stop, autoplay
+- **discord-bot:audio-controls** — toggle, pause, resume, skip, volume, loop, mute
+- **discord-bot:audio-responses** — respuestas síncronas (queue paginado)
+
+### discord-bot:voice-events
 **Direction:** Gateway → Audio
-**Purpose:** Command routing and execution requests
-**Message Types:**
-- Play commands (`/play`, `/playnext`, `/playnow`)
-- Queue management (`skip`, `pause`, `resume`, `stop`)
-- Playback control (`seek`, `volume`, `loop`)
-- Queue operations (`shuffle`, `clear`)
+**Purpose:** Raw Discord gateway events para Lavalink (VOICE_STATE_UPDATE, VOICE_SERVER_UPDATE)
 
-**Message Format:**
-```typescript
-{
-  type: 'play' | 'skip' | 'pause' | 'resume' | 'stop' | 'seek' | 'volume' | 'loop' | 'shuffle' | 'clear',
-  guildId: string,
-  userId: string,
-  channelId: string,
-  data: Record<string, any>,
-  metadata: {
-    timestamp: number,
-    commandType?: 'play' | 'playnext' | 'playnow'
-  }
-}
-```
-
-### 2. discord-bot:to-audio
+### discord-bot:to-audio
 **Direction:** Gateway → Audio
-**Purpose:** Discord voice events and state updates
-**Message Types:**
-- `VOICE_SERVER_UPDATE` - Critical for voice connection establishment
-- `VOICE_STATE_UPDATE` - Voice state changes
-- Discord client events forwarding
+**Purpose:** VOICE_CREDENTIALS estructurados, search, play (DiscordAudioService)
 
-**Critical Fix (Sept 24, 2025):**
-Raw voice events now forwarded to enable `player.connected = true`, resolving voice connection race conditions.
-
-### 3. discord-bot:to-discord
+### discord-bot:to-discord
 **Direction:** Audio → Gateway
 **Purpose:** Lavalink event propagation to Discord
 **Message Types:**
@@ -142,7 +123,7 @@ Raw voice events now forwarded to enable `player.connected = true`, resolving vo
 - Error notifications
 - Queue state updates
 
-### 4. discord-bot:ui:now
+### discord-bot:ui:now
 **Direction:** Audio → Gateway
 **Purpose:** Real-time UI updates for music controls
 **Message Types:**

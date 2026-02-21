@@ -28,18 +28,12 @@ discord_bot/
 │   ├── TESTING_GUIDE.md
 │   ├── METRICS.md
 │   ├── CHANGELOG.md
-│   ├── DATABASE_MIGRATION_GUIDE.md
 │   ├── DEPLOYMENT_GUIDE.md
-│   ├── ENTERPRISE_BILLING_SYSTEM.md
 │   ├── KUBERNETES_DEPLOYMENT_GUIDE.md
 │   ├── MARKET_RESEARCH.md
 │   ├── PROJECT_STRUCTURE.md
 │   │
 │   ├── architecture/
-│   │
-│   ├── commercial/
-│   │   ├── FEATURES.md
-│   │   └── PRICING.md
 │   │
 │   ├── guides/
 │   │   ├── TROUBLESHOOTING.md

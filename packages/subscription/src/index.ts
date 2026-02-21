@@ -36,6 +36,14 @@ export {
   getFeaturesByTier,
 } from './features.js';
 
+export {
+  getAudioSourceQualityMatrix
+} from './audio-quality-matrix.js';
+export type {
+  EffectiveAudioQuality,
+  SourceQualityCapability
+} from './audio-quality-matrix.js';
+
 // Usage limits
 export {
   LIMITS,

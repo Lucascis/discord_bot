@@ -36,7 +36,7 @@
 
 - **Discord Bot Token** - From [Discord Developer Portal](https://discord.com/developers/applications)
 - **Discord Application ID** - Same portal as above
-- **Stripe API Keys** (Optional) - For subscription billing
+- **Stripe API Keys** (Optional) - For optional payment integration
 - **Sentry DSN** (Optional) - For error tracking
 
 ---
@@ -67,7 +67,7 @@ nano .env
 **Minimum Required Variables**:
 ```env
 # Discord
-DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_TOKEN=your_bot_token_here
 DISCORD_APPLICATION_ID=your_application_id_here
 
 # Database
@@ -147,7 +147,7 @@ Create `.env.production`:
 NODE_ENV=production
 
 # Discord
-DISCORD_BOT_TOKEN=<production_bot_token>
+DISCORD_TOKEN=<production_bot_token>
 DISCORD_APPLICATION_ID=<application_id>
 DISCORD_GUILD_ID=<main_guild_id>
 
@@ -168,7 +168,7 @@ LAVALINK_SECURE=false
 API_PORT=3000
 API_HOST=0.0.0.0
 
-# Stripe (for subscription billing)
+# Stripe (optional payment integration)
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_BASIC_MONTHLY=price_...
@@ -303,7 +303,7 @@ docker push your-registry/discord-bot-gateway:1.0.0
 NODE_ENV=production                  # development | production | staging
 
 # Discord Configuration
-DISCORD_BOT_TOKEN=                   # Required: Bot token
+DISCORD_TOKEN=                   # Required: Bot token
 DISCORD_APPLICATION_ID=              # Required: Application ID
 DISCORD_GUILD_ID=                    # Optional: Main guild for commands
 DEV_GUILD_IDS=                       # Optional: Dev guilds (comma-separated)
@@ -345,7 +345,7 @@ CORS_ORIGINS=*                       # Optional: CORS origins (comma-separated)
 #### Stripe Configuration (Optional)
 
 ```env
-STRIPE_SECRET_KEY=sk_...             # Required for billing
+STRIPE_SECRET_KEY=sk_...             # Required for payment integration
 STRIPE_WEBHOOK_SECRET=whsec_...      # Required for webhooks
 STRIPE_PRICE_BASIC_MONTHLY=price_... # Product price IDs
 STRIPE_PRICE_BASIC_YEARLY=price_...
@@ -421,13 +421,13 @@ VALUES
   ('plan_basic', 'stripe', 'price_basic_yearly', 4990, 'usd', 'YEAR');
 ```
 
-> 📌 **Important:** the applications will refuse to start if no active plans or prices exist. Load at least the three public tiers (FREE, BASIC, PREMIUM → Free / Plus / Pro) following the same structure.
+> 📌 **Important:** the applications will refuse to start if no active tiers or prices exist. Load at least the three public tiers (FREE, BASIC, avanzado → Free / Plus / Pro) following the same structure.
 
 ### 3c. Control Panel Endpoints
 
-Una vez pobladas las tablas, puedes auditar y recargar los planes sin redeploy:
+Una vez pobladas las tablas, puedes auditar y recargar los niveles sin redeploy:
 
-- `GET /api/v1/plans`: devuelve los planes tal como existen en la base (incluye precios por proveedor/intervalo).
+- `GET /api/v1/plans`: devuelve los niveles tal como existen en la base (incluye precios por proveedor/intervalo).
 - `GET /api/v1/plans/runtime`: muestra el cache que usa la aplicación en ese momento.
 - `POST /api/v1/plans/reload`: invalida el cache y vuelve a cargar desde la base.
 
@@ -509,7 +509,7 @@ SENTRY_TRACES_SAMPLE_RATE=0.1
 **Symptoms**: Bot offline in Discord
 
 **Solutions**:
-1. Verify `DISCORD_BOT_TOKEN` is correct
+1. Verify `DISCORD_TOKEN` is correct
 2. Check bot has required intents enabled in Developer Portal
 3. Verify network connectivity
 4. Check logs: `pm2 logs gateway`
@@ -646,7 +646,7 @@ lavalink:
 - [Architecture Overview](./docs/architecture/)
 - [API Reference](./docs/reference/)
 - [Subscription System](./SUBSCRIPTION_SYSTEM_STATUS.md)
-- [Premium Integration](./PREMIUM_INTEGRATION_INSTRUCTIONS.md)
+- [Architecture Overview](./ARCHITECTURE.md)
 
 ### Getting Help
 

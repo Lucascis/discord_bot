@@ -31,7 +31,7 @@ export function Navbar() {
         <Link href="/" className="flex items-center gap-3 group">
           <div className="h-8 w-8 rounded-lg border border-brand-200/40 bg-gradient-to-br from-brand-300 to-brand-700 shadow-neon-brand group-hover:scale-105 transition-transform" />
           <span className="text-lg font-bold font-display tracking-tight">
-            Discord<span className="text-brand-300">Bot</span>
+            Nebu<span className="text-brand-300">DJ</span>
           </span>
         </Link>
 

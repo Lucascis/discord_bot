@@ -2,7 +2,7 @@
 
 ## Overview
 
-Esta guía cubre la estrategia de testing para el Discord Music Bot, incluyendo tests unitarios, de integración y del nuevo sistema premium.
+Esta guía cubre la estrategia de testing para el Discord Music Bot, incluyendo tests unitarios, de integración y del sistema de capacidades avanzadas.
 
 ## 🚀 Quick Start
 
@@ -10,8 +10,8 @@ Esta guía cubre la estrategia de testing para el Discord Music Bot, incluyendo 
 # Ejecutar todos los tests
 pnpm test
 
-# Ejecutar tests específicos del sistema premium
-npx vitest run packages/config/test/enhanced-premium.test.ts
+# Ejecutar tests específicos del sistema de capacidades
+npx vitest run packages/config/test/enhanced-tier-config.test.ts
 
 # Ejecutar tests con coverage
 pnpm test --coverage
@@ -55,9 +55,9 @@ packages/*/test/               # Shared package tests
 ### End-to-End Tests
 - **Discord Commands**: Full command execution
 - **Audio Playback**: Complete audio flow
-- **Premium Features**: Feature access and billing
+- **Capacidades avanzadas**: Feature access and usage controls
 
-## ✅ Premium System Tests
+## ✅ Sistema de capacidades avanzadas - Tests
 
 ### Feature Access Tests
 
@@ -67,7 +67,7 @@ describe('Feature Access Control', () => {
     expect(hasFeatureAccess('free', 'sponsor_block')).toBe(true);
   });
 
-  it('should deny premium features to free tier', () => {
+  it('should deny advanced features to free tier', () => {
     expect(hasFeatureAccess('free', 'spotify_integration')).toBe(false);
   });
 });
@@ -94,9 +94,9 @@ describe('Quota Management', () => {
 
 ```typescript
 describe('Pricing Calculations', () => {
-  it('should apply discounts for yearly billing', () => {
-    const monthly = calculatePriceWithPeriod('premium', 'monthly');
-    const yearly = calculatePriceWithPeriod('premium', 'yearly');
+  it('should apply discounts for yearly cycle', () => {
+    const monthly = calculatePriceWithPeriod('advanced', 'monthly');
+    const yearly = calculatePriceWithPeriod('advanced', 'yearly');
     expect(yearly).toBeLessThan(monthly * 12);
   });
 });
@@ -109,7 +109,7 @@ describe('Pricing Calculations', () => {
 | Domain Layer | 95% | 100% |
 | Use Cases | 85% | 95% |
 | Services | 80% | 90% |
-| Premium System | 100% | 100% |
+| Sistema capacidades | 100% | 100% |
 | Integration | 70% | 85% |
 
 ## 🔧 Testing Utilities
@@ -155,14 +155,14 @@ afterAll(async () => {
 
 ## 🏃‍♂️ Running Specific Test Suites
 
-### Premium Configuration Tests
+### Tests de configuración de capacidades
 
 ```bash
-# Run premium system tests
-npx vitest run packages/config/test/enhanced-premium.test.ts
+# Ejecutar tests del sistema de capacidades
+npx vitest run packages/config/test/enhanced-tier-config.test.ts
 
-# Expected output:
-# ✓ Enhanced Premium Configuration (21 tests) 6ms
+# Salida esperada:
+# ✓ Enhanced Configuration (21 tests) 6ms
 #   ✓ Feature Access Control (5 tests)
 #   ✓ Feature Lists by Tier (2 tests)
 #   ✓ Quota Management (3 tests)
@@ -272,7 +272,7 @@ Test Files  33 passed (35)
 Tests       346 passed | 2 skipped (354)
 Duration    36.08s
 
-Premium Tests:
+Tests de capacidades:
 ✓ Feature Access Control: 5/5 passed
 ✓ Quota Management: 3/3 passed
 ✓ Pricing Calculations: 3/3 passed
@@ -349,7 +349,7 @@ describe('Component Name', () => {
 
 - **Descriptive**: `should return user subscription when valid ID provided`
 - **Behavior-focused**: `should throw error when quota exceeded`
-- **Specific**: `should calculate 15% discount for yearly billing`
+- **Specific**: `should calculate 15% discount for yearly cycle`
 
 ## 🎭 Mocking Guidelines
 
@@ -385,7 +385,7 @@ jobs:
           node-version: '18'
       - run: pnpm install
       - run: pnpm test
-      - run: pnpm test:premium
+      - run: pnpm test:config
 ```
 
 ### Pre-commit Hooks
@@ -421,7 +421,7 @@ npx husky add .husky/pre-commit "pnpm test:quick"
 
 ---
 
-📊 **Testing is a critical part of maintaining code quality and ensuring the premium system works reliably in production.**
+📊 **Testing is a critical part of maintaining code quality and ensuring the system works reliably in production.**
 # Main Stack Voice Validation (Docker-first)
 
 Use the primary stack for release validation:
@@ -448,6 +448,15 @@ Run full voice gate on the main stack:
 pnpm test:voice:diag:main
 pnpm test:e2e:audio:main
 pnpm test:voice:release:main
+```
+
+Notas operativas:
+
+- Los smoke scripts de panel/voz ya no dependen de `jq`; usan parsing JSON vía Node para mayor portabilidad (Windows + WSL).
+- `test:voice:release:main` valida audibilidad real como señal principal. Si querés que falle también por errores de extractor YouTube en logs, activá:
+
+```bash
+VOICE_RELEASE_STRICT_YOUTUBE=true pnpm test:voice:release:main
 ```
 
 Tail logs during Discord manual validation:

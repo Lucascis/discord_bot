@@ -39,8 +39,9 @@ Recommended order:
      - `dev.lavalink.youtube:youtube-plugin:1.17.0`
 2. Keep a stable client order in `application.yml` (`MUSIC/MWEB/WEB/WEBEMBEDDED/ANDROID_VR`).
 3. Enable automatic token sync in Audio (fallback chain):
-   - Library provider (`youtube-po-token-generator`)
+   - Last-known-good cache (`/tmp/youtube-token-cache.json`)
    - Optional endpoint provider (`YOUTUBE_TOKEN_AUTO_ENDPOINT`)
+   - Library provider (`youtube-po-token-generator`)
    - Static env fallback (`YOUTUBE_PO_TOKEN` + `YOUTUBE_VISITOR_DATA`)
 4. If breakage persists for restricted content, provide optional static env:
    - `YOUTUBE_PO_TOKEN`
@@ -51,9 +52,9 @@ Recommended order:
    - `scripts/test-voice-release-main.sh` fails if recent Lavalink logs include `Problematic YouTube player script`.
    - treat this as a hard blocker for V1 promotion until extraction path is stable in repeated runs.
 
-Recommended env for automation:
+Recommended env for 24/7 playback (prevents ~30 min stop due to token expiry):
 - `YOUTUBE_TOKEN_AUTO_ENABLED=true`
-- `YOUTUBE_TOKEN_AUTO_REFRESH_MS=1800000`
+- `YOUTUBE_TOKEN_AUTO_REFRESH_MS=900000` (15 min; default since Fase 1)
 - `YOUTUBE_TOKEN_AUTO_ENDPOINT=` (optional)
 - `YOUTUBE_TOKEN_AUTO_ENDPOINT_BEARER=` (optional)
 - Runtime default in this repo:
@@ -61,9 +62,11 @@ Recommended env for automation:
   - `.env.test`: auto disabled to keep tests deterministic
 
 Validation notes:
-- Fallback order is strict: `library -> endpoint -> static env`.
-- If `YOUTUBE_TOKEN_AUTO_ENABLED=false`, Audio skips auto providers and uses only static fallback when both values exist.
-- To confirm runtime behavior, check Audio logs for `youtube_token_sync:*` signals.
+- Fallback order is strict: `cache -> endpoint -> library -> static env`.
+- Audio persists a successful token pair to `/tmp/youtube-token-cache.json` and reuses it on restart if providers fail (max age: 24h).
+- Library provider failures (including OOM) trigger backoff to avoid repeated heavy subprocess retries.
+- If `YOUTUBE_TOKEN_AUTO_ENABLED=false`, Audio still uses cache/static fallback when available.
+- To confirm runtime behavior, check Audio logs for `youtube_token_sync:*` signals (`automatic refresh enabled`, `lavalink /youtube updated`, failure causes).
 
 ## 4) Recovery Procedure
 1. If only Lavalink is unhealthy:

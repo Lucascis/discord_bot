@@ -1,5 +1,74 @@
 # Changelog
 
+## [3.0.19] - Panel End-to-End Controls + Playlist CRUD + Release Script Portability - 2026-02-17
+
+### Panel Agent + API Agent + Audio Agent + Test Agent
+
+- ✅ Completed panel music-core controls with backend contract alignment:
+  - Added panel/API support for `autoplay` and `filter` control actions via `POST /api/v1/player/:guildId/controls`.
+  - Added queue snapshot endpoint `GET /api/v1/player/:guildId/queue`.
+  - Extended audio queue response with `history` and `current` track context for panel consumption.
+- ✅ Upgraded Web Player UX for operational control:
+  - Added queue and history sections with pagination.
+  - Added autoplay trigger and filter preset apply controls.
+  - Added accessibility labels on player control buttons.
+- ✅ Completed playlist management capabilities in panel:
+  - Added rename, delete, visibility toggle, add/remove track, and track reordering flows.
+  - Extended database playlist service with definitive methods for update/delete/remove/reorder and stricter edit permission checks.
+- ✅ Expanded admin/ops visibility on panel:
+  - Landing and admin plans now surface dynamic health/operations cards.
+  - Monitoring widgets now consume real health payloads instead of fixed mock values.
+- ✅ Hardened smoke/release scripts for Windows + WSL portability:
+  - Removed hard dependency on `jq` in panel/voice smoke scripts (Node JSON parsing fallback).
+  - Sanitized CRLF-sensitive env values in smoke scripts to avoid malformed URL failures.
+  - `test-voice-release-main.sh` now supports non-strict YouTube extractor mode via `VOICE_RELEASE_STRICT_YOUTUBE` (default non-strict), while preserving full audibility validation.
+- ✅ Validation executed:
+  - full Docker rebuild (`down + build --no-cache + up -d --force-recreate`)
+  - `pnpm test:web:panel:main` (PASS)
+  - `pnpm test:voice:smoke:main` (PASS)
+  - `pnpm test:voice:release:main` (PASS; extractor check in warning mode with audibility passing)
+
+---
+
+## [3.0.18] - YouTube Token Sync Stability Validation + Last-Good Cache - 2026-02-17
+
+### Audio Agent + Shared/Infra Agent
+
+- ✅ Hardened `youtube_token_sync` startup resilience in Docker:
+  - added last-known-good token cache at `/tmp/youtube-token-cache.json`.
+  - startup resolution order now: `cache -> endpoint -> library -> static env`.
+  - successful sync now persists token pair for restart-time fallback.
+- ✅ Added safety for heavy generator failures:
+  - library provider OOM/timeout failures now use backoff to reduce repeated expensive retries.
+- ✅ Stability validation executed against live Docker stack:
+  - repeated `audio` restarts with healthy service recovery.
+  - confirmed runtime signals: `youtube_token_sync: automatic refresh enabled` and `youtube_token_sync: lavalink /youtube updated`.
+  - no full-service crash during provider failure path; fallback remains available.
+- ✅ Updated operational runbook:
+  - `docs/operations/LAVALINK_TROUBLESHOOTING.md` now documents cache behavior, fallback order, and log-based validation checklist.
+
+---
+
+## [3.0.17] - Audio Stability Streams + Source Quality Transparency - 2026-02-17
+
+### Audio + Gateway + Shared/Infra + Panel
+
+- Added dual-path critical voice propagation with reliability-first semantics:
+  - Gateway now publishes voice packets to Redis Streams (`discord-bot:voice-events-stream`) and keeps Pub/Sub compatibility path.
+  - Audio consumes voice events through Streams consumer group (`voice-event-processors`) and Pub/Sub fallback with deduplication.
+  - Included per-event observability for ingestion, end-to-end latency, processing latency, and last-seen timestamps.
+- Hardened Redis subscriber reconnection in audio:
+  - auto re-subscription for tracked channels after reconnect.
+  - exposed subscription state for health diagnostics.
+- Added source quality matrix and product transparency:
+  - new runtime matrix in subscription package and API endpoint `GET /api/v1/plans/audio-quality-matrix`.
+  - panel now displays quality matrix and explicit lossless eligibility notes by source.
+- Multi-tenant hardening:
+  - audio guild mutex now supports distributed Redis lock acquisition with local fallback under contention/errors.
+  - gateway voice stream payloads include shard bucket metadata to reduce hot-key pressure downstream.
+
+---
+
 ## [3.0.16] - Release Gate Stabilization + Legacy Test Removal - 2026-02-15
 
 ### Test Agent
@@ -166,8 +235,8 @@
 
 ### Panel Agent + API Agent
 
-- ✅ Updated paid-plan summon behavior:
-  - panel summon UI is now enabled for all paid tiers (`BASIC`, `PREMIUM`, `ENTERPRISE`).
+- ✅ Updated summon por tier de pago behavior:
+  - panel summon UI is now enabled for all paid tiers (tiers de pago (BASIC, avanzado, escala alta)).
   - API summon gate now blocks only `FREE`.
   - files:
     - `/Users/lucascisterna/Documents/repos/discord_bot/apps/panel/src/components/SummonBotPanel.tsx`
@@ -283,17 +352,17 @@
 
 - ✅ Improved guild metadata reliability for panel rendering:
   - increased Discord guild hydration timeout to reduce fallback-to-ID behavior.
-  - premium flag for panel actions now restricted to effective `PREMIUM|ENTERPRISE`.
+  - flag de tier avanzado para acciones del panel restringido a tiers efectivos.
   - file: `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
 - ✅ Gateway now synchronizes guild metadata/config records on startup and guild updates to keep panel names/icons fresh:
   - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
 
-### Plan Governance
+### Tier Governance
 
-- ✅ Re-aligned runtime limits/config metadata for BASIC/PREMIUM/ENTERPRISE consistency:
+- ✅ Re-aligned runtime limits/config metadata for consistencia de tiers:
   - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/limits.ts`
-  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/premium-features.ts`
-  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-premium-config.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/tier-features.ts`
+  - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-tier-config.ts`
 
 ---
 
@@ -306,7 +375,7 @@
 - ✅ Unified effective tier resolution for panel flows:
   - Added shared tier resolver (`db tier + env override`) and reused it in guild list, tier debug, and player panel endpoints.
   - `POST /api/v1/player/:guildId/summon` and `GET /api/v1/player/:guildId/instances` now use effective tier (including `PREMIUM_TEST_GUILD_IDS`) consistently.
-  - Premium-only summon gate is now explicit (`PREMIUM|ENTERPRISE`) and instances endpoint exposes effective tier.
+  - Summon gate para tier avanzado ahora explícito and instances endpoint exposes effective tier.
 - Files:
   - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/services/effective-guild-tier.ts`
   - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
@@ -331,8 +400,8 @@
 - ✅ `pnpm test:voice:smoke:main` (PASS with now-playing progression and active playback)
 - ✅ Live API checks:
   - `/api/v1/guilds` returns `name` + CDN `icon` correctly.
-  - `/api/v1/player/:guildId/summon` accepted with premium tier.
-  - `/api/v1/player/:guildId/instances` reports effective `tier=PREMIUM`.
+  - `/api/v1/player/:guildId/summon` accepted with tier avanzado.
+  - `/api/v1/player/:guildId/instances` reports effective `tier=avanzado`.
 
 ---
 
@@ -401,18 +470,18 @@
 
 ---
 
-## [3.0.5] - Plan Normalization & QA Tier Consistency - 2026-02-12
+## [3.0.5] - Normalización de tiers & QA Tier Consistency - 2026-02-12
 
 ### Shared/Infra Agent
 
-- ✅ Normalized commercial plan limits in runtime templates:
+- ✅ Normalized límites por tier in runtime templates:
   - `BASIC` (Plus) now capped to `maxGuilds=1`.
-  - `PREMIUM` (Pro) now capped to `maxGuilds=3`.
+  - tier avanzado (Pro) now capped to `maxGuilds=3`.
   - Files:
     - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/plans.ts`
     - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/limits.ts`
     - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/features.ts`
-- ✅ Added operations reference for plan sync/audit:
+- ✅ Added operations reference for sync/audit de tiers:
   - `/Users/lucascisterna/Documents/repos/discord_bot/docs/operations/PLAN_CONFIGURATION.md`
 - ✅ Hardened diagnostics script for the active Docker project:
   - `pnpm diag:voice:microcut` now uses `COMPOSE_PROJECT_NAME` (default `discordbot_main`) instead of relying on stale default compose project state.
@@ -422,24 +491,24 @@
 ### Gateway Agent + API Agent
 
 - ✅ Fixed QA override consistency for `PREMIUM_TEST_GUILD_IDS`:
-  - effective tier now resolves to `PREMIUM` instead of `ENTERPRISE`.
+  - effective tier now resolves to tier avanzado.
   - Files:
     - `/Users/lucascisterna/Documents/repos/discord_bot/packages/subscription/src/guild-service.ts`
-    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/presentation/controllers/premium-controller.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/presentation/controllers/tier-controller.ts`
     - `/Users/lucascisterna/Documents/repos/discord_bot/api/src/routes/v1/guilds.ts`
 - ✅ Implemented panel summon handling in gateway:
   - `discord-bot:panel-commands` now processes `summon` by joining target voice channel and producing voice credentials flow for Audio.
   - file:
     - `/Users/lucascisterna/Documents/repos/discord_bot/gateway/src/main.ts`
 
-### Config Agent Surface (Plan quotas)
+### Config Agent Surface (quotas)
 
-- ✅ Synced premium quota metadata to match commercial positioning:
+- ✅ Synced quota metadata to match posicionamiento:
   - Plus: 1 server/session baseline.
   - Pro: up to 3 servers/sessions baseline.
   - Files:
-    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-premium-config.ts`
-    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/premium-features.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/enhanced-tier-config.ts`
+    - `/Users/lucascisterna/Documents/repos/discord_bot/packages/config/src/tier-features.ts`
 - ✅ Added Docker-main smoke validation for panel invoke flow:
   - new script `pnpm test:voice:smoke:main` performs `summon -> play -> now-playing > 0ms`.
   - files:
@@ -492,11 +561,11 @@
 
 ---
 
-## [3.0.2] - Premium QA Sandbox & Filter UI Hardening - 2025-11-03
+## [3.0.2] - QA Sandbox & Filter UI Hardening - 2025-11-03
 
-### 🎯 Enterprise QA Enhancements
+### 🎯 QA Enhancements
 
-- ✅ **Premium test guild validation**: `packages/config/src/index.ts` now filters out malformed `PREMIUM_TEST_GUILD_IDS` and logs actionable warnings so QA guild bootstrapping no longer fails silently.
+- ✅ **Test guild validation**: `packages/config/src/index.ts` now filters out malformed `PREMIUM_TEST_GUILD_IDS` and logs actionable warnings so QA guild bootstrapping no longer fails silently.
 - ✅ **Skip logic restored**: The main music control deck again enables `Skip` during active playback even if the queue is empty, matching expected moderator tooling.
 - ✅ **Filter session polish**: Updated the Now Playing embed to surface active audio filter metadata and ensured the filter control stays disabled until playback starts.
 
@@ -508,7 +577,7 @@
 ### 📦 Housekeeping
 
 - 🔁 Replaced the legacy `gateway/src/ui.ts` helpers with a thin re-export of `MusicUIBuilder` and the shared `resolveTextChannel` utility to keep tests aligned with production code.
-- 📝 Documented the changes here to keep the enterprise changelog in sync with the premium QA flow.
+- 📝 Documented the changes here to keep the changelog en sync con el flujo QA.
 
 ---
 
@@ -516,7 +585,7 @@
 
 ### 🚀 **PRODUCTION-READY AUDIO SYSTEM**
 
-**Status**: ✅ **FULLY OPERATIONAL** - All critical audio playback issues resolved with enterprise-grade stability.
+**Status**: ✅ **FULLY OPERATIONAL** - All critical audio playback issues resolved with estabilidad operativa.
 
 #### Critical Infrastructure Fixes (September 24, 2025)
 
@@ -692,7 +761,7 @@ This fix represents a **complete transformation** from non-functional to fully o
 - `gateway/src/main.ts` - Added raw Discord events forwarding
 - `audio/package.json` - Unified lavalink-client version to v2.5.9
 
-**Status**: ✅ **PRODUCTION READY** - Discord music bot now fully operational with enterprise-grade voice connection handling.
+**Status**: ✅ **PRODUCTION READY** - Discord music bot now fully operational with voice operativo connection handling.
 
 ---
 
@@ -703,28 +772,28 @@ This fix represents a **complete transformation** from non-functional to fully o
 #### Siguiendo Metodología `/docs/DEVELOPMENT_METHODOLOGY.md`
 
 **Problem Identified:**
-- ❌ 60+ unused enterprise configuration variables (lines 44-121) not defined in configuration schema
+- ❌ 60+ unused configuración variables (lines 44-121) not defined in configuration schema
 - ❌ Missing optional variables from .env.example that could enhance functionality
 - ❌ Poor organization and lack of security documentation
 - ❌ Variables being parsed but ignored by application (slower startup)
 
 **Root Cause Analysis:**
 - 🔍 **Schema Mismatch**: Variables in .env not recognized by Zod validation schema in `packages/config/src/index.ts`
-- 🔍 **Unused Enterprise Variables**: Extensive enterprise configuration section not implemented in application
+- 🔍 **Unused Variables**: Extensive configuración section not implemented in application
 - 🔍 **Missing Optional Features**: Variables for YouTube enhanced compatibility, Sentry monitoring, additional music platforms missing
 - 🔍 **Security Concerns**: No documentation about credential security and best practices
 
 **Solution Implemented:**
 
 #### 🧹 **Removed Unused Variables (60+ Variables Eliminated)**
-- ✅ **Enterprise Production Configuration** (lines 44-121) - Completely removed
+- ✅ **Production Configuration** (lines 44-121) - Completely removed
 - ✅ **Security Configuration** section - Removed unused variables
 - ✅ **Performance Settings** not in schema - Eliminated
 - ✅ **Load Balancing** settings - Removed (not implemented)
 
 **Variables Removed:**
 ```bash
-# Removed: All enterprise variables not in config schema
+# Removed: All variables not in config schema
 MAX_MEMORY_GB, ENABLE_GC_OPTIMIZATION, THREAD_POOL_SIZE
 DISCORD_SHARD_MODE, DISCORD_CACHE_OPTIMIZATION, DISCORD_COMPRESSION
 REDIS_CONNECTION_POOL_SIZE, REDIS_COMMAND_TIMEOUT, REDIS_RETRY_ATTEMPTS
@@ -1016,7 +1085,7 @@ RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, COMMAND_THROTTLE_MS
 - `tests/monitoring-endpoints.test.ts` - Fixed content-type expectations
 - `audio/test/performance.test.ts` - Enhanced mock verification logic
 
-**Status**: ✅ **PRODUCTION READY** - Complete Discord music bot system fully operational with enterprise-grade reliability and testing.
+**Status**: ✅ **PRODUCTION READY** - Complete Discord music bot system fully operational with reliability operativa and testing.
 
 ---
 
@@ -1398,14 +1467,14 @@ Channel-Based UI Management:
 
 ---
 
-## [2.7.0] - API Service Enterprise Enhancements - 2025-09-20
+## [2.7.0] - API Service Enhancements - 2025-09-20
 
 ### 🌐 API Service - Comprehensive REST & Webhook System
 
 #### Siguiendo Metodología `/docs/DEVELOPMENT_METHODOLOGY.md`
 
 **Investigación Oficial Realizada:**
-- ✅ Express.js v4 Best Practices - Enterprise API patterns
+- ✅ Express.js v4 Best Practices - API patterns
 - ✅ Zod Validation - Type-safe schema validation
 - ✅ HMAC Authentication - Webhook security standards
 - ✅ Redis Pub/Sub - Microservices communication patterns
@@ -1481,7 +1550,7 @@ Channel-Based UI Management:
 
 ### Technical Architecture Improvements
 
-**🏗️ Enterprise Patterns:**
+**🏗️ Patrones:**
 - Request ID tracing across all endpoints
 - Structured error responses with proper HTTP codes
 - Comprehensive input validation with Zod schemas
@@ -1502,19 +1571,19 @@ Channel-Based UI Management:
 - 7 analytics endpoints for business intelligence
 - 6 direct music control endpoints
 - Sub-100ms response times for core endpoints
-- Enterprise-grade error handling and recovery
+- Error handling operativo and recovery
 
 ---
 
-## [2.6.0] - Audio Service Enterprise Optimizations - 2025-09-20
+## [2.6.0] - Audio Service Optimizations - 2025-09-20
 
-### 🎵 Audio Service - Transformación Enterprise-Grade
+### 🎵 Audio Service - Transformación operativa
 
 #### Siguiendo Metodología `/docs/DEVELOPMENT_METHODOLOGY.md`
 
 **Investigación Oficial Realizada:**
 - ✅ Lavalink v4.0 documentation - Advanced configuration patterns
-- ✅ BullMQ documentation - Enterprise job queue patterns
+- ✅ BullMQ documentation - job queue patterns
 - ✅ Redis Caching Strategies - Multi-layer architecture
 - ✅ Node.js Performance Optimization - Memory management patterns
 
@@ -1522,7 +1591,7 @@ Channel-Based UI Management:
 
 #### Implementaciones Completadas
 
-**🔧 BullMQ Enterprise Job Queue:**
+**🔧 BullMQ Job Queue:**
 - ✅ `worker/src/types/jobs.ts` - Comprehensive TypeScript definitions
 - ✅ `worker/src/utils/redis-client.ts` - Connection pooling optimizado
 - ✅ `worker/src/workers/bullmq-worker.ts` - Worker management system
@@ -1698,7 +1767,7 @@ Coverage: Comprehensive
 - ✅ **TypeScript**: Typecheck pasando sin errores
 - ✅ **Startup**: API service iniciando correctamente en puerto configurado
 
-**📈 Mejoras Implementadas vs Plan Original:**
+**📈 Mejoras Implementadas vs original:**
 - ✅ **Input Validation**: Sistema Zod completo implementado
 - ✅ **Error Handling**: Hierarchy de errores con códigos específicos
 - ✅ **API Versioning**: Estructura /api/v1 funcional
@@ -1954,7 +2023,7 @@ discord_bot/
 #### Implementaciones Completadas
 
 **📦 Dependencias Añadidas:**
-- ✅ `bullmq@^5.58.7` - Redis-based job queue con enterprise features
+- ✅ `bullmq@^5.58.7` - Redis-based job queue con features
 - ✅ `ioredis@^5.7.0` - Redis client optimizado para BullMQ
 - ✅ `node-cron@^4.2.1` - Cron-based scheduling
 - ✅ `@types/node-cron@^3.0.11` - TypeScript types

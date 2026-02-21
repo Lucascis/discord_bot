@@ -3,11 +3,10 @@ import { NextRequest } from 'next/server';
 
 const API_BASE_URL = (process.env.INTERNAL_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://api:3000').trim();
 const API_KEY = (process.env.API_KEY || '').trim();
+const UPSTREAM_TIMEOUT_MS = 20_000;
 
 const PUBLIC_GET_PATHS = new Set<string>([
   'health',
-  'plans',
-  'plans/runtime',
 ]);
 
 function isPublicGetPath(path: string, method: string): boolean {
@@ -48,18 +47,49 @@ async function proxyRequest(request: NextRequest, rawPath: string[]): Promise<Re
   const hasBody = !['GET', 'HEAD'].includes(method);
   const body = hasBody ? await request.text() : undefined;
 
-  const upstreamResponse = await fetch(upstreamUrl.toString(), {
-    method,
-    headers,
-    body,
-    cache: 'no-store',
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  let upstreamResponse: Response;
+  try {
+    upstreamResponse = await fetch(upstreamUrl.toString(), {
+      method,
+      headers,
+      body,
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({
+      error: 'Upstream API unavailable',
+      details: message,
+    }), {
+      status: 502,
+      headers: { 'content-type': 'application/json' }
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const responseHeaders = new Headers(upstreamResponse.headers);
   responseHeaders.delete('content-encoding');
   responseHeaders.delete('transfer-encoding');
 
-  return new Response(upstreamResponse.body, {
+  // Avoid stream piping errors when upstream closes early.
+  let payload: ArrayBuffer;
+  try {
+    payload = await upstreamResponse.arrayBuffer();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({
+      error: 'Upstream API stream interrupted',
+      details: message,
+    }), {
+      status: 502,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  return new Response(payload, {
     status: upstreamResponse.status,
     headers: responseHeaders
   });

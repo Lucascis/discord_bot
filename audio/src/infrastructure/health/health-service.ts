@@ -31,6 +31,15 @@ export class HealthService {
     ) {
         this.healthChecker = new HealthChecker('audio');
         this.healthChecker.register('redis', () => CommonHealthChecks.redis(this.redisManager.getPublisher()));
+        this.healthChecker.register('redis-subscriber', async () => {
+            const state = this.redisManager.getRedisSubscriptionState();
+            const healthy = state.subscriberStatus === 'ready' && state.handlersCount > 0;
+            return {
+                status: healthy ? 'healthy' : 'degraded',
+                message: healthy ? 'Redis subscriber and channel handlers are active' : 'Redis subscriber is not fully ready',
+                details: state
+            };
+        });
 
         this.server = http.createServer(this.handleRequest.bind(this));
     }
@@ -118,6 +127,17 @@ export class HealthService {
                             },
                         };
                     })],
+                    ['redis-subscriptions', () => this.advancedHealth.checkComponent('redis-subscriptions', async () => {
+                        const state = this.redisManager.getRedisSubscriptionState();
+                        const healthy = state.subscriberStatus === 'ready' && state.handlersCount > 0;
+                        return {
+                            status: healthy ? 'healthy' : 'degraded',
+                            message: healthy
+                                ? `Redis subscriber ready with ${state.subscribedChannels.length} channels`
+                                : 'Redis subscriber/channel handlers not ready',
+                            details: state
+                        };
+                    })],
                     ['lavalink-nodes', () => this.advancedHealth.checkComponent('lavalink-nodes', async () => {
                         const nodes = Array.from(this.lavalinkManager.library.nodeManager?.nodes.values() || []) as LavalinkNode[];
                         const connectedNodes = nodes.filter(node => node.connected);
@@ -172,6 +192,7 @@ export class HealthService {
             } else if (req.url === '/health/trends') {
                 const trends = {
                     'redis-circuit-breaker': this.advancedHealth.getComponentTrends('redis-circuit-breaker', 30),
+                    'redis-subscriptions': this.advancedHealth.getComponentTrends('redis-subscriptions', 30),
                     'lavalink-nodes': this.advancedHealth.getComponentTrends('lavalink-nodes', 30),
                     'audio-performance': this.advancedHealth.getComponentTrends('audio-performance', 30),
                     'worker-integration': this.advancedHealth.getComponentTrends('worker-integration', 30),

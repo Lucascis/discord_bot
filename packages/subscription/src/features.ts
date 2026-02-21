@@ -38,7 +38,7 @@ export const FEATURES: Record<string, FeatureFlag> = {
     valuesByTier: {
       [SubscriptionTier.FREE]: 'standard',
       [SubscriptionTier.BASIC]: 'high',
-      [SubscriptionTier.PREMIUM]: 'highest',
+      [SubscriptionTier.PREMIUM]: 'lossless',
       [SubscriptionTier.ENTERPRISE]: 'lossless',
     },
   },

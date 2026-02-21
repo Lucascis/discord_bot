@@ -26,20 +26,20 @@ sequenceDiagram
     Gateway->>Gateway: Validate command
     Gateway->>Discord: Reply "🎵 Processing..."<br/>(Ephemeral, prevents timeout)
 
-    Gateway->>Database: Check ServerConfiguration<br/>(Premium features, settings)
+    Gateway->>Database: Check ServerConfiguration<br/>(Capacidades avanzadas, settings)
     Database-->>Gateway: Config data
 
     Gateway->>Database: Check RateLimit
     Database-->>Gateway: Rate limit OK
 
-    Gateway->>Redis: Publish to discord-bot:commands
-    Note over Redis: {<br/>type: 'play',<br/>guildId, userId,<br/>query: 'song name',<br/>commandType: 'play'<br/>}
+    Gateway->>Redis: Add to Stream discord-bot:audio-commands
+    Note over Redis: {<br/>type: 'play',<br/>guildId, userId,<br/>query: 'song name'<br/>}
 
     Gateway-->>Discord: Processing message sent
 
     Note over Audio: Command Processor
 
-    Redis-->>Audio: Subscribe discord-bot:commands
+    Redis-->>Audio: Consume from Stream
     Audio->>Audio: Process play command
     Audio->>Database: Get/Create Queue
     Database-->>Audio: Queue ID
@@ -119,15 +119,15 @@ sequenceDiagram
 
     Note over Gateway: Raw Event Handler
 
-    Gateway->>Redis: Publish to discord-bot:to-audio
-    Note over Redis: {<br/>event: 'VOICE_STATE_UPDATE',<br/>data: {...}<br/>}
+    Gateway->>Redis: Publish to discord-bot:voice-events
+    Note over Redis: {<br/>t: 'VOICE_STATE_UPDATE',<br/>d: {...}<br/>}
 
-    Gateway->>Redis: Publish to discord-bot:to-audio
-    Note over Redis: {<br/>event: 'VOICE_SERVER_UPDATE',<br/>token, endpoint, guildId<br/>}
+    Gateway->>Redis: Publish to discord-bot:voice-events
+    Note over Redis: {<br/>t: 'VOICE_SERVER_UPDATE',<br/>token, endpoint, guildId<br/>}
 
     Note over Audio: Voice Connection Handler
 
-    Redis-->>Audio: Subscribe discord-bot:to-audio
+    Redis-->>Audio: Subscribe discord-bot:voice-events
     Audio->>Audio: Process VOICE_STATE_UPDATE
     Audio->>Audio: Process VOICE_SERVER_UPDATE
 
@@ -165,14 +165,14 @@ sequenceDiagram
     Gateway->>Database: Validate permissions
     Database-->>Gateway: Permission OK
 
-    Gateway->>Redis: Publish to discord-bot:commands
-    Note over Redis: {<br/>type: 'pause',<br/>guildId, userId<br/>}
+    Gateway->>Redis: Add to Stream discord-bot:audio-controls
+    Note over Redis: {<br/>type: 'toggle',<br/>guildId<br/>}
 
     Gateway->>Discord: Update button<br/>(disabled state)
 
     Note over Audio: Command Processor
 
-    Redis-->>Audio: Subscribe discord-bot:commands
+    Redis-->>Audio: Consume from Stream
     Audio->>Lavalink: Pause player
     Lavalink-->>Audio: Player paused
 
@@ -422,4 +422,4 @@ graph LR
 ### Database Query Optimization
 1. **Indexed queries** - Guild ID, timestamps
 2. **Connection pooling** - Prisma connection pool
-3. **Prepared statements** - Query plan caching
+3. **Prepared statements** - Query caching

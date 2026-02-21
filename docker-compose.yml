@@ -5,11 +5,9 @@ services:
     container_name: discord-postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: NebuDB_2026_PublicRelease_9f4a
       POSTGRES_DB: discord
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,6 +17,9 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    # Prefer Postgres fast shutdown signal and enough grace time to avoid crash-recovery startup.
+    stop_signal: SIGINT
+    stop_grace_period: 90s
     networks:
       - discord-network
     deploy:
@@ -109,7 +110,7 @@ services:
     environment:
       # Increased heap for large shards (1000+ guilds) while keeping a cap
       NODE_OPTIONS: "--expose-gc --max-old-space-size=768"
-      DATABASE_URL: "postgresql://postgres:postgres@discord-postgres:5432/discord"
+      DATABASE_URL: "postgresql://postgres:NebuDB_2026_PublicRelease_9f4a@discord-postgres:5432/discord"
       REDIS_URL: "redis://discord-redis:6379"
       LAVALINK_HOST: "discord-lavalink"
     depends_on:
@@ -154,7 +155,7 @@ services:
     command: node api/dist/index.js
     env_file: .env
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@discord-postgres:5432/discord"
+      DATABASE_URL: "postgresql://postgres:NebuDB_2026_PublicRelease_9f4a@discord-postgres:5432/discord"
       REDIS_URL: "redis://discord-redis:6379"
       LAVALINK_HOST: "discord-lavalink"
     depends_on:
@@ -198,7 +199,7 @@ services:
     env_file: .env
     environment:
       NODE_OPTIONS: "--expose-gc --max-old-space-size=768"
-      DATABASE_URL: "postgresql://postgres:postgres@discord-postgres:5432/discord"
+      DATABASE_URL: "postgresql://postgres:NebuDB_2026_PublicRelease_9f4a@discord-postgres:5432/discord"
       REDIS_URL: "redis://discord-redis:6379"
       LAVALINK_HOST: "discord-lavalink"
     depends_on:
@@ -243,7 +244,7 @@ services:
     command: node worker/dist/index.js
     env_file: .env
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@discord-postgres:5432/discord"
+      DATABASE_URL: "postgresql://postgres:NebuDB_2026_PublicRelease_9f4a@discord-postgres:5432/discord"
       REDIS_URL: "redis://discord-redis:6379"
       LAVALINK_HOST: "discord-lavalink"
     depends_on:
@@ -292,7 +293,7 @@ services:
       NEXT_PUBLIC_API_BASE_URL: "http://localhost:3000"
       INTERNAL_API_BASE_URL: "http://api:3000"
       AUTH_TRUST_HOST: "true"
-      DATABASE_URL: "postgresql://postgres:postgres@discord-postgres:5432/discord"
+      DATABASE_URL: "postgresql://postgres:NebuDB_2026_PublicRelease_9f4a@discord-postgres:5432/discord"
     depends_on:
       api:
         condition: service_healthy

@@ -166,11 +166,11 @@ REQUEST_TIMEOUT=30000                          # Request timeout (ms)
 #### **Rate Limiting**
 ```env
 # Rate Limiting Settings
-RATE_LIMIT_WINDOW_MS=900000                    # Standard window (ms) for subscription-aware limiter
+RATE_LIMIT_WINDOW_MS=900000                    # Standard window (ms) for runtime-aware limiter
 RATE_LIMIT_STRICT_WINDOW_MS=900000             # Strict endpoint window (ms)
 RATE_LIMIT_STRICT_MAX=20                       # Max requests per window for strict endpoints
 API_RATE_LIMIT_IN_MEMORY=false                 # Force in-memory limiter (used for tests)
-API_RATE_LIMIT_DEFAULT_TIER=PREMIUM            # Tier usado cuando no hay guild/contexto (panel, tooling)
+API_RATE_LIMIT_DEFAULT_TIER=BASIC              # Perfil usado cuando no hay guild/contexto (panel, tooling)
 
 # Command-Specific Rate Limits
 RATE_LIMIT_PLAY_COMMAND=10                     # Play command limit per minute
@@ -178,38 +178,23 @@ RATE_LIMIT_SKIP_COMMAND=20                     # Skip command limit per minute
 RATE_LIMIT_QUEUE_COMMAND=5                     # Queue command limit per minute
 ```
 
-The API rate limiter is subscription-aware. Default per-minute limits by commercial plan are:
+The API rate limiter is runtime-aware. Default per-minute limits por perfil son:
 
-| Plan  | Tier (interno) | Requests / Minute |
+| Tier  | Interno | Requests / Minute |
 |-------|----------------|-------------------|
 | Free  | FREE           | 10                |
 | Plus  | BASIC          | 30                |
-| Pro   | PREMIUM        | 100               |
+| Avanzado | ADVANCED | 100               |
 
-For sensitive endpoints (metrics, security diagnostics) the limit is clamped by `RATE_LIMIT_STRICT_MAX` regardless of plan to guarantee platform stability. Despliegues custom de nivel enterprise pueden ajustar estos límites caso por caso vía configuración interna.
+For sensitive endpoints (metrics, security diagnostics) the limit is clamped by `RATE_LIMIT_STRICT_MAX` regardless of profile to guarantee platform stability.
 
-#### **Premium Testing Sandbox**
+#### **Testing Sandbox**
 ```env
-# Comma-separated guild IDs that should start with Pro features enabled and allow in-place plan switching
+# Comma-separated guild IDs with advanced runtime profile enabled for QA
 PREMIUM_TEST_GUILD_IDS=123456789012345678,987654321098765432
 ```
 
-When set, the gateway automatically provisions the listed guilds with the PRO subscription on startup and unlocks the `/premium demo` control panel so QA teams can cycle between tiers without touching Stripe. Para despliegues enterprise/custom podés apuntar estos guilds a configuraciones especiales, pero eso no introduce un cuarto plan comercial.
-
-### **Payment Configuration**
-
-```env
-# Payment Provider
-PAYMENT_PROVIDER=stripe                        # stripe | mercadopago
-
-# Stripe Configuration (required if PAYMENT_PROVIDER=stripe)
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-
-# Mercado Pago Configuration (required if PAYMENT_PROVIDER=mercadopago)
-MERCADOPAGO_ACCESS_TOKEN=your_access_token
-MERCADOPAGO_WEBHOOK_SECRET=your_webhook_secret
-```
+When set, the gateway applies advanced runtime behavior on startup for listed guilds in QA/testing scenarios.
 
 ### **YouTube Enhanced Compatibility**
 
@@ -225,17 +210,17 @@ YOUTUBE_REFRESH_TOKEN=your_refresh_token
 
 ### **Panel Summon Limits**
 
-Premium customers can invoke additional bot instances directly from the web panel. The number of concurrent instances per guild is capped per tier and enforced via Redis (`discord-bot:active-instances:<guildId>`):
+Usuarios con perfil avanzado pueden invocar instancias adicionales desde el panel web. The number of concurrent instances per guild is enforced via Redis (`discord-bot:active-instances:<guildId>`):
 
-| Plan        | Concurrent Instances por guild |
+| Tier        | Concurrent Instances por guild |
 |-------------|--------------------------------|
 | FREE        | 1                              |
 | PLUS        | 1                              |
 | PRO         | 1                              |
 
-> Discord solo permite una conexión de voz por bot y por servidor (guild). Los límites superiores de Plus/Pro se aplican a **cuántos guilds puede atender la misma cuenta en paralelo**, no a múltiples instancias en el mismo servidor.
+> Discord solo permite una conexión de voz por bot y por servidor (guild). Los límites superiores aplican a **cuántos guilds puede atender la misma cuenta en paralelo**, no a múltiples instancias en el mismo servidor.
 
-Cuando el panel emite un summon, la API registra el par canal de voz/texto activo en Redis (`discord-bot:active-instances:<guildId>`). Si se vuelve a invocar el bot en otro canal del mismo guild, la instancia se **mueve** a ese nuevo canal (manteniendo 1 por guild). Cuando el audio service se desconecta (manual o automáticamente), la entrada se elimina y el slot queda libre. Si cambiás los límites de planes, reiniciá API + gateway para que ambos servicios tomen los nuevos valores.
+Cuando el panel emite un summon, la API registra el par canal de voz/texto activo en Redis (`discord-bot:active-instances:<guildId>`). Si se vuelve a invocar el bot en otro canal del mismo guild, la instancia se **mueve** a ese nuevo canal (manteniendo 1 por guild). Cuando el audio service se desconecta (manual o automáticamente), la entrada se elimina y el slot queda libre.
 
 #### **CORS and Security**
 
@@ -257,7 +242,7 @@ PANEL_STAFF_DISCORD_IDS=123,456                           # Comma separated user
 ```
 
 - `INTERNAL_API_BASE_URL` is evaluated at runtime so the same image works locally and in Docker. When running inside `docker compose`, keep it pointed to `http://api:3000`. When developing the panel outside containers, set it to `http://localhost:3000`.
-- Every time you rotate `API_KEY`, mirror the value in `NEXT_PUBLIC_PANEL_API_KEY`; otherwise, the panel cannot call `/api/v1/plans` and fallback messages (“No pudimos sincronizar los planes…”) will appear.
+- Every time you rotate `API_KEY`, mirror the value in `NEXT_PUBLIC_PANEL_API_KEY`; otherwise, BFF calls from panel can fail.
 - `NEXTAUTH_URL` must exactly match the Redirect URI configured in the Discord Developer Portal. Update it when exposing the panel publicly (e.g., `https://panel.tu-dominio.com`).
 ```env
 # CORS Configuration
@@ -273,7 +258,7 @@ SECURITY_API_KEY=<your_api_key>           # API authentication key
 
 ### **Panel Web y Control de Acceso**
 
-El panel Next.js funciona como landing comercial y como consola para clientes. Los accesos administrativos se gobiernan por OAuth de Discord y una allowlist declarada en el `.env`.
+El panel Next.js funciona como landing del proyecto y como consola operativa. Los accesos administrativos se gobiernan por OAuth de Discord y una allowlist declarada en el `.env`.
 
 ```env
 # Panel público y API
@@ -292,9 +277,9 @@ PANEL_STAFF_DISCORD_IDS=1234567890,9087654321           # IDs con acceso al pane
 NEXT_PUBLIC_PANEL_STAFF_DISCORD_IDS=1234567890          # (opcional) expone los mismos IDs al front
 ```
 
-- Los usuarios finales solo ven la landing, los planes y `/dashboard`.
-- Cuando el `user.id` autenticado está en la allowlist se muestra un acceso destacado al Plan Engine, pero el staff puede permanecer en el dashboard de clientes sin redirecciones forzadas.
-- Las rutas administrativas siguen protegidas: sin un ID autorizado es imposible cargar `/admin/plans`, aunque la sesión esté iniciada.
+- Los usuarios finales solo ven la landing y `/dashboard`.
+- Cuando el `user.id` autenticado está en la allowlist se muestra acceso al panel operativo.
+- Las rutas administrativas siguen protegidas: sin un ID autorizado no se puede cargar el panel interno.
 - Cuando el panel corre dentro de Docker, `INTERNAL_API_BASE_URL` apunta al hostname interno (`http://api:3000`) para SSR, mientras que `NEXT_PUBLIC_API_BASE_URL` se mantiene en `http://localhost:3000` para las peticiones del navegador.
 - El Web Player usa SSE (`/api/v1/player/{guild}/events`) más un token efímero firmado con `NEXTAUTH_SECRET` para abrir el stream `/api/v1/player/{guild}/stream`. Si cambiás el secreto, reiniciá API y Panel para que la firma coincida.
 
@@ -975,7 +960,7 @@ Panel settings are stored in Redis alongside database configuration and are appl
 - `announceNowPlaying` / `deleteInvokeMessage` toggle channel announcements and cleanup.
 - `uiTheme.playingColor` / `uiTheme.pausedColor` accept 6-digit hex colors (with or without `#`) to brand the Now Playing embed for each guild.
 
-## 💳 Planes y límites
+## 💳 Niveles y límites
 - **Free**: 1 instancia (1 guild a la vez), panel básico deshabilitado.
 - **Plus**: 1 instancia, panel web y audio dual habilitados, soporte prioritized.
 - **Pro**: hasta 3 instancias simultáneas en distintos guilds (1 por guild), panel + audio dual + 24/7.

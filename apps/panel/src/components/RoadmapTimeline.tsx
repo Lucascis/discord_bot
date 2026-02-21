@@ -6,17 +6,17 @@ const phases = [
   },
   {
     title: 'Fase 1 · Landing',
-    description: 'Hero interactivo, comparativa y tabla de planes conectada a la API.',
+    description: 'Hero interactivo, status operativo y accesos directos al dashboard.',
     eta: 'Semana 2'
   },
   {
-    title: 'Fase 2 · Portal premium',
-    description: 'Dashboard de guild + Studio Mode + billing portal.',
+    title: 'Fase 2 · Portal personal',
+    description: 'Dashboard de guild + Studio Mode + controles completos de reproduccion.',
     eta: 'Semanas 3-5'
   },
   {
-    title: 'Fase 3 · Panel interno',
-    description: 'Plan Engine, experiments y tablero de incidentes.',
+    title: 'Fase 3 · Operacion interna',
+    description: 'Configuracion avanzada, observabilidad y tablero de incidentes.',
     eta: 'Semanas 6-8'
   }
 ];

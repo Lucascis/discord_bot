@@ -71,6 +71,48 @@ function mapLavalinkTrack(track: LavalinkTrack): Track {
   };
 }
 
+async function fetchYoutubeViewCount(identifier: string): Promise<number | null> {
+  const endpoint = `https://returnyoutubedislikeapi.com/votes?videoId=${encodeURIComponent(identifier)}`;
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), 2500);
+  try {
+    const response = await fetch(endpoint, { signal: abortController.signal });
+    if (!response.ok) return null;
+    const payload = await response.json() as { viewCount?: unknown };
+    return typeof payload.viewCount === 'number' && Number.isFinite(payload.viewCount)
+      ? Math.max(0, Math.trunc(payload.viewCount))
+      : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function enrichTracksWithViews(tracks: Track[]): Promise<Track[]> {
+  const youtubeTracks = tracks.filter((track) => track.source === 'youtube' && track.identifier);
+  if (youtubeTracks.length === 0) return tracks;
+
+  const viewEntries = await Promise.all(
+    youtubeTracks.map(async (track) => {
+      const viewCount = await fetchYoutubeViewCount(track.identifier);
+      return [track.identifier, viewCount] as const;
+    })
+  );
+
+  const viewMap = new Map<string, number>();
+  for (const [identifier, viewCount] of viewEntries) {
+    if (typeof viewCount === 'number') {
+      viewMap.set(identifier, viewCount);
+    }
+  }
+
+  return tracks.map((track) => ({
+    ...track,
+    viewCount: track.source === 'youtube' ? viewMap.get(track.identifier) : undefined
+  }));
+}
+
 export async function searchTracksViaLavalink(
   query: string,
   source: 'youtube' | 'spotify' | 'soundcloud' | 'all' = 'all',
@@ -110,7 +152,7 @@ export async function searchTracksViaLavalink(
   const trackList = payload.data ?? payload.tracks ?? [];
   const mappedTracks = trackList.map(mapLavalinkTrack);
   const startIndex = (page - 1) * limit;
-  const pagedTracks = mappedTracks.slice(startIndex, startIndex + limit);
+  const pagedTracks = await enrichTracksWithViews(mappedTracks.slice(startIndex, startIndex + limit));
 
   return {
     query,

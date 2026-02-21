@@ -5,8 +5,6 @@ export type GuildOverview = {
   name: string;
   icon?: string | null;
   available?: boolean;
-  subscriptionTier?: string;
-  isPremium?: boolean;
 };
 
 export type GuildSettings = {

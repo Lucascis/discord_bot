@@ -36,8 +36,8 @@ Last Updated: 2025-11-17
   - Inicializar con `docker-compose -f docker-compose.production.yml up -d postgres redis`.
   - Ejecutar el servicio de migraciones (si se usa en producción):
     - `docker-compose -f docker-compose.production.yml up migrate`.
-- [ ] Tabla `subscription_plans` contiene al menos los 4 planes básicos:
-  - FREE, BASIC, PREMIUM, ENTERPRISE.
+- [ ] RuntimeConfig inicial cargada en base:
+  - Valores globales y por guild validados para el entorno objetivo.
 
 ---
 
@@ -79,7 +79,7 @@ curl http://localhost:3003/health   # Worker
 - [ ] Probar manualmente:
   - `/play <tema>` → debe unirse al canal de voz y reproducir.
   - `/skip`, `/queue`, `/stop`.
-  - `/premium status` y `/premium plans` (planes cargados).
+  - Confirmar estado operativo desde panel/API (`/api/v1/health`, dashboard, queue).
 
 Si algún comando falla:
 - Revisar logs de `discord-bot-gateway` y `discord-bot-audio`:
@@ -121,7 +121,7 @@ Durante las primeras horas tras el lanzamiento:
 
 ---
 
-## 7. Plan de Escalado (cuando crezca el tráfico)
+## 7. Estrategia de escalado (cuando crezca el tráfico)
 
 Para las primeras centenas / ~1000 guilds:
 - Un solo stack de `docker-compose.production.yml` es suficiente.

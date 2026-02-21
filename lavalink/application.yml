@@ -28,13 +28,13 @@ lavalink:
       distortion: true
       channelMix: true
       lowPass: true
-    # Enhanced performance settings for production - tuned for stable playback
-    bufferDurationMs: 1800          # Slightly larger jitter buffer to absorb short network spikes
-    frameBufferDurationMs: 15000    # Larger frame cache for sustained playback stability
-    nonAllocatingFrameBuffer: true  # Reduce allocations and GC pressure under load
+    # Enhanced performance settings for production - tuned for stable playback (Fase 1 stability)
+    bufferDurationMs: 2200          # Larger jitter buffer to reduce microcortes
+    frameBufferDurationMs: 18000   # Larger frame cache for sustained 24/7 playback
+    nonAllocatingFrameBuffer: true # Reduce allocations and GC pressure under load
     opusEncodingQuality: 8
     resamplingQuality: HIGH
-    trackStuckThresholdMs: 15000    # Increased from 10000ms to be more tolerant
+    trackStuckThresholdMs: 20000   # More tolerant to transient stalls (was 15000)
     useSeekGhosting: true
     playerUpdateInterval: 5         # Keep player updates frequent enough for stable position/progress
     youtubePlaylistLoadLimit: 50  # Reduced to save memory
@@ -55,41 +55,27 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
-    # Client order tuned for reliability first (search + playback fallbacks)
+    # Hardened client order:
+    # - Prefer clients that are typically less brittle for playback.
+    # - Keep WEB/WEBEMBEDDED available for metadata/search and PoToken compatibility.
     clients:
-      - MUSIC
-      - MWEB
+      - ANDROID_VR
       - WEB
       - WEBEMBEDDED
-      - ANDROID_VR
     clientOptions:
-      # MUSIC/MWEB are useful for metadata/search resilience.
-      MUSIC:
-        playback: false
-        videoLoading: false
-        playlistLoading: false
-        searching: true
-      MWEB:
-        playback: true
-        videoLoading: true
-        playlistLoading: true
-        searching: true
-      # Web client - stable playback fallback
-      WEB:
-        playback: true
-        videoLoading: true
-        playlistLoading: true
-        searching: true
-      # Web embedded - additional fallback on YouTube script churn
-      WEBEMBEDDED:
-        playback: true
-        videoLoading: true
-        playlistLoading: true
-        searching: true
-      # Android VR client - legacy fallback
       ANDROID_VR:
         playback: true
         videoLoading: true
+        playlistLoading: true
+        searching: true
+      WEB:
+        playback: false
+        videoLoading: false
+        playlistLoading: true
+        searching: true
+      WEBEMBEDDED:
+        playback: false
+        videoLoading: false
         playlistLoading: true
         searching: true
     # Additional performance settings - optimized for search speed
@@ -141,7 +127,7 @@ plugins:
       deezer: false
 
   sponsorblock:
-    enabled: true
+    enabled: false
     categories:
       - sponsor
       - selfpromo

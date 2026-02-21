@@ -84,7 +84,7 @@ const envSchema = z.object({
   YOUTUBE_PO_TOKEN: z.string().optional(),
   YOUTUBE_VISITOR_DATA: z.string().optional(),
   YOUTUBE_TOKEN_AUTO_ENABLED: booleanLike.default(false),
-  YOUTUBE_TOKEN_AUTO_REFRESH_MS: z.coerce.number().int().min(60000).default(1800000),
+  YOUTUBE_TOKEN_AUTO_REFRESH_MS: z.coerce.number().int().min(60000).default(900000), // 15 min - prevents ~30 min playback stop (token expiry)
   YOUTUBE_TOKEN_AUTO_ENDPOINT: optionalUrl,
   YOUTUBE_TOKEN_AUTO_ENDPOINT_BEARER: z.string().optional(),
   // Premium testing helpers

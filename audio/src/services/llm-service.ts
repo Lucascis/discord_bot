@@ -13,7 +13,7 @@ export class LlmService {
         this.tavilyApiKey = env.TAVILY_API_KEY || '';
 
         if (!this.apiKey) {
-            this.logger.warn('OPENAI_API_KEY not set. AI DJ will fail if triggered.');
+            this.logger.info('OPENAI_API_KEY not set. AI DJ features remain disabled until configured.');
         }
     }
 

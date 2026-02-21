@@ -1,7 +1,7 @@
 # Database Schema Architecture
 
 ## Overview
-This diagram illustrates the PostgreSQL database schema using Prisma ORM. The schema supports music queuing, configuration management, premium features, and event sourcing.
+This diagram illustrates the PostgreSQL database schema using Prisma ORM. The schema supports music queuing, configuration management, capacidades avanzadas, and event sourcing.
 
 ## Entity Relationship Diagram
 
@@ -246,11 +246,11 @@ graph LR
 - Snapshots optimize query performance
 - Supports analytics and debugging
 
-### 3. Premium Feature Model
+### 3. Modelo de capacidades avanzadas
 
 ```mermaid
 graph TD
-    A[UserSubscription] -->|Grants| B[Premium Features]
+    A[UserSubscription] -->|Grants| B[Capacidades avanzadas]
     B --> C[ServerConfiguration]
     C -->|Enables| D[spotifyEnabled]
     C -->|Enables| E[appleMusicEnabled]
@@ -280,7 +280,7 @@ graph TD
 ### Configuration Management
 
 **ServerConfiguration**
-- Premium tier management
+- Gestión de niveles/tiers
 - Feature toggles (Spotify, Apple Music, Deezer, etc.)
 - Audio quality settings
 - Queue limitations
@@ -293,13 +293,13 @@ graph TD
 - Music enablement per channel
 - Fine-grained permission control
 
-### Premium Features
+### Capacidades avanzadas
 
 **UserSubscription**
-- User-level subscriptions (free, basic, premium, enterprise)
+- User-level subscriptions (free, basic, avanzado, escala alta)
 - Payment provider integration (Stripe, PayPal, crypto)
 - Usage tracking (play time, requests)
-- Premium server allocation
+- Server allocation por nivel
 
 **LyricsCache**
 - Cached lyrics from providers (Genius, Musixmatch)
@@ -364,7 +364,7 @@ PlaybackHistory.findMany({
   orderBy: { playedAt: 'desc' }
 })
 
-// Premium feature check
+// Feature check por nivel
 ServerConfiguration.findUnique({ where: { guildId } })
 ```
 

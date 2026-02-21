@@ -108,7 +108,8 @@ export class HealthServer {
   }
 
   private setupServer(port: number): void {
-    this.server = this.app.listen(port, () => {
+    // Bind explicitly to IPv4 so Docker host port forwarding can reach health probes reliably.
+    this.server = this.app.listen(port, '0.0.0.0', () => {
       logger.info({ port }, 'Health server started');
     });
 

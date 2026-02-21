@@ -16,7 +16,7 @@ export class TtsService {
                 this.client = new TextToSpeechClient();
                 this.isEnabled = true;
             } else {
-                this.logger.warn('GOOGLE_APPLICATION_CREDENTIALS not set. TTS will fail if triggered.');
+                this.logger.info('GOOGLE_APPLICATION_CREDENTIALS not set. TTS features remain disabled until configured.');
             }
         } catch (error) {
             this.logger.error({ error }, 'Failed to initialize Google TTS client');
@@ -25,7 +25,7 @@ export class TtsService {
 
     async synthesize(text: string): Promise<string> {
         if (!this.isEnabled || !this.client) {
-            this.logger.warn('TTS disabled or not initialized. Returning mock URL.');
+            this.logger.debug('TTS disabled or not initialized. Returning mock URL.');
             return 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
         }
 

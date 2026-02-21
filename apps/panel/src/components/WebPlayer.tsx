@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { NowPlayingState, PlayerActionPayload } from '@/lib/player-client';
-import { buildStreamUrl, requestStreamToken } from '@/lib/player-client';
+import type { NowPlayingState, PlayerActionPayload, QueueSnapshot } from '@/lib/player-client';
+import { buildStreamUrl, getQueueSnapshot, requestStreamToken } from '@/lib/player-client';
 import { getLyrics, type LyricsPayload } from '@/lib/lyrics-client';
 
 interface Props {
@@ -17,8 +17,9 @@ interface Props {
 export function WebPlayer({ guildId, state, onAction, refreshing = false, panelApiKey }: Props) {
   const [volume, setVolume] = useState(state?.volume ?? 100);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recentActionRef = useRef<Map<string, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
-  const [isExecutingAction, setIsExecutingAction] = useState(false);
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const [panelPlayback, setPanelPlayback] = useState(false);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -30,6 +31,10 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState<string | null>(null);
   const [artworkFailed, setArtworkFailed] = useState(false);
+  const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queuePage, setQueuePage] = useState(1);
+  const [selectedFilterPreset, setSelectedFilterPreset] = useState('flat');
 
   useEffect(() => {
     setVolume(state?.volume ?? 100);
@@ -54,6 +59,39 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
   useEffect(() => {
     setArtworkFailed(false);
   }, [state?.artworkUrl, state?.title]);
+
+  useEffect(() => {
+    if (!guildId) {
+      setQueueSnapshot(null);
+      return;
+    }
+    let active = true;
+    const loadQueue = async () => {
+      try {
+        setQueueLoading(true);
+        const snapshot = await getQueueSnapshot(guildId, { page: queuePage }, panelApiKey);
+        if (active) {
+          setQueueSnapshot(snapshot);
+        }
+      } catch {
+        if (active) {
+          setQueueSnapshot(null);
+        }
+      } finally {
+        if (active) {
+          setQueueLoading(false);
+        }
+      }
+    };
+    void loadQueue();
+    const interval = setInterval(() => {
+      void loadQueue();
+    }, 4000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [guildId, panelApiKey, queuePage, state?.title, state?.positionMs, state?.queueLen, state?.paused]);
 
   useEffect(() => {
     const interval = setInterval(() => setTick((current) => current + 1), 1000);
@@ -96,17 +134,43 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
     };
   }, [showLyrics, state?.title, state?.author, state?.durationMs]);
 
-  const handleAction = async (payload: PlayerActionPayload) => {
+  const handleAction = (payload: PlayerActionPayload) => {
     if (!state) return;
-    setIsExecutingAction(true);
-    setError(null);
-    try {
-      await onAction(payload);
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : 'No se pudo ejecutar la acción');
-    } finally {
-      setIsExecutingAction(false);
+    const actionKey = payload.action;
+    const now = Date.now();
+    const lastAttempt = recentActionRef.current.get(actionKey) ?? 0;
+    if (now - lastAttempt < 180) return;
+    recentActionRef.current.set(actionKey, now);
+
+    setPendingActions((prev) => {
+      const next = new Set(prev);
+      next.add(actionKey);
+      return next;
+    });
+
+    // Keep browser-side audio in sync for immediate perceived response.
+    if (payload.action === 'toggle' && panelPlayback && audioRef.current) {
+      if (state.paused) {
+        void audioRef.current.play().catch(() => {
+          // UI command still proceeds even if browser autoplay blocks.
+        });
+      } else {
+        audioRef.current.pause();
+      }
     }
+
+    setError(null);
+    void onAction(payload)
+      .catch((actionError) => {
+        setError(actionError instanceof Error ? actionError.message : 'No se pudo ejecutar la acción');
+      })
+      .finally(() => {
+        setPendingActions((prev) => {
+          const next = new Set(prev);
+          next.delete(actionKey);
+          return next;
+        });
+      });
   };
 
   const ensureAudioElement = () => {
@@ -338,17 +402,18 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
 
               {/* Main Controls */}
               <div className="flex items-center gap-4">
-                <ControlBtn icon="⏮" onClick={() => handleAction({ action: 'previous' })} disabled={!state} />
+                <ControlBtn label="Previous track" icon="⏮" onClick={() => handleAction({ action: 'previous' })} disabled={!state || pendingActions.has('previous')} />
                 <ControlBtn
+                  label={state?.paused ? 'Resume playback' : 'Pause playback'}
                   icon={state?.paused ? "▶" : "⏸"}
                   onClick={() => handleAction({ action: 'toggle' })}
                   primary
-                  disabled={!state || isExecutingAction}
+                  disabled={!state || pendingActions.has('toggle')}
                 />
-                <ControlBtn icon="⏭" onClick={() => handleAction({ action: 'skip' })} disabled={!state || isExecutingAction} />
+                <ControlBtn label="Skip track" icon="⏭" onClick={() => handleAction({ action: 'skip' })} disabled={!state || pendingActions.has('skip')} />
                 <div className="w-px h-8 bg-white/10 mx-2" />
-                <ControlBtn icon="⏹" onClick={() => handleAction({ action: 'stop' })} disabled={!state || isExecutingAction} />
-                <ControlBtn icon="🔀" onClick={() => handleAction({ action: 'shuffle' })} disabled={!state || isExecutingAction} />
+                <ControlBtn label="Stop playback" icon="⏹" onClick={() => handleAction({ action: 'stop' })} disabled={!state || pendingActions.has('stop')} />
+                <ControlBtn label="Shuffle queue" icon="🔀" onClick={() => handleAction({ action: 'shuffle' })} disabled={!state || pendingActions.has('shuffle')} />
               </div>
             </div>
           </div>
@@ -369,18 +434,42 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
               value={volume}
               onChange={(e) => handleVolumeChange(Number(e.target.value))}
               className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-lg"
-              disabled={!state || isExecutingAction}
+              disabled={!state}
             />
           </div>
 
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-2">
-            <ActionButton onClick={() => handleAction({ action: 'mute' })} disabled={!state || isExecutingAction}>
+            <ActionButton onClick={() => handleAction({ action: 'mute' })} disabled={!state || pendingActions.has('mute')}>
               {state?.volume === 0 ? 'Unmute' : 'Mute'}
             </ActionButton>
-            <ActionButton onClick={() => handleAction({ action: 'clear' })} disabled={!state || isExecutingAction}>
+            <ActionButton onClick={() => handleAction({ action: 'clear' })} disabled={!state || pendingActions.has('clear')}>
               Clear Queue
             </ActionButton>
+            <ActionButton onClick={() => handleAction({ action: 'autoplay' })} disabled={!state || pendingActions.has('autoplay')}>
+              Autoplay Mode
+            </ActionButton>
+            <ActionButton
+              onClick={() => handleAction({ action: 'filter', preset: selectedFilterPreset })}
+              disabled={!state || pendingActions.has('filter')}
+            >
+              Apply Filter
+            </ActionButton>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-white/50 uppercase tracking-[0.24em]">Filter preset</p>
+            <select
+              value={selectedFilterPreset}
+              onChange={(event) => setSelectedFilterPreset(event.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white"
+            >
+              <option value="flat">Flat</option>
+              <option value="bassboost">Bass Boost</option>
+              <option value="nightcore">Nightcore</option>
+              <option value="vaporwave">Vaporwave</option>
+              <option value="karaoke">Karaoke</option>
+            </select>
           </div>
 
           {/* Status Tags */}
@@ -388,10 +477,84 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
             <StatusTag label="Autoplay" value={state?.autoplayMode ?? 'off'} />
             <StatusTag label="Repeat" value={state?.repeatMode ?? 'off'} />
             <StatusTag label="Web audio" value={panelStatus} />
+            {state?.source && (
+              <StatusTag label="Fuente" value={state.source} />
+            )}
+            {state?.source && (
+              <StatusTag label="Calidad efectiva" value={getEffectiveSourceQuality(state.source)} />
+            )}
             {state?.filter && <StatusTag label="Filter" value={state.filter.label} />}
+            {state?.source && (
+              <p className="text-[11px] text-white/55">{getLosslessTransparencyNote(state.source)}</p>
+            )}
             {panelError && (
               <p className="text-xs text-rose-300/80">{panelError}</p>
             )}
+          </div>
+        </div>
+      </div>
+
+      <div className="relative z-10 mt-8 grid gap-6 xl:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-black/25 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.24em] text-white/40">Queue</p>
+            <p className="text-xs text-white/55">
+              {queueLoading ? 'Syncing…' : `${queueSnapshot?.totalTracks ?? 0} tracks`}
+            </p>
+          </div>
+          <div className="space-y-2">
+            {(queueSnapshot?.items ?? []).length === 0 && (
+              <p className="text-sm text-white/50">No hay tracks en cola.</p>
+            )}
+            {(queueSnapshot?.items ?? []).map((item, index) => (
+              <div key={`${item.uri ?? item.title}-${index}`} className="rounded-lg bg-white/5 px-3 py-2">
+                <p className="text-sm text-white">{item.title}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setQueuePage((prev) => Math.max(1, prev - 1))}
+              disabled={queuePage <= 1}
+              className="rounded-lg border border-white/10 px-3 py-1 text-xs text-white/70 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <p className="text-xs text-white/55">Page {queueSnapshot?.page ?? queuePage} / {Math.max(queueSnapshot?.totalPages ?? 1, 1)}</p>
+            <button
+              type="button"
+              onClick={() =>
+                setQueuePage((prev) => {
+                  const maxPages = Math.max(queueSnapshot?.totalPages ?? 1, 1);
+                  return Math.min(maxPages, prev + 1);
+                })
+              }
+              disabled={queuePage >= Math.max(queueSnapshot?.totalPages ?? 1, 1)}
+              className="rounded-lg border border-white/10 px-3 py-1 text-xs text-white/70 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/25 p-5">
+          <p className="text-xs uppercase tracking-[0.24em] text-white/40">History</p>
+          <div className="mt-3 space-y-2">
+            {queueSnapshot?.current && (
+              <div className="rounded-lg border border-brand-400/30 bg-brand-500/10 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-brand-100/80">Current</p>
+                <p className="text-sm text-white">{queueSnapshot.current.title}</p>
+              </div>
+            )}
+            {(queueSnapshot?.history ?? []).length === 0 && (
+              <p className="text-sm text-white/50">Sin historial reciente.</p>
+            )}
+            {(queueSnapshot?.history ?? []).map((item, index) => (
+              <div key={`${item.uri ?? item.title}-${index}`} className="rounded-lg bg-white/5 px-3 py-2">
+                <p className="text-sm text-white/80">{item.title}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -486,13 +649,15 @@ export function WebPlayer({ guildId, state, onAction, refreshing = false, panelA
   );
 }
 
-function ControlBtn({ icon, onClick, primary, disabled }: { icon: string; onClick: () => void; primary?: boolean; disabled?: boolean }) {
+function ControlBtn({ icon, label, onClick, primary, disabled }: { icon: string; label: string; onClick: () => void; primary?: boolean; disabled?: boolean }) {
   return (
     <motion.button
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.9 }}
       onClick={onClick}
       disabled={disabled}
+      aria-label={label}
+      title={label}
       className={`
         flex items-center justify-center rounded-full transition-all disabled:opacity-40 disabled:cursor-not-allowed
         ${primary
@@ -510,6 +675,7 @@ function ActionButton({ children, onClick, disabled }: { children: React.ReactNo
     <button
       onClick={onClick}
       disabled={disabled}
+      aria-label={typeof children === 'string' ? children : undefined}
       className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-xs font-medium text-white/70 transition-colors disabled:opacity-40"
     >
       {children}
@@ -534,4 +700,24 @@ function formatTimestamp(value: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = `${totalSeconds % 60}`.padStart(2, '0');
   return `${minutes}:${seconds}`;
+}
+
+function getEffectiveSourceQuality(source: string): 'standard' | 'high' | 'lossless' {
+  const normalized = source.trim().toLowerCase();
+  if (normalized === 'http' || normalized === 'local') return 'lossless';
+  if (normalized === 'youtube' || normalized === 'youtube_music' || normalized === 'spotify' || normalized === 'soundcloud' || normalized === 'bandcamp' || normalized === 'vimeo') {
+    return 'high';
+  }
+  return 'standard';
+}
+
+function getLosslessTransparencyNote(source: string): string {
+  const normalized = source.trim().toLowerCase();
+  if (normalized === 'http' || normalized === 'local') {
+    return 'Lossless disponible solo si el origen real es FLAC/ALAC/PCM.';
+  }
+  if (normalized === 'youtube' || normalized === 'youtube_music' || normalized === 'spotify') {
+    return 'Esta fuente no entrega lossless real en este flujo.';
+  }
+  return 'Calidad final depende del códec y bitrate de la fuente.';
 }

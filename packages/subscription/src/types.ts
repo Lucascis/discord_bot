@@ -30,7 +30,7 @@ export interface PlanDefinition {
 export interface PlanFeatures {
   // Playback features
   concurrentPlaybacks: number;
-  audioQuality: 'standard' | 'high' | 'highest' | 'lossless';
+  audioQuality: 'standard' | 'high' | 'lossless' | 'spatial';
 
   // Command access
   basicCommands: boolean;

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers deploying Discord Music Bot across multiple instances for high availability, load distribution, and geographic redundancy. Suitable for Enterprise customers and large-scale deployments.
+This guide covers deploying Discord Music Bot across multiple instances for high availability, load distribution, and geographic redundancy. Suitable for despliegues de escala alta.
 
 ---
 
@@ -1446,4 +1446,4 @@ spec:
 
 **Last Updated:** October 31, 2025
 
-*This guide assumes familiarity with Kubernetes, Docker, and cloud infrastructure. For assistance with deployment, contact enterprise@discordmusicbot.com*
+*This guide assumes familiarity with Kubernetes, Docker, and cloud infrastructure. For assistance with deployment, consult the project documentation.*

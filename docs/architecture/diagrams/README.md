@@ -27,7 +27,7 @@ This directory contains comprehensive Mermaid.js diagrams documenting the Discor
 **Key Topics:**
 - Entity relationship diagram with all Prisma models
 - Queue and QueueItem management
-- Premium features (ServerConfiguration, UserSubscription)
+- Capacidades avanzadas (ServerConfiguration, UserSubscription)
 - Event sourcing tables (EventStoreEvent, EventStoreSnapshot)
 - Configuration hierarchy (server → channel)
 - Lyrics caching and playback history
@@ -37,7 +37,7 @@ This directory contains comprehensive Mermaid.js diagrams documenting the Discor
 - Understanding data relationships
 - Query optimization
 - Adding new models
-- Premium feature development
+- Desarrollo de capacidades avanzadas
 
 ---
 

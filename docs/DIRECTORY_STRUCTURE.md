@@ -15,7 +15,7 @@
 
 ### 🎯 Project Overview
 
-**Enterprise Discord Music Bot** with production-ready microservices architecture built on Node.js/TypeScript, featuring advanced music processing, AI-powered autoplay, and comprehensive observability.
+**Discord Music Bot** with production-ready microservices architecture built on Node.js/TypeScript, featuring advanced music processing, AI-powered autoplay, and comprehensive observability.
 
 **Architecture Pattern**: **Event-Driven Microservices**
 - **4 Core Services**: Gateway, Audio, API, Worker
@@ -423,7 +423,7 @@ database/
 │   ├── 🎯 index.ts                    # Main package exports
 │   ├── 🔧 logger-interface.ts         # Logging abstraction interface
 │   ├── 🔧 transaction-manager.ts      # Database transaction management
-│   ├── 💰 premium-service.ts          # Premium feature service
+│   ├── 💰 tier-service.ts             # Feature service por nivel
 │   └── 📊 metrics.ts                  # Database performance metrics
 └── 📁 test/                           # Database integration tests
 ```
@@ -432,7 +432,7 @@ database/
 - Prisma ORM client configuration and database connection management
 - Database schema migrations and version control
 - Transaction management with rollback capabilities
-- Premium service integration for feature gating
+- Service integration for feature gating
 - Performance metrics collection and monitoring
 - Type-safe database operations with Prisma Client
 
@@ -487,7 +487,7 @@ config/
 │   ├── 🔧 redis.ts                    # Redis configuration schema
 │   ├── 🔧 discord.ts                  # Discord API configuration
 │   ├── 🔧 lavalink.ts                 # Lavalink configuration schema
-│   └── 💰 premium-features.ts         # Premium feature configuration
+│   └── 💰 tier-features.ts            # Feature configuration por nivel
 └── 📁 test/                           # Configuration validation tests
     └── config.test.ts                 # Schema validation tests
 ```
@@ -495,7 +495,7 @@ config/
 **Key Responsibilities:**
 - Environment variable validation using Zod schemas
 - Type-safe configuration management across all services
-- Premium feature configuration and feature flags
+- Feature configuration and feature flags
 - Service-specific configuration schemas (Discord, Redis, Lavalink)
 - Development vs production environment handling
 - Configuration validation at startup
@@ -950,7 +950,7 @@ k8s/
 
 #### Istio Service Mesh (`k8s/istio/`)
 
-**Enterprise Service Mesh** with security, observability, and traffic management:
+**Service Mesh** with security, observability, and traffic management:
 
 **Service Mesh Components:**
 - **Istio Control Plane**: Traffic management, security policies, telemetry

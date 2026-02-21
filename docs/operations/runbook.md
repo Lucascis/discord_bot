@@ -500,7 +500,7 @@ kubectl exec -it postgres-0 -n discord-bot -- psql -U postgres discord
 
 UPDATE subscriptions
 SET
-  tier = 'PREMIUM',
+  tier = 'BASIC',
   status = 'ACTIVE',
   "currentPeriodEnd" = NOW() + INTERVAL '30 days'
 WHERE "guildId" = '<guild-id>';
@@ -510,7 +510,7 @@ kubectl exec -it redis-0 -n discord-bot -- redis-cli DEL "features:<guild-id>"
 kubectl exec -it redis-0 -n discord-bot -- redis-cli DEL "subscription:<guild-id>"
 
 # Publish event
-kubectl exec -it redis-0 -n discord-bot -- redis-cli PUBLISH discord-bot:events '{"type":"subscriptionUpgraded","guildId":"<guild-id>","tier":"PREMIUM"}'
+kubectl exec -it redis-0 -n discord-bot -- redis-cli PUBLISH discord-bot:events '{"type":"subscriptionUpgraded","guildId":"<guild-id>","tier":"BASIC"}'
 ```
 
 ---
@@ -700,7 +700,7 @@ kubectl exec -it postgres-0 -n discord-bot -- psql -U postgres discord -c "VACUU
 
 1. **Capacity planning review**
 - Review HPA metrics
-- Plan for growth
+- Estrategia para crecimiento
 - Adjust resource limits
 
 2. **Security audit**

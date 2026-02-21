@@ -8,14 +8,11 @@ import { getActiveInstances, summonBot, type ActiveInstance } from '@/lib/player
 interface Props {
   guildId?: string;
   panelApiKey: string;
-  subscriptionTier?: string;
   disabled?: boolean;
   onSummonSuccess?: (payload: { voiceChannelId: string; textChannelId: string }) => void;
 }
 
-export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disabled, onSummonSuccess }: Props) {
-  const normalizedTier = (subscriptionTier ?? 'FREE').toUpperCase();
-  const isPaidPlan = normalizedTier !== 'FREE';
+export function SummonBotPanel({ guildId, panelApiKey, disabled, onSummonSuccess }: Props) {
   const [channels, setChannels] = useState<GuildChannel[]>([]);
   const [voiceChannel, setVoiceChannel] = useState('');
   const [textChannel, setTextChannel] = useState('');
@@ -54,7 +51,7 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
   }, [activeInstances, channels]);
 
   const fetchData = async (isBackground = false) => {
-    if (!guildId || !isPaidPlan) return;
+    if (!guildId) return;
     if (!isBackground) setLoadingInstances(true);
     try {
       const [list, instancePayload] = await Promise.all([
@@ -83,7 +80,7 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
   };
 
   useEffect(() => {
-    if (!guildId || !isPaidPlan) {
+    if (!guildId) {
       setChannels([]);
       setActiveInstances([]);
       setInstanceLimit(null);
@@ -106,7 +103,7 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
       if (interval) clearInterval(interval);
       if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current);
     };
-  }, [guildId, isPaidPlan, panelApiKey]);
+  }, [guildId, panelApiKey]);
 
   useEffect(() => {
     if (voiceChannel && !voiceOptions.some((channel) => channel.id === voiceChannel)) {
@@ -120,10 +117,10 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
     }
   }, [textChannel, textOptions]);
 
-  if (!guildId || !isPaidPlan) {
+  if (!guildId) {
     return (
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-        <p>Funcionalidad exclusiva para planes pagos: invocá el bot a un canal de voz y asigná el canal de texto de la UI desde el panel.</p>
+        <p>Selecciona un servidor para invocar el bot a un canal de voz y asignar el canal de texto de la UI desde el panel.</p>
       </div>
     );
   }
@@ -163,10 +160,9 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
     <div className="rounded-2xl border border-brand-400/20 bg-gradient-to-br from-brand-500/10 to-black/40 p-4 text-sm text-white/80">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-brand-200">Paid Plan</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-brand-200">Control Panel</p>
           <h3 className="text-xl font-semibold text-white">Invocar bot desde el panel</h3>
           <p className="text-white/60">Seleccioná los canales donde querés que el bot aparezca.</p>
-          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-white/40">Plan activo: {normalizedTier}</p>
         </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -210,7 +206,7 @@ export function SummonBotPanel({ guildId, panelApiKey, subscriptionTier, disable
             ))}
           </ul>
           {instanceLimit !== null && (
-            <p className="mt-1 text-amber-200/80">Límite de plan: {instanceLimit} instancia{instanceLimit === 1 ? '' : 's'} en simultáneo.</p>
+            <p className="mt-1 text-amber-200/80">Límite actual: {instanceLimit} instancia{instanceLimit === 1 ? '' : 's'} en simultáneo.</p>
           )}
         </div>
       )}

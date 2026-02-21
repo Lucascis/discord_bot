@@ -4,6 +4,7 @@ import { logger } from '@discord-bot/logger';
 export interface CommandProcessorOptions {
   concurrency?: number;
   controlConcurrency?: number;
+  realtimeControlConcurrency?: number;
   retryAttempts?: number;
 }
 
@@ -49,11 +50,21 @@ export class CommandProcessor {
         { count: this.options.controlConcurrency || 12, block: 500 }
       );
 
+      // Ultra-low-latency consumer for real-time playback controls (pause/toggle/skip/previous/stop).
+      await redisStreams.startConsumer(
+        RedisStreamsManager.STREAMS.AUDIO_REALTIME_CONTROLS,
+        RedisStreamsManager.CONSUMER_GROUPS.AUDIO_REALTIME_CONTROLS_PROCESSORS,
+        this.consumerName,
+        this.handleCommand,
+        { count: this.options.realtimeControlConcurrency || 20, block: 100 }
+      );
+
       this.isInitialized = true;
       logger.info({
         consumerName: this.consumerName,
         commandStream: RedisStreamsManager.STREAMS.AUDIO_COMMANDS,
-        controlsStream: RedisStreamsManager.STREAMS.AUDIO_CONTROLS
+        controlsStream: RedisStreamsManager.STREAMS.AUDIO_CONTROLS,
+        realtimeControlsStream: RedisStreamsManager.STREAMS.AUDIO_REALTIME_CONTROLS
       }, 'CommandProcessor initialized successfully');
     } catch (error) {
       logger.error({ error }, 'Failed to initialize CommandProcessor');
@@ -239,8 +250,10 @@ export class CommandProcessor {
     // Stop consumer
     const commandConsumerKey = `${RedisStreamsManager.STREAMS.AUDIO_COMMANDS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_PROCESSORS}:${this.consumerName}`;
     const controlsConsumerKey = `${RedisStreamsManager.STREAMS.AUDIO_CONTROLS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_CONTROLS_PROCESSORS}:${this.consumerName}`;
+    const realtimeControlsConsumerKey = `${RedisStreamsManager.STREAMS.AUDIO_REALTIME_CONTROLS}:${RedisStreamsManager.CONSUMER_GROUPS.AUDIO_REALTIME_CONTROLS_PROCESSORS}:${this.consumerName}`;
     redisStreams.stopConsumer(commandConsumerKey);
     redisStreams.stopConsumer(controlsConsumerKey);
+    redisStreams.stopConsumer(realtimeControlsConsumerKey);
 
     this.isInitialized = false;
     logger.info('CommandProcessor shutdown complete');
