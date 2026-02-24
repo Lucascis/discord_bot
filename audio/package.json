@@ -22,7 +22,7 @@
     "@opentelemetry/auto-instrumentations-node": "^0.67.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.208.0",
     "@opentelemetry/sdk-node": "^0.208.0",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.3.1",
     "ioredis": "^5.8.2",
     "lavalink-client": "^2.7.0",
     "prom-client": "^15.1.3",
