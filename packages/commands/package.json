@@ -12,7 +12,7 @@
   "dependencies": {
     "@discord-bot/config": "workspace:*",
     "@discord-bot/logger": "workspace:*",
-    "@discordjs/builders": "^1.13.0",
+    "@discordjs/builders": "^1.13.1",
     "discord.js": "^14.25.1",
     "reflect-metadata": "^0.2.2"
   },
