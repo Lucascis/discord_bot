@@ -1,5 +1,5 @@
 # Multi-stage Docker build for production optimization
-FROM node:22.11.0-alpine3.20 AS base
+FROM node:24.1.0-alpine3.20 AS base
 
 ENV PNPM_VERSION=10.23.0
 
@@ -99,7 +99,7 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN pnpm --filter @discord-bot/panel build
 
 # Production stage - final optimized image
-FROM node:22.11.0-alpine3.20 AS production
+FROM node:24.1.0-alpine3.20 AS production
 
 ENV PNPM_VERSION=10.23.0
 
